@@ -1,0 +1,9 @@
+name: sagitta_stack
+description: Full-Stack Dart Server and SSR based on Sagitta stack pattern
+version: 0.1.0
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+dependencies:
+  shelf: ^1.4.1
+  syncer_dart:
+    path: ../../../syncer.c/bindings/dart

@@ -1,0 +1,15 @@
+[package]
+name = "rust-server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+axum = "0.7.5"
+tokio = { version = "1.37", features = ["full"] }
+maud = { version = "0.26.0", features = ["axum"] }
+reqwest = { version = "0.12.3", features = ["json"] } # For Supabase REST API
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+dotenvy = "0.15"
+tower-http = { version = "0.5.2", features = ["cors", "fs"] }
+syncer-rs = { path = "../../../syncer.c/bindings/rust" }
