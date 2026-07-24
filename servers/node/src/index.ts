@@ -188,14 +188,21 @@ app.post("/doc/:id/sync", async (req, res) => {
       lwwKeys: "updatedAt"
     });
 
-    // Update with merged result
+    // Update with merged result. The WHERE version = <read version> guard is
+    // a compare-and-swap: without it two concurrent syncs both read version N
+    // and the slower write silently clobbers the faster one's merge.
     const updated = await pool.query(
-      `UPDATE syncer_test_docs 
-       SET data = $1::jsonb, version = $2, updated_at = NOW() 
-       WHERE id = $3
+      `UPDATE syncer_test_docs
+       SET data = $1::jsonb, version = version + 1, updated_at = NOW()
+       WHERE id = $3 AND version = $2
        RETURNING id, data, version, updated_at`,
-      [mergedRaw, currentVersion + 1, req.params.id]
+      [mergedRaw, currentVersion, req.params.id]
     );
+
+    if (updated.rows.length === 0) {
+      // Lost the race: someone committed between our read and write.
+      return res.status(409).json({ error: "Concurrent update, retry the sync", conflict: true });
+    }
 
     res.json({
       merged: true,
