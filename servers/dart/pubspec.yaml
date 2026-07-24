@@ -1,10 +1,11 @@
 name: dart_server
-description: Dart server serving JS and WASM clients
+description: Dart Shelf server with C FFI syncer
 version: 0.1.0
 environment:
   sdk: '>=3.0.0 <4.0.0'
 dependencies:
   shelf: ^1.4.1
   shelf_router: ^1.1.4
+  ffi: ^2.1.3
   syncer_dart:
     path: ../../../syncer.c/bindings/dart

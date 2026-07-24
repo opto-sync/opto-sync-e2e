@@ -36,7 +36,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  # --- Full-Stack Rust (Leptos/Dioxus WASM) ---
+  # --- Full-Stack Rust (Axum SSR + syncer-rs C FFI) ---
   rust-fullstack:
     build:
       context: ../
@@ -51,7 +51,7 @@ services:
       - syncer-net
     restart: unless-stopped
     profiles:
-      - fullstack  # Optional: only built when needed
+      - fullstack
 
   # --- Node.js Server (Express + Drizzle) ---
   node:
@@ -71,7 +71,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  # --- Dart Shelf Server (in-memory, serves JS/WASM clients) ---
+  # --- Dart Shelf Server (in-memory, C FFI merging) ---
   dart:
     build:
       context: ../
@@ -86,9 +86,9 @@ services:
       - syncer-net
     restart: unless-stopped
     profiles:
-      - dart  # Optional: only built when needed
+      - dart
 
-  # --- Full-Stack Dart (Sagitta Stack) ---
+  # --- Full-Stack Dart (Sagitta SSR Stack) ---
   sagitta:
     build:
       context: ../
@@ -103,9 +103,9 @@ services:
       - syncer-net
     restart: unless-stopped
     profiles:
-      - sagitta  # Optional: only built when needed
+      - sagitta
 
-  # --- E2E Test Runner ---
+  # --- E2E Test Runner (Node + Rust only by default) ---
   test-runner:
     image: curlimages/curl:8.7.1
     depends_on:
@@ -118,6 +118,23 @@ services:
       - syncer-net
     profiles:
       - test   # Only run with: docker compose --profile test up
+
+  # --- Full E2E Test Runner (all servers) ---
+  test-runner-full:
+    image: curlimages/curl:8.7.1
+    depends_on:
+      - rust-mash
+      - node
+      - rust-fullstack
+      - dart
+      - sagitta
+    volumes:
+      - ./test:/test:ro
+    entrypoint: ["/bin/sh", "/test/run_e2e_full.sh"]
+    networks:
+      - syncer-net
+    profiles:
+      - fulltest   # docker compose --profile fulltest --profile fullstack --profile dart --profile sagitta up
 
 networks:
   syncer-net:

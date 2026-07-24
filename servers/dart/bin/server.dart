@@ -1,7 +1,5 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:ffi' as ffi;
-import 'package:ffi/ffi.dart';
 import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart' as io;
 import 'package:shelf_router/shelf_router.dart';
@@ -41,7 +39,8 @@ Future<void> main() async {
     libraryPath = '/usr/lib/libsyncer.so'; // Default path in Docker
   }
   
-  final syncer = SyncerFFI(libraryPath);
+  // Syncer class from syncer_dart binding (merge method)
+  final syncer = Syncer(libraryPath);
   print('[dart-server] FFI initialized');
 
   final app = Router();
@@ -84,9 +83,13 @@ Future<void> main() async {
     
     // Merge using C FFI
     try {
-      final mergedRaw = syncer.mergeJson(doc.data, payload,
-        resolveByTimestamp: true,
-        timestampKey: 'updatedAt'
+      final mergedRaw = syncer.merge(
+        doc.data,
+        payload,
+        options: MergeOptions(
+          resolveByTimestamp: true,
+          timestampKey: 'updatedAt',
+        ),
       );
       
       doc.data = mergedRaw;

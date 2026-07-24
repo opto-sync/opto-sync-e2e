@@ -4,27 +4,30 @@ RUN apt-get update && apt-get install -y gcc make
 
 WORKDIR /build
 
-# Copy syncer.c core
+# Compile native libsyncer.so
 COPY syncer.c/core/ /build/syncer-core/
 WORKDIR /build/syncer-core
 RUN gcc -shared -fPIC -O3 -Iinclude src/syncer.c src/yyjson.c -o libsyncer.so
 
+WORKDIR /build
+
 # Copy Dart binding
 COPY syncer.c/bindings/dart/ /build/syncer-dart/
 
-# Copy the Dart server source
+# Copy the Dart shelf server source
 COPY opto-sync-e2e/servers/dart/ /build/app/
 WORKDIR /build/app
 
-# Fix paths for Docker environment
+# Fix path to syncer_dart
 RUN sed -i 's|../../../syncer.c/bindings/dart|../syncer-dart|g' pubspec.yaml
 
-RUN dart pub get 2>/dev/null || true
-RUN dart compile exe bin/server.dart -o bin/server 2>/dev/null || true
+RUN dart pub get
+RUN dart compile exe bin/server.dart -o bin/server
 
 # --- Stage 2: Runtime ---
-FROM gcr.io/distroless/cc-debian12
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /build/syncer-core/libsyncer.so /usr/lib/libsyncer.so
-COPY --from=builder /build/app/bin/server /app/server 2>/dev/null || true
+COPY --from=builder /build/app/bin/server /app/server
 EXPOSE 3004
 CMD ["/app/server"]
