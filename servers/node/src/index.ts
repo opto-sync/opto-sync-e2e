@@ -10,7 +10,10 @@ const DocumentPayloadSchema = z.object({
   title: z.string().optional(),
   metadata: z.record(z.any()).optional(),
   settings: z.record(z.any()).optional(),
-  updatedAt: z.string().datetime().optional(),
+  // Accept any string: ISO datetimes, nanosecond epoch integers, etc.
+  updatedAt: z.string().optional(),
+  syncedAt: z.string().optional(),
+  createdAt: z.string().optional(),
 }).passthrough(); // Allow other fields to pass through during optimistic updates
 
 dotenv.config({ path: "../../.env" });
