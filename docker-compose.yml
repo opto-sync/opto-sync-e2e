@@ -1,0 +1,124 @@
+version: "3.9"
+
+services:
+  # --- PostgreSQL Database ---
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: syncer
+      POSTGRES_PASSWORD: syncer_test
+      POSTGRES_DB: syncer_test
+    ports:
+      - "5433:5432"
+    networks:
+      - syncer-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U syncer -d syncer_test"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+
+  # --- Rust MASH Server (Maud + Axum + Supabase + HTMX) ---
+  rust-mash:
+    build:
+      context: ../   # parent opto-sync directory
+      dockerfile: opto-sync-e2e/servers/rust/Dockerfile
+    ports:
+      - "3001:3001"
+    env_file:
+      - .env
+    environment:
+      - SERVER_PORT=3001
+    networks:
+      - syncer-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # --- Full-Stack Rust (Leptos/Dioxus WASM) ---
+  rust-fullstack:
+    build:
+      context: ../
+      dockerfile: opto-sync-e2e/servers/rust-fullstack/Dockerfile
+    ports:
+      - "3002:3002"
+    env_file:
+      - .env
+    environment:
+      - SERVER_PORT=3002
+    networks:
+      - syncer-net
+    restart: unless-stopped
+    profiles:
+      - fullstack  # Optional: only built when needed
+
+  # --- Node.js Server (Express + Drizzle) ---
+  node:
+    build:
+      context: ../
+      dockerfile: opto-sync-e2e/servers/node/Dockerfile
+    ports:
+      - "3003:3003"
+    env_file:
+      - .env
+    environment:
+      - SERVER_PORT=3003
+    networks:
+      - syncer-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # --- Dart Shelf Server (in-memory, serves JS/WASM clients) ---
+  dart:
+    build:
+      context: ../
+      dockerfile: opto-sync-e2e/servers/dart/Dockerfile
+    ports:
+      - "3004:3004"
+    env_file:
+      - .env
+    environment:
+      - SERVER_PORT=3004
+    networks:
+      - syncer-net
+    restart: unless-stopped
+    profiles:
+      - dart  # Optional: only built when needed
+
+  # --- Full-Stack Dart (Sagitta Stack) ---
+  sagitta:
+    build:
+      context: ../
+      dockerfile: opto-sync-e2e/servers/sagitta/Dockerfile
+    ports:
+      - "3005:3005"
+    env_file:
+      - .env
+    environment:
+      - SERVER_PORT=3005
+    networks:
+      - syncer-net
+    restart: unless-stopped
+    profiles:
+      - sagitta  # Optional: only built when needed
+
+  # --- E2E Test Runner ---
+  test-runner:
+    image: curlimages/curl:8.7.1
+    depends_on:
+      - rust-mash
+      - node
+    volumes:
+      - ./test:/test:ro
+    entrypoint: ["/bin/sh", "/test/run_e2e.sh"]
+    networks:
+      - syncer-net
+    profiles:
+      - test   # Only run with: docker compose --profile test up
+
+networks:
+  syncer-net:
+    driver: bridge
