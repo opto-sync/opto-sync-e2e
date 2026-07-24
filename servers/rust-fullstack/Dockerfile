@@ -8,15 +8,16 @@ WORKDIR /build
 COPY syncer.c/core/ /build/syncer-core/
 COPY syncer.c/bindings/rust/ /build/syncer-rs/
 
-# Fix syncer-rs Cargo.toml to point to local core path
-RUN sed -i 's|../core|/build/syncer-core|g' /build/syncer-rs/build.rs 2>/dev/null || true
-
 # Copy the fullstack server source
 COPY opto-sync-e2e/servers/rust-fullstack/ /build/app/
 WORKDIR /build/app
 
-# Fix the syncer-rs path in Cargo.toml
-RUN sed -i 's|../../../syncer.c/bindings/rust|/build/syncer-rs|g' Cargo.toml
+# Fix the syncer-rs dependency path in Cargo.toml
+RUN sed -i 's|../../../syncer.c/bindings/rust|../syncer-rs|g' Cargo.toml
+
+# Fix the syncer-rs build.rs to use the relative path to the C core
+# (relative from /build/syncer-rs/ to /build/syncer-core/ = ../syncer-core)
+RUN sed -i 's|../../core|../syncer-core|g' /build/syncer-rs/build.rs
 
 RUN cargo build --release
 
