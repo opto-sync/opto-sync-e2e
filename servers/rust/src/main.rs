@@ -91,10 +91,23 @@ async fn get_document(
     }
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+struct DocumentPayload {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    title: Option<String>,
+    #[serde(rename = "updatedAt", skip_serializing_if = "Option::is_none")]
+    updated_at: Option<String>,
+    // Catch-all for optimistic partial updates
+    #[serde(flatten)]
+    extra: std::collections::HashMap<String, Value>,
+}
+
 async fn sync_document(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
-    Json(incoming): Json<Value>,
+    Json(incoming): Json<DocumentPayload>,
 ) -> impl IntoResponse {
     let current = match state.get_doc(&id).await {
         Ok(Some(doc)) => doc,

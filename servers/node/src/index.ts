@@ -2,6 +2,16 @@ import express from "express";
 import cors from "cors";
 import pg from "pg";
 import dotenv from "dotenv";
+import { z } from "zod";
+
+// Base schema for validation
+const DocumentPayloadSchema = z.object({
+  id: z.string().optional(),
+  title: z.string().optional(),
+  metadata: z.record(z.any()).optional(),
+  settings: z.record(z.any()).optional(),
+  updatedAt: z.string().datetime().optional(),
+}).passthrough(); // Allow other fields to pass through during optimistic updates
 
 dotenv.config({ path: "../../.env" });
 
@@ -134,7 +144,13 @@ app.get("/doc/:id", async (req, res) => {
 // POST /doc/:id/sync — Merge incoming JSON with existing document
 app.post("/doc/:id/sync", async (req, res) => {
   try {
-    const incomingJson = JSON.stringify(req.body);
+    // 1. Validate incoming payload using Zod
+    const validationResult = DocumentPayloadSchema.safeParse(req.body);
+    if (!validationResult.success) {
+      return res.status(400).json({ error: "Invalid payload", details: validationResult.error.format() });
+    }
+
+    const incomingJson = JSON.stringify(validationResult.data);
 
     // Fetch current raw JSON as TEXT to avoid deserialization
     const current = await pool.query(
