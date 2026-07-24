@@ -1,1 +1,0 @@
-cargo:rustc-env=MIME_TYPES_GENERATED_PATH=/Users/maca5/codes/opto-sync/opto-sync-e2e/servers/rust/target/debug/build/mime_guess-186d9b3e18abdfb5/out/mime_types_generated.rs

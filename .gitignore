@@ -1,0 +1,23 @@
+# Rust build artifacts
+**/target/
+
+# Node.js
+**/node_modules/
+**/.npm/
+
+# Dart
+**/.dart_tool/
+**/pubspec.lock
+
+# Environment files (keep .env.example if present)
+.env
+*.env.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
