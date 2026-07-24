@@ -87,6 +87,11 @@ try {
   }
 }
 
+// Keys that would let a crafted payload poison an object's prototype chain
+// (JSON.parse creates "__proto__" as an own key; assigning it flips the
+// prototype). Skipped unconditionally in the JS fallback merge.
+const POLLUTING_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
 /**
  * JS fallback deep merge (used when the native addon is not compiled).
  */
@@ -100,7 +105,12 @@ function jsDeepMerge(base: any, incoming: any): any {
   }
   const result = { ...base };
   for (const key of Object.keys(incoming)) {
-    if (key in result && typeof result[key] === "object" && typeof incoming[key] === "object") {
+    if (POLLUTING_KEYS.has(key)) continue;
+    if (
+      Object.prototype.hasOwnProperty.call(result, key) &&
+      typeof result[key] === "object" &&
+      typeof incoming[key] === "object"
+    ) {
       result[key] = jsDeepMerge(result[key], incoming[key]);
     } else {
       result[key] = incoming[key];
@@ -111,7 +121,11 @@ function jsDeepMerge(base: any, incoming: any): any {
 
 function performMerge(rawBase: string, rawIncoming: string, opts?: any): string {
   if (mergeJson) {
-    return mergeJson(rawBase, rawIncoming, opts);
+    const merged = mergeJson(rawBase, rawIncoming, opts);
+    if (merged == null) {
+      throw new Error("syncer merge returned null: input was not valid JSON");
+    }
+    return merged;
   }
   // JS fallback
   const merged = jsDeepMerge(JSON.parse(rawBase), JSON.parse(rawIncoming));
@@ -171,7 +185,7 @@ app.post("/doc/:id/sync", async (req, res) => {
     // Perform merge via C FFI (or JS fallback)
     const mergedRaw = performMerge(rawBase, incomingJson, {
       resolveByTimestamp: true,
-      timestampKey: "updatedAt"
+      lwwKeys: "updatedAt"
     });
 
     // Update with merged result

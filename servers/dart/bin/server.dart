@@ -88,7 +88,7 @@ Future<void> main() async {
         payload,
         options: MergeOptions(
           resolveByTimestamp: true,
-          timestampKey: 'updatedAt',
+          lwwKeys: 'updatedAt',
         ),
       );
       
