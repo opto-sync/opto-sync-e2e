@@ -92,7 +92,11 @@ Future<void> _verify() async {
   _check(revision['owner'] == 'dart' && revision['updatedAt'] == 4000,
       'guarded object follows updatedAt, NOT flush order: rust flushed last but is stale');
   _check(revision['priority'] == 2, "rust's stale revision was rejected WHOLESALE");
-  _check(serverFinal['createdAt'] == 1000, 'createdAt (FWW) survived every client');
+  // Base-only root scalar: no client payload sends a root `createdAt`, so
+  // nothing can overwrite it. (`createdAt` is no longer a guarded key on any
+  // tier — FWW is a node-level veto and is opt-in.)
+  _check(serverFinal['createdAt'] == 1000,
+      'base-only root createdAt untouched by every client');
   _check(items.length == 5, 'exactly three new identities appended');
 
   final shared = items.firstWhere((i) => i['id'] == 'shared');
