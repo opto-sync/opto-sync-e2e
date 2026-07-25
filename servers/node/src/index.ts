@@ -41,7 +41,21 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const PORT = parseInt(process.env.SERVER_PORT || "3003", 10);
 const TEST_MODE = process.env.E2E_ALLOW_OPTION_OVERRIDE === "1";
 const REQUIRE_NATIVE = process.env.SYNCER_REQUIRE_NATIVE !== "0";
-const MAX_CAS_ATTEMPTS = 5;
+/**
+ * Compare-and-swap retry budget. Measured behavior: no conflicts up to ~5
+ * concurrent writers on one document, then rising 409s (25-60% at 20 writers)
+ * because every loser retried in lockstep and collided again. A larger budget
+ * plus full-jitter backoff de-synchronizes them. Losing the race is never a
+ * correctness problem — a 409 means "nothing was written, retry" — but a
+ * reference server should absorb ordinary contention itself.
+ */
+const MAX_CAS_ATTEMPTS = parseInt(process.env.SYNCER_CAS_ATTEMPTS || "12", 10);
+
+/** Full-jitter exponential backoff, capped. */
+function casBackoff(attempt: number): Promise<void> {
+  const ceiling = Math.min(2 ** attempt, 40);
+  return new Promise((resolve) => setTimeout(resolve, Math.random() * ceiling));
+}
 
 // ── Seed data ────────────────────────────────────────────────────────────
 const SEED_DOCS = [
