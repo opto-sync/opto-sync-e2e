@@ -21,6 +21,35 @@ export const FIXTURES_DIR = resolve(HERE, '../fixtures');
 export const BASE_URL = (process.env.OPTO_SYNC_SERVER_URL || 'http://localhost:3003').replace(/\/$/, '');
 export const LANG = 'ts';
 
+/**
+ * The server's merge policy, stated explicitly (see GET /health defaultOptions).
+ *
+ * !! WHY THIS OBJECT HAS TO EXIST !!
+ *
+ * @opto-sync/client's DEFAULT_RECONCILE_OPTIONS sets only resolveByTimestamp /
+ * lwwKeys / fwwKeys. It does NOT set arrayStrategy or arrayMatchKeys, so the
+ * native core falls back to ArrayStrategy.REPLACE — while the server, the Dart
+ * client (FfiSyncer defaults to mergeByKey + 'id') and the Rust client
+ * (ReconcileOptions::default() -> MergeByKey + "id") all use MERGE_BY_KEY on
+ * "id". Out of the box the TypeScript client therefore reconciles arrays by
+ * wholesale replacement: pulling a server document silently DROPS local
+ * elements the server has not seen and APPLIES elements the timestamp guard
+ * should have rejected.
+ *
+ * See the "KNOWN DIVERGENCE" test in scenarios.test.mjs, which pins the current
+ * default so that fixing the client fails loudly here instead of drifting.
+ *
+ * Every client in this suite is configured with the server's policy so the three
+ * languages are compared on equal terms.
+ */
+export const SERVER_POLICY = Object.freeze({
+  arrayStrategy: 4, // ArrayStrategy.MERGE_BY_KEY
+  arrayMatchKeys: 'id',
+  resolveByTimestamp: true,
+  lwwKeys: 'updatedAt,syncedAt',
+  fwwKeys: 'createdAt',
+});
+
 /* ------------------------------------------------------------------ */
 /* Fixtures                                                            */
 /* ------------------------------------------------------------------ */
