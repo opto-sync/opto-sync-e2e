@@ -173,9 +173,6 @@ export default {
           1 + ok.length,
           "version advanced exactly once per acknowledged write"
         );
-        const lost = ok
-          .map((r, i) => i)
-          .filter((_, i) => false); // placeholder, real check below
         const ackedKeys = results
           .map((r, i) => (r.status === 200 ? `p${i}` : null))
           .filter(Boolean);
@@ -184,7 +181,14 @@ export default {
           [],
           "every acknowledged parallel write is present in the final row"
         );
-        t.eq(lost.length, 0, "no bookkeeping inconsistency");
+        const rejectedKeys = results
+          .map((r, i) => (r.status === 409 ? `p${i}` : null))
+          .filter(Boolean);
+        t.deepEq(
+          rejectedKeys.filter((k) => Object.prototype.hasOwnProperty.call(after.body.data, k)),
+          [],
+          "no 409-rejected write was partially applied"
+        );
       },
     },
     {
