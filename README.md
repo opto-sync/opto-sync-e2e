@@ -79,8 +79,30 @@ docker compose --profile fulltest --profile fullstack --profile dart --profile s
 
 `run_e2e.sh` exercises the node server (health, seed docs, deep merge of
 nested objects). `run_e2e_full.sh` covers node, rust-fullstack, dart and
-sagitta with a shared merge scenario; rust-mash is validated separately by
-the `--profile test` run because it needs live Supabase credentials.
+sagitta, asserting element-level keyed-array behavior (stale element rejected,
+untouched element kept, new element appended, `createdAt` re-creation refused)
+rather than merely that a merge occurred.
+
+### Deeper suites
+
+| Suite | What it proves | Run |
+|---|---|---|
+| `test/conformance/` | Scenario-level behavior against the Postgres-backed node server: jsonb round-trip fidelity, tombstones, CAS conflicts, unique-index identity, strategy matrix, robustness | `docker compose --profile conformance up --exit-code-from conformance` |
+| `test/cross-server/` | Four runtimes produce semantically identical documents from one mutation sequence; non-contending mutations converge in any apply order | `docker compose --profile crossserver --profile fullstack --profile dart --profile sagitta up --exit-code-from cross-server` |
+| `test/clients/` | The client libraries in `../opto-sync-clients` (ts/dart/rust) syncing against a live server: offline queue, replay, pull-back reconcile, cross-client convergence | `test/clients/run_all.sh` (from the host) |
+| `test/supabase/` | The Supabase REST path end to end via a local PostgREST stand-in, with JWT auth enforced | see `test/supabase/README.md` |
+
+Suites that need a specific server can also be iterated from the host against
+the published ports (e.g. `HOST_MODE=1 node test/cross-server/run.mjs`).
+
+### Known runtime limit: integer precision
+
+Integers beyond 2^53 cannot survive an IEEE-754 double, so **JavaScript-based
+components round them** — `1689940800123456789` becomes `...800` — while Rust
+and Dart preserve them exactly. The C core is not at fault, and the
+`cross-server` suite asserts this per runtime rather than hiding it. Represent
+nanosecond timestamps as **digit strings**; the core compares pure-digit
+strings numerically, so resolution stays correct.
 
 ## Clients
 
