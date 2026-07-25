@@ -188,7 +188,14 @@ async function main() {
   ok(pol.arrayMatchKeys === "id", "arrayMatchKeys is 'id'", String(pol.arrayMatchKeys));
   ok(pol.resolveByTimestamp === true, "resolveByTimestamp enabled");
   ok(pol.lwwKeys === "updatedAt,syncedAt", "lwwKeys are updatedAt,syncedAt", String(pol.lwwKeys));
-  ok(pol.fwwKeys === "createdAt", "fwwKeys is createdAt", String(pol.fwwKeys));
+  // No FWW key, deliberately: FWW in the core is a node-level VETO, so any
+  // default FWW key lets a replica holding a newer value for it lock a record
+  // permanently. See the "createdAt is not first-write-wins" section below.
+  ok(
+    pol.fwwKeys === null || pol.fwwKeys === undefined,
+    "fwwKeys is unset (no key may veto a write for being NEWER)",
+    JSON.stringify(pol.fwwKeys)
+  );
 
   // ══ 2. The REST layer is real, and its auth is really enforced ═════════
   section("REST layer");
