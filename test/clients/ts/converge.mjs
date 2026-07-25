@@ -20,6 +20,7 @@ import {
 import {
   BASE_URL,
   CROSS_CLIENT as FX,
+  SERVER_POLICY,
   assertDeepEqual,
   assertDeepEqualKeyed,
   getDocData,
@@ -59,7 +60,10 @@ async function flush() {
 
   // fake-indexeddb is per-process, but name the DB uniquely anyway so a rerun
   // can never observe a previous run's queue.
-  const client = new OptoSyncClient({ databaseName: `opto-e2e-converge-${LANG}-${Date.now()}` });
+  const client = new OptoSyncClient({
+    ...SERVER_POLICY,
+    databaseName: `opto-e2e-converge-${LANG}-${Date.now()}`,
+  });
 
   const mid = await client.queueMutation('docs', FX.docId, payload);
   check((await client.pendingMutations()).length === 1, 'payload queued as pending');
@@ -99,7 +103,10 @@ async function verify() {
     'appended identities appear in flush order at the end of the array');
 
   // (b) this client's own local reconcile of the final state.
-  const client = new OptoSyncClient({ databaseName: `opto-e2e-verify-${LANG}-${Date.now()}` });
+  const client = new OptoSyncClient({
+    ...SERVER_POLICY,
+    databaseName: `opto-e2e-verify-${LANG}-${Date.now()}`,
+  });
   const localCopy = FX.payloads[LANG];
   const reconciled = client.reconcileIncoming('docs', FX.docId, serverFinal, localCopy);
   assertDeepEqualKeyed(reconciled, FX.expectedFinal,
