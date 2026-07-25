@@ -1,0 +1,128 @@
+# ============================================================================
+# Supabase-path override: stands up a local PostgREST as a stand-in for
+# Supabase's REST API and repoints rust-mash at it.
+#
+# rust-mash is the only server that persists through a REST API instead of a
+# Postgres connection, and it was excluded from every e2e run because it
+# needed live cloud credentials — so the Supabase sync path had zero coverage.
+# Supabase's REST API *is* PostgREST, so running PostgREST locally exercises
+# the same wire protocol, auth headers, upsert semantics and jsonb round trip
+# with no cloud project. See test/supabase/README.md for what this does and
+# does NOT cover.
+#
+# --- RUN -------------------------------------------------------------------
+#   # 1. bring up ONLY these services (postgres must already be running;
+#   #    never `down` — other suites share it)
+#   docker compose -f docker-compose.yml -f docker-compose.supabase.yml \
+#     up -d --build postgrest rust-mash
+#
+#   # 2. run the suite (in-network runner)
+#   docker compose -f docker-compose.yml -f docker-compose.supabase.yml \
+#     --profile supabasetest run --rm supabase-test
+#
+#   # ...or from the host (ports 3001 / 3010 are published):
+#   node test/supabase/run.mjs
+#
+#   # teardown of just this stack:
+#   docker compose -f docker-compose.yml -f docker-compose.supabase.yml \
+#     stop postgrest rust-mash
+# ---------------------------------------------------------------------------
+
+services:
+  # --- One-shot bootstrap: anon/authenticator roles + supabase_sync_docs ---
+  # Runs psql against the LIVE postgres service. Read/write only — it does not
+  # restart postgres and does not touch syncer_test_docs.
+  supabase-init:
+    image: postgres:16-alpine
+    environment:
+      PGPASSWORD: syncer_test
+    volumes:
+      - ./test/supabase/init.sql:/init.sql:ro
+    entrypoint:
+      - /bin/sh
+      - -c
+      - 'psql -v ON_ERROR_STOP=1 -h postgres -U syncer -d syncer_test -f /init.sql'
+    networks:
+      - syncer-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  # --- PostgREST: the engine behind Supabase's /rest/v1 API ----------------
+  postgrest:
+    image: postgrest/postgrest:v12.2.3
+    environment:
+      # Logs in as the privilege-less authenticator, then SET ROLE per JWT.
+      PGRST_DB_URI: postgres://authenticator:authenticator_test@postgres:5432/syncer_test
+      PGRST_DB_SCHEMAS: public
+      PGRST_DB_ANON_ROLE: anon
+      # Same arrangement as a real Supabase project: the anon "API key" is an
+      # HS256 JWT with role=anon signed by the project JWT secret, and it is
+      # sent in BOTH `apikey` and `Authorization: Bearer` — exactly what
+      # rust-mash does. If this secret and SUPABASE_KEY below ever drift apart,
+      # every request 401s, which is the honest failure mode.
+      PGRST_JWT_SECRET: syncer-e2e-super-secret-jwt-token-with-at-least-32-characters
+      PGRST_DB_POOL: "10"
+      PGRST_LOG_LEVEL: info
+      PGRST_ADMIN_SERVER_PORT: "3001"
+      PGRST_OPENAPI_MODE: ignore-privileges
+    ports:
+      # Published so the test suite can also be run from the host and read the
+      # stored rows back through the REST layer directly.
+      - "3010:3000"
+    networks:
+      - syncer-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      supabase-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  # --- rust-mash repointed from cloud Supabase to local PostgREST ---------
+  rust-mash:
+    environment:
+      # `environment:` wins over `env_file: .env`, so the placeholder cloud
+      # values in .env are overridden here without editing that file.
+      - SERVER_PORT=3001
+      - SUPABASE_URL=http://postgrest:3000
+      # Bare PostgREST serves tables at /<table>; Supabase serves them at
+      # /rest/v1/<table>. rust-mash defaults to Supabase's prefix, so real
+      # projects need no config — only this local stand-in overrides it.
+      - SUPABASE_REST_PREFIX=
+      # Own table, so the Postgres-path suites running against
+      # syncer_test_docs at the same time stay independent.
+      - SUPABASE_TABLE=supabase_sync_docs
+      # Deterministic anon JWT: {"iss":"syncer-e2e","role":"anon",
+      # "iat":1577836800,"exp":3376684800} signed HS256 with PGRST_JWT_SECRET.
+      - SUPABASE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzeW5jZXItZTJlIiwicm9sZSI6ImFub24iLCJpYXQiOjE1Nzc4MzY4MDAsImV4cCI6MzM3NjY4NDgwMH0.VbjxUdv0mxNy0AnYA-y18kqcL_7r4cjAWEL7alIh5u0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      postgrest:
+        condition: service_started
+
+  # --- Supabase-path conformance suite (zero-dependency node ESM) ---------
+  # docker compose -f docker-compose.yml -f docker-compose.supabase.yml \
+  #   --profile supabasetest run --rm supabase-test
+  supabase-test:
+    image: node:22-alpine
+    working_dir: /test
+    environment:
+      - RUST_MASH_URL=http://rust-mash:3001
+      - POSTGREST_URL=http://postgrest:3000
+      - SUPABASE_TABLE=supabase_sync_docs
+      - SUPABASE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzeW5jZXItZTJlIiwicm9sZSI6ImFub24iLCJpYXQiOjE1Nzc4MzY4MDAsImV4cCI6MzM3NjY4NDgwMH0.VbjxUdv0mxNy0AnYA-y18kqcL_7r4cjAWEL7alIh5u0
+    volumes:
+      - ./test:/test:ro
+    entrypoint: ["node", "/test/supabase/run.mjs"]
+    networks:
+      - syncer-net
+    depends_on:
+      postgrest:
+        condition: service_started
+      rust-mash:
+        condition: service_started
+    profiles:
+      - supabasetest
