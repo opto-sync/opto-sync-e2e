@@ -83,7 +83,7 @@ fn defaults_match_the_server_policy() {
 
 #[test]
 fn scenario_1a_offline_queue_flushed_individually() {
-    skip_if_no_server!();
+    skip_if_no_server!("1a offline queue flushed individually");
     let fx = scenario("offlineQueue");
     let id = doc_id(field_str(fx, "docSuffixIndividual"));
     put_doc(&id, field(fx, "base"));
@@ -141,7 +141,7 @@ fn scenario_1a_offline_queue_flushed_individually() {
 
 #[test]
 fn scenario_1b_offline_queue_flushed_via_batch() {
-    skip_if_no_server!();
+    skip_if_no_server!("1b offline queue flushed via /sync/batch");
     let fx = scenario("offlineQueue");
     let id = doc_id(field_str(fx, "docSuffixBatch"));
     put_doc(&id, field(fx, "base"));
@@ -187,7 +187,7 @@ fn scenario_1b_offline_queue_flushed_via_batch() {
 
 #[test]
 fn scenario_2_optimistic_write_then_pullback() {
-    skip_if_no_server!();
+    skip_if_no_server!("2 optimistic write then pull-back reconcile");
     let fx = scenario("optimisticPullback");
     let id = doc_id(field_str(fx, "docSuffix"));
     put_doc(&id, field(fx, "base"));
@@ -237,7 +237,7 @@ fn scenario_2_optimistic_write_then_pullback() {
 
 #[test]
 fn scenario_3_stale_rejection_round_trip() {
-    skip_if_no_server!();
+    skip_if_no_server!("3 stale-write rejection round-trip");
     let fx = scenario("staleRejection");
     let id = doc_id(field_str(fx, "docSuffix"));
     let client = new_client();
@@ -280,7 +280,7 @@ fn scenario_3_stale_rejection_round_trip() {
 
 #[test]
 fn scenario_4_keyed_array_through_full_stack() {
-    skip_if_no_server!();
+    skip_if_no_server!("4 keyed-array reconciliation through the full stack");
     let fx = scenario("keyedArray");
     let id = doc_id(field_str(fx, "docSuffix"));
     put_doc(&id, field(fx, "base"));
@@ -340,7 +340,7 @@ fn scenario_4_keyed_array_through_full_stack() {
 
 #[test]
 fn scenario_5_replay_idempotency() {
-    skip_if_no_server!();
+    skip_if_no_server!("5 replay/retry idempotency");
     let fx = scenario("replayIdempotency");
     let id = doc_id(field_str(fx, "docSuffix"));
     put_doc(&id, field(fx, "base"));
@@ -404,7 +404,7 @@ fn scenario_5_replay_idempotency() {
 
 #[test]
 fn scenario_6_failure_marking() {
-    skip_if_no_server!();
+    skip_if_no_server!("6 failure marking");
     let fx = scenario("failureMarking");
     let missing_id = doc_id(field_str(fx, "missingSuffix"));
     let ok_id = doc_id(field_str(fx, "okSuffix"));
