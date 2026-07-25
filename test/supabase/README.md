@@ -59,7 +59,7 @@ Rust-side unit tests (prefix normalization, merge policy) run with
 | Group | Asserts |
 | --- | --- |
 | health / native core | `/health` is 200; the **native C core** is what merges (`native: true`, `mergeEngine: native-c-ffi-rust`, semver `coreVersion` ≥ 0.2.0 — the version that added `MERGE_BY_KEY`) |
-| merge policy | the server-owned policy matches the Postgres path exactly: `MERGE_BY_KEY(4)`, `arrayMatchKeys: id`, `lwwKeys: updatedAt,syncedAt`, `fwwKeys: createdAt` |
+| merge policy | the server-owned policy matches the Postgres path exactly: `MERGE_BY_KEY(4)`, `arrayMatchKeys: id`, `lwwKeys: updatedAt,syncedAt`, and **no** `fwwKeys` (FWW is a node-level veto, so no key may reject a write for being *newer*) |
 | REST layer | PostgREST serves the table; it **404s on `/rest/v1/...`** (proving `SUPABASE_REST_PREFIX` is load-bearing, not decorative); an **invalid JWT is rejected with 401** (proving the suite is not passing against a wide-open database) |
 | create + round trip | create through `rust-mash`, read back through `rust-mash`, then read the row **directly out of PostgREST** and compare; `updated_at` is a server-side trigger value `rust-mash` never sent |
 | deep merge | nested key added, nested sibling preserved, untouched branch preserved verbatim, version bumped — and the merged jsonb **actually persisted**, verified by a direct PostgREST read |
