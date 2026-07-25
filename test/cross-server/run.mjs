@@ -161,11 +161,16 @@ function sequentialPayloads(ns) {
         ],
       },
     },
-    // 3. createdAt is First-Write-Wins: an element claiming later creation
-    //    for an existing identity must be rejected wholesale.
+    // 3. createdAt is NOT a first-write-wins key in the default policy, so an
+    //    element that claims a later creation AND carries a newer updatedAt is
+    //    APPLIED. (FWW is a node-level veto in the core: it would drop this
+    //    element wholesale despite updatedAt 99999 being the newest write
+    //    anywhere, which is why `createdAt` was removed from every tier's
+    //    default. `fwwKeys` remains available per request on servers that let a
+    //    client name its own policy.)
     {
       [ns]: {
-        rows: [{ id: "a", createdAt: 99999, updatedAt: 99999, label: "IMPOSTOR" }],
+        rows: [{ id: "a", createdAt: 99999, updatedAt: 99999, label: "RECREATED" }],
       },
     },
     // 4. Scalar arrays union under MERGE_BY_KEY; unicode and digit-string
