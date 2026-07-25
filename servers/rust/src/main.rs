@@ -90,7 +90,7 @@ impl AppState {
         )
     }
 
-    fn auth<'a>(&self, rb: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+    fn auth(&self, rb: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
         rb.header("apikey", &self.supabase_key)
             .header("Authorization", format!("Bearer {}", self.supabase_key))
     }
