@@ -44,7 +44,10 @@ A `postgres:16` container backs the node server (exposed on host port 5433).
 
 All five servers apply the **same merge policy**, so conformance expectations
 are uniform across runtimes: `MERGE_BY_KEY` on `id`, `resolveByTimestamp` with
-LWW keys `updatedAt,syncedAt` and FWW key `createdAt`.
+LWW keys `updatedAt,syncedAt`, and **no FWW key**. (`createdAt` used to be an
+FWW key. FWW in the core is a node-level *veto* — an incoming node whose FWW key
+is newer is dropped wholesale, however new its `updatedAt` is — so any replica
+holding a later `createdAt` for a record could never write to it again.)
 
 The node server **refuses to start without the native C addon**
 (`SYNCER_REQUIRE_NATIVE=1`). A JS fallback merge would let the entire suite
