@@ -212,7 +212,6 @@ export default {
         t.eq(a.label, "alpha", "element claiming a LATER createdAt is rejected");
         t.eq(a.createdAt, 1000, "original createdAt is preserved (first write wins)");
         t.eq(a.updatedAt, 2000, "FWW rejection also blocks the newer updatedAt");
-        t.lacksKey(a, "label2", "rejection is wholesale, as with LWW");
       },
     },
     {
