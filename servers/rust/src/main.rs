@@ -248,10 +248,12 @@ async fn main() {
         eprintln!("Warning: SUPABASE_URL not set");
         "http://localhost:54321".to_string()
     });
-    let supabase_key = std::env::var("SUPABASE_ANON_KEY").unwrap_or_else(|_| {
-        eprintln!("Warning: SUPABASE_ANON_KEY not set");
-        "".to_string()
-    });
+    let supabase_key = std::env::var("SUPABASE_KEY")
+        .or_else(|_| std::env::var("SUPABASE_ANON_KEY")) // legacy fallback
+        .unwrap_or_else(|_| {
+            eprintln!("Warning: SUPABASE_KEY not set");
+            "".to_string()
+        });
 
     let state = Arc::new(AppState {
         http: Client::new(),
