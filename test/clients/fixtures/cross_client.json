@@ -1,0 +1,107 @@
+{
+  "$comment": [
+    "Scenario 7 - cross-client convergence. THE fixture: one fresh document, three",
+    "different clients (@opto-sync/client, opto_sync_client, opto-sync-client), each",
+    "queueing a DIFFERENT payload, flushed in a deterministic order by run_all.sh:",
+    "",
+    "    ts  ->  dart  ->  rust",
+    "",
+    "`expectedFinal` is derived by hand from the syncer.c v0.2.0 merge policy shared",
+    "by the server and all three clients. Every language asserts against it, which is",
+    "the whole point: uniform behavior is provable rather than assumed.",
+    "",
+    "Derivation, key by key:",
+    "",
+    "  title       unguarded root scalar (no updatedAt on either root) -> plain",
+    "              last-writer-wins by ARRIVAL order -> rust flushed last -> 'rust title'.",
+    "  <lang>Marker  each client contributes its own key; none collide -> all three survive.",
+    "  createdAt   base 1000. No client payload sends createdAt at the root, so the",
+    "              fwwKeys guard never fires and the original value sticks.",
+    "  revision    guarded object. base 1000 -> ts 2000 applied -> dart 4000 applied",
+    "              -> rust 3000 is STALE against 4000 and is rejected WHOLESALE, so",
+    "              rust's owner/priority never land. Final: dart's, updatedAt 4000.",
+    "              This is the load-bearing assertion: flush order does NOT decide a",
+    "              guarded object, the timestamp does.",
+    "  items       MERGE_BY_KEY on id.",
+    "                'keep'     nobody touches it -> preserved verbatim.",
+    "                'shared'   base 5000; ts sends 3000 (stale, rejected); dart sends",
+    "                           6000 (applied, deep-merged onto base so createdAt 1000",
+    "                           survives); rust sends 5500 (now stale vs 6000, rejected).",
+    "                'ts-new' / 'dart-new' / 'rust-new' are new identities, appended in",
+    "                           flush order at the END of the base array.",
+    "",
+    "No payload carries a top-level \"id\" - the document id lives in the URL."
+  ],
+
+  "docId": "cl-converge",
+
+  "base": {
+    "title": "base title",
+    "createdAt": 1000,
+    "revision": { "updatedAt": 1000, "owner": "base", "priority": 0 },
+    "items": [
+      { "id": "keep", "createdAt": 1000, "updatedAt": 1000, "label": "untouched", "qty": 1 },
+      { "id": "shared", "createdAt": 1000, "updatedAt": 5000, "label": "base-shared", "qty": 9 }
+    ]
+  },
+
+  "flushOrder": ["ts", "dart", "rust"],
+
+  "payloads": {
+    "ts": {
+      "title": "ts title",
+      "tsMarker": "ts-was-here",
+      "revision": { "updatedAt": 2000, "owner": "ts", "priority": 1 },
+      "items": [
+        { "id": "shared", "updatedAt": 3000, "label": "ts-shared", "qty": 10 },
+        { "id": "ts-new", "createdAt": 2000, "updatedAt": 2000, "label": "ts new row", "qty": 11 }
+      ]
+    },
+    "dart": {
+      "title": "dart title",
+      "dartMarker": "dart-was-here",
+      "revision": { "updatedAt": 4000, "owner": "dart", "priority": 2 },
+      "items": [
+        { "id": "shared", "updatedAt": 6000, "label": "dart-shared", "qty": 20 },
+        { "id": "dart-new", "createdAt": 3000, "updatedAt": 3000, "label": "dart new row", "qty": 21 }
+      ]
+    },
+    "rust": {
+      "title": "rust title",
+      "rustMarker": "rust-was-here",
+      "revision": { "updatedAt": 3000, "owner": "rust", "priority": 3 },
+      "items": [
+        { "id": "shared", "updatedAt": 5500, "label": "rust-shared", "qty": 30 },
+        { "id": "rust-new", "createdAt": 4000, "updatedAt": 4000, "label": "rust new row", "qty": 31 }
+      ]
+    }
+  },
+
+  "expectedFinal": {
+    "title": "rust title",
+    "createdAt": 1000,
+    "tsMarker": "ts-was-here",
+    "dartMarker": "dart-was-here",
+    "rustMarker": "rust-was-here",
+    "revision": { "updatedAt": 4000, "owner": "dart", "priority": 2 },
+    "items": [
+      { "id": "keep", "createdAt": 1000, "updatedAt": 1000, "label": "untouched", "qty": 1 },
+      { "id": "shared", "createdAt": 1000, "updatedAt": 6000, "label": "dart-shared", "qty": 20 },
+      { "id": "ts-new", "createdAt": 2000, "updatedAt": 2000, "label": "ts new row", "qty": 11 },
+      { "id": "dart-new", "createdAt": 3000, "updatedAt": 3000, "label": "dart new row", "qty": 21 },
+      { "id": "rust-new", "createdAt": 4000, "updatedAt": 4000, "label": "rust new row", "qty": 31 }
+    ]
+  },
+
+  "$verifyNote": [
+    "Each language's convergence phase ends by reconciling `expectedFinal` (pulled",
+    "live from the server) into its OWN payload as the local copy, and asserting the",
+    "result equals `expectedFinal`. That comparison is keyed-array-order-insensitive:",
+    "a client whose local array started as [shared, ts-new] ends up with the",
+    "server's other identities appended after its own, so the ORDER legitimately",
+    "differs while the identity set and every element's content must match exactly.",
+    "MERGE_BY_KEY is identity-based, not positional, so this is the correct notion of",
+    "equality here - the strict order-sensitive check is applied to the SERVER",
+    "document, where order is fully determined."
+  ]
+}

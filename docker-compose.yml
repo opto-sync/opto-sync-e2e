@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   # --- PostgreSQL Database ---
   postgres:
@@ -53,7 +51,7 @@ services:
     profiles:
       - fullstack
 
-  # --- Node.js Server (Express + Drizzle) ---
+  # --- Node.js Server (Express + Postgres jsonb + native C addon) ---
   node:
     build:
       context: ../
@@ -64,6 +62,11 @@ services:
       - .env
     environment:
       - SERVER_PORT=3003
+      # Refuse to start without the native addon: a JS fallback merge would
+      # let the whole suite pass without exercising the C core.
+      - SYNCER_REQUIRE_NATIVE=1
+      # Enables /reset and the X-Syncer-Options header for the conformance suite.
+      - E2E_ALLOW_OPTION_OVERRIDE=1
     networks:
       - syncer-net
     depends_on:
@@ -135,6 +138,50 @@ services:
       - syncer-net
     profiles:
       - fulltest   # docker compose --profile fulltest --profile fullstack --profile dart --profile sagitta up
+
+  # --- Conformance Suite (real assertions, not curl+grep) ---
+  # Scenario-level e2e: deep merge, keyed-array reconciliation, jsonb
+  # round-trip fidelity, convergence under reordering, CAS conflicts,
+  # tombstones, unique-index identity. Run:
+  #   docker compose --profile conformance up --exit-code-from conformance
+  conformance:
+    image: node:22-alpine
+    working_dir: /test
+    depends_on:
+      postgres:
+        condition: service_healthy
+      node:
+        condition: service_started
+    environment:
+      - BASE_URL=http://node:3003
+    volumes:
+      - ./test:/test:ro
+    entrypoint: ["node", "/test/conformance/run.mjs"]
+    networks:
+      - syncer-net
+    profiles:
+      - conformance
+
+  # --- Cross-Server Convergence ---
+  # Proves four independent runtimes (Node/napi+jsonb, Rust/static-link,
+  # Dart/FFI x2) produce semantically identical documents from an identical
+  # mutation sequence, and that non-contending mutations converge regardless of
+  # apply order. Run:
+  #   docker compose --profile crossserver --profile fullstack --profile dart \
+  #     --profile sagitta up --exit-code-from cross-server
+  cross-server:
+    image: node:22-alpine
+    working_dir: /test
+    depends_on:
+      node:
+        condition: service_started
+    volumes:
+      - ./test:/test:ro
+    entrypoint: ["node", "/test/cross-server/run.mjs"]
+    networks:
+      - syncer-net
+    profiles:
+      - crossserver
 
 networks:
   syncer-net:

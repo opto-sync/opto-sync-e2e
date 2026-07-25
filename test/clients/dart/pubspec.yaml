@@ -1,0 +1,28 @@
+name: opto_sync_client_e2e
+description: >-
+  Client-in-the-loop e2e suite for the opto_sync_client Dart package: drives the
+  real Drift mutation queue and the real FfiSyncer reconcile path against the
+  live node+Postgres opto-sync server.
+publish_to: 'none'
+version: 0.1.0
+
+environment:
+  sdk: ^3.12.1
+
+dependencies:
+  # The library under test, straight from source — no published version can
+  # drift out from under this suite.
+  opto_sync_client:
+    path: ../../../../opto-sync-clients/clients/dart
+  # Needed to open an in-memory queue and to query/update it directly: the
+  # client exposes its OptoSyncDatabase publicly and ships no transport, so the
+  # flush loop lives here.
+  drift: ^2.34.2
+  sqlite3: ^3.5.0
+
+dev_dependencies:
+  lints: ^6.0.0
+  test: ^1.25.6
+
+# HTTP deliberately uses dart:io HttpClient rather than package:http — one less
+# dependency to resolve, and the suite must run offline.

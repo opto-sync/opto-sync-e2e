@@ -87,8 +87,13 @@ Future<void> main() async {
         doc.data,
         payload,
         options: MergeOptions(
+          // Same policy as every other opto-sync server, so the conformance
+          // expectations are uniform across runtimes.
+          arrayStrategy: ArrayMergeStrategy.mergeByKey,
+          arrayMatchKeys: 'id',
           resolveByTimestamp: true,
-          lwwKeys: 'updatedAt',
+          lwwKeys: 'updatedAt,syncedAt',
+          fwwKeys: 'createdAt',
         ),
       );
       
