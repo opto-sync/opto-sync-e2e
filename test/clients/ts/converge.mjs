@@ -99,7 +99,7 @@ async function verify() {
     'appended identities appear in flush order at the end of the array');
 
   // (b) this client's own local reconcile of the final state.
-  const client = new OptoSyncClient({ databaseName: `opto-e2e-verify-${LANG}` });
+  const client = new OptoSyncClient({ databaseName: `opto-e2e-verify-${LANG}-${Date.now()}` });
   const localCopy = FX.payloads[LANG];
   const reconciled = client.reconcileIncoming('docs', FX.docId, serverFinal, localCopy);
   assertDeepEqualKeyed(reconciled, FX.expectedFinal,
