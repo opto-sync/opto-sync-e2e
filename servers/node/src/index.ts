@@ -378,7 +378,8 @@ app.post("/doc/:id/sync", async (req, res) => {
           resurrected: Boolean(deleted_at),
         });
       }
-      // Lost the CAS race — re-read and merge again.
+      // Lost the CAS race — back off, then re-read and merge again.
+      await casBackoff(attempt);
     }
 
     res.status(409).json({ error: "Concurrent update, retry the sync", conflict: true });
