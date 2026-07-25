@@ -9,7 +9,7 @@
     "  arrayMatchKeys     = \"id\"",
     "  resolveByTimestamp = true",
     "  lwwKeys            = \"updatedAt,syncedAt\"",
-    "  fwwKeys            = \"createdAt\"",
+    "  fwwKeys            = (unset)",
     "",
     "Policy facts these fixtures depend on (see syncer.c core/src/syncer.c):",
     " * Rejection is WHOLE-OBJECT and per level: if base has a strictly newer",
