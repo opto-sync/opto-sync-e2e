@@ -22,12 +22,29 @@ const HOST_MODE = process.env.HOST_MODE === "1";
 /** Comma-separated server names to exclude, e.g. SKIP_SERVERS=node. */
 const SKIP = new Set((process.env.SKIP_SERVERS ?? "").split(",").filter(Boolean));
 
+/**
+ * `int64Exact` records whether a runtime's JSON layer round-trips integers
+ * beyond 2^53 losslessly. The C core always does (see
+ * syncer.c/test-differential), but a server built on a JS JSON parser turns
+ * every number into an IEEE-754 double before the core ever sees it, so
+ * 1689940800123456789 arrives as 1689940800123456800. This is a property of
+ * the host runtime, not of the merge engine — it is asserted rather than
+ * hidden so a regression in either direction is visible.
+ *
+ * Practical guidance for library users: represent nanosecond timestamps as
+ * DIGIT STRINGS. The core compares pure-digit strings numerically, so LWW/FWW
+ * resolution stays correct and no runtime can round them.
+ */
 const SERVERS = [
-  { name: "node",           url: HOST_MODE ? "http://localhost:3003" : "http://node:3003",           doc: "doc-1" },
-  { name: "rust-fullstack", url: HOST_MODE ? "http://localhost:3002" : "http://rust-fullstack:3002", doc: "doc-a" },
-  { name: "dart",           url: HOST_MODE ? "http://localhost:3004" : "http://dart:3004",           doc: "doc1" },
-  { name: "sagitta",        url: HOST_MODE ? "http://localhost:3005" : "http://sagitta:3005",        doc: "doc-s1" },
+  { name: "node",           url: HOST_MODE ? "http://localhost:3003" : "http://node:3003",           doc: "doc-1",   int64Exact: false },
+  { name: "rust-fullstack", url: HOST_MODE ? "http://localhost:3002" : "http://rust-fullstack:3002", doc: "doc-a",   int64Exact: true  },
+  { name: "dart",           url: HOST_MODE ? "http://localhost:3004" : "http://dart:3004",           doc: "doc1",    int64Exact: true  },
+  { name: "sagitta",        url: HOST_MODE ? "http://localhost:3005" : "http://sagitta:3005",        doc: "doc-s1",  int64Exact: true  },
 ];
+
+const NANO = "1689940800123456789";
+/** What an IEEE-754 double does to NANO — the only acceptable lossy result. */
+const NANO_AS_DOUBLE = "1689940800123456800";
 
 let pass = 0;
 let fail = 0;
