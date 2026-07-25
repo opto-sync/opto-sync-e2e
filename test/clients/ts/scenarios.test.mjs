@@ -13,13 +13,17 @@ import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  ArrayStrategy,
+  DEFAULT_RECONCILE_OPTIONS,
   OptoSyncClient,
   SYNC_STATUS,
   engineVersion,
+  reconcileIncoming,
 } from '../../../../opto-sync-clients/clients/ts/dist/index.js';
 
 import {
   SCENARIOS,
+  SERVER_POLICY,
   assertDeepEqual,
   docId,
   getDocData,
