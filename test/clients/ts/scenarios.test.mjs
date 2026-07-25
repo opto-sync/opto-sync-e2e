@@ -53,9 +53,16 @@ const S = SCENARIOS.scenarios;
 let dbSeq = 0;
 const openClients = [];
 
-/** A fresh client with an isolated IndexedDB, so no test can see another's queue. */
+/**
+ * A fresh client with an isolated IndexedDB, so no test can see another's queue,
+ * configured with the SERVER's merge policy (see SERVER_POLICY for why that has
+ * to be spelled out for the TypeScript client but not for Dart/Rust).
+ */
 function freshClient() {
-  const client = new OptoSyncClient({ databaseName: `opto-e2e-ts-${++dbSeq}` });
+  const client = new OptoSyncClient({
+    ...SERVER_POLICY,
+    databaseName: `opto-e2e-ts-${++dbSeq}`,
+  });
   openClients.push(client);
   return client;
 }
