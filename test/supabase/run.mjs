@@ -177,6 +177,10 @@ async function main() {
     ok(maj > 0 || min >= 2, `core version ${h.coreVersion} supports MERGE_BY_KEY (>= 0.2.0)`);
   }
   ok(h.table === TABLE, `rust-mash targets table ${TABLE}`, String(h.table));
+  // The code default is Supabase's "/rest/v1"; this run overrides it to "" for
+  // bare PostgREST. Asserting it here documents that the override took effect
+  // rather than the suite silently testing the wrong URL shape.
+  ok(h.restPrefix === "", "REST prefix overridden to '' for bare PostgREST", JSON.stringify(h.restPrefix));
 
   section("server-owned merge policy matches the Postgres path");
   const pol = h.mergePolicy || {};
