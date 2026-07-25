@@ -291,9 +291,16 @@ async function main() {
     check(`phase1: ${server.name} appended new element (c/gamma)`, () => {
       assert.equal(sub.rows.find((r) => r.id === "c").label, "gamma");
     });
-    check(`phase1: ${server.name} createdAt FWW rejected re-creation`, () => {
-      assert.equal(JSON.stringify(sub).includes("IMPOSTOR"), false);
-      assert.equal(sub.rows.find((r) => r.id === "a").createdAt, 1000);
+    check(`phase1: ${server.name} later createdAt does NOT veto a newer write`, () => {
+      const a = sub.rows.find((r) => r.id === "a");
+      // The whole point: no key in the default policy can reject a node for
+      // being NEWER, so payload 3 lands and the record stays writable.
+      assert.equal(a.label, "RECREATED");
+      assert.equal(a.updatedAt, 99999);
+      assert.equal(a.createdAt, 99999);
+      // Still a merge, not a replace: the field payload 3 never mentioned
+      // survives from payload 2.
+      assert.equal(a.qty, 42);
     });
     check(`phase1: ${server.name} deep-merged nested leaf`, () => {
       assert.equal(sub.deep.l1.l2.l3.keep, "yes");
