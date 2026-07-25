@@ -1,0 +1,25 @@
+[package]
+name = "opto-sync-client-e2e"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = """
+Client-in-the-loop e2e suite for the opto-sync-client crate: drives the real
+MutationStore queue and the real reconcile path against the live node+Postgres
+opto-sync server.
+"""
+
+[dependencies]
+# The library under test, straight from source.
+opto-sync-client = { path = "../../../../opto-sync-clients/clients/rust" }
+# Semantic JSON comparison: serde_json::Value orders object keys, which is
+# exactly what is needed since Postgres jsonb reorders them.
+serde_json = "1"
+# Plain-HTTP client. default-features = false keeps TLS out of the build: the
+# suite only ever talks to a local server over http, and the fewer crates it
+# needs the more reliably it builds offline.
+ureq = { version = "2.12", default-features = false }
+
+[[bin]]
+name = "converge"
+path = "src/bin/converge.rs"
