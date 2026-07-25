@@ -1,0 +1,165 @@
+{
+  "$comment": [
+    "Shared client-in-the-loop e2e fixtures. Read verbatim by the TypeScript, Dart",
+    "and Rust suites so all three assert against IDENTICAL inputs and IDENTICAL",
+    "expectations. Never edit a payload without re-deriving every `expected` value",
+    "from the syncer.c v0.2.0 merge policy that BOTH the server and the clients use:",
+    "",
+    "  arrayStrategy      = MERGE_BY_KEY (4)",
+    "  arrayMatchKeys     = \"id\"",
+    "  resolveByTimestamp = true",
+    "  lwwKeys            = \"updatedAt,syncedAt\"",
+    "  fwwKeys            = \"createdAt\"",
+    "",
+    "Policy facts these fixtures depend on (see syncer.c core/src/syncer.c):",
+    " * Rejection is WHOLE-OBJECT and per level: if base has a strictly newer",
+    "   lwwKey than incoming, the entire incoming object at that level is dropped",
+    "   (keys present only in incoming are NOT copied).",
+    " * A guard only applies when BOTH sides carry the key. An object with no",
+    "   updatedAt on either side is a plain last-writer-wins deep merge, so for",
+    "   unguarded scalars the ARRIVAL ORDER decides. Fixtures exploit both.",
+    " * fwwKeys: an incoming object whose createdAt is NEWER than base's is",
+    "   rejected wholesale. Client payloads therefore omit createdAt for objects",
+    "   that already exist on the server.",
+    " * MERGE_BY_KEY appends unmatched identities at the END of the base array, so",
+    "   array order in `expected` is significant and deterministic.",
+    " * Array elements with no identity key (e.g. strings) get UNION semantics,",
+    "   which is what makes replaying a queue idempotent.",
+    "",
+    "No payload carries a top-level \"id\": the document id lives in the URL, so",
+    "these payloads need no per-language templating."
+  ],
+
+  "docIdPrefix": "cl",
+
+  "scenarios": {
+    "offlineQueue": {
+      "$doc": "Scenario 1 - queue 3 mutations offline, then flush. Run twice: once one-by-one via POST /doc/:id/sync, once atomically via POST /sync/batch. Both must land on the same `expected`.",
+      "docSuffixIndividual": "s1-individual",
+      "docSuffixBatch": "s1-batch",
+      "base": {
+        "title": "s1 base",
+        "createdAt": 1000,
+        "counters": { "updatedAt": 1000, "a": 0, "b": 0, "c": 0 }
+      },
+      "mutations": [
+        { "m1": "one", "counters": { "updatedAt": 2000, "a": 1 } },
+        { "m2": "two", "counters": { "updatedAt": 3000, "b": 2 } },
+        { "m3": "three", "counters": { "updatedAt": 4000, "c": 3 } }
+      ],
+      "expected": {
+        "title": "s1 base",
+        "createdAt": 1000,
+        "m1": "one",
+        "m2": "two",
+        "m3": "three",
+        "counters": { "updatedAt": 4000, "a": 1, "b": 2, "c": 3 }
+      }
+    },
+
+    "optimisticPullback": {
+      "$doc": "Scenario 2 - apply a mutation locally through the client's reconcile path, push it, pull the server doc back, reconcile it into the local copy. Local and server must agree semantically (deep-equal after parse; jsonb reorders keys so raw strings are never compared).",
+      "docSuffix": "s2-pullback",
+      "base": {
+        "title": "s2 server base",
+        "createdAt": 1000,
+        "section": { "updatedAt": 1000, "v": "base", "keep": "yes" }
+      },
+      "mutation": {
+        "title": "s2 local title",
+        "extra": "local-only",
+        "section": { "updatedAt": 2000, "v": "local" }
+      },
+      "expected": {
+        "title": "s2 local title",
+        "createdAt": 1000,
+        "extra": "local-only",
+        "section": { "updatedAt": 2000, "v": "local", "keep": "yes" }
+      }
+    },
+
+    "staleRejection": {
+      "$doc": "Scenario 3 - both directions of timestamp resolution, round-tripped through the server. First the server holds an OLDER state: pulling it into the newer local copy must change nothing at all (whole-object rejection, so sOnly is not even copied). Then the server holds a NEWER state: it wins, and this time the merge descends, so the local-only key survives alongside the server's keys.",
+      "docSuffix": "s3-stale",
+      "local": { "title": "local wins", "updatedAt": 3000, "lOnly": "local-marker" },
+      "serverStale": { "title": "server stale", "updatedAt": 1000, "sOnly": "stale-marker" },
+      "expectedLocalSurvives": { "title": "local wins", "updatedAt": 3000, "lOnly": "local-marker" },
+      "serverFresh": { "title": "server fresh", "updatedAt": 5000, "sOnly": "fresh-marker" },
+      "expectedServerWins": {
+        "title": "server fresh",
+        "updatedAt": 5000,
+        "sOnly": "fresh-marker",
+        "lOnly": "local-marker"
+      }
+    },
+
+    "keyedArray": {
+      "$doc": "Scenario 4 - keyed-array reconciliation through the full stack. r1 is untouched by the client and must survive; r2 is updated with a FRESHER updatedAt and must be applied; r3 is updated with a STALER updatedAt and must be rejected wholesale; r4 is new and must be appended at the end.",
+      "docSuffix": "s4-rows",
+      "base": {
+        "title": "s4 rows",
+        "createdAt": 1000,
+        "rows": [
+          { "id": "r1", "createdAt": 1000, "updatedAt": 1000, "label": "untouched", "qty": 1 },
+          { "id": "r2", "createdAt": 1000, "updatedAt": 2000, "label": "server-old", "qty": 2 },
+          { "id": "r3", "createdAt": 1000, "updatedAt": 9000, "label": "server-fresh", "qty": 3 }
+        ]
+      },
+      "mutation": {
+        "rows": [
+          { "id": "r2", "updatedAt": 5000, "label": "client-updated", "qty": 22 },
+          { "id": "r3", "updatedAt": 4000, "label": "client-stale", "qty": 33 },
+          { "id": "r4", "createdAt": 5000, "updatedAt": 5000, "label": "client-new", "qty": 4 }
+        ]
+      },
+      "expected": {
+        "title": "s4 rows",
+        "createdAt": 1000,
+        "rows": [
+          { "id": "r1", "createdAt": 1000, "updatedAt": 1000, "label": "untouched", "qty": 1 },
+          { "id": "r2", "createdAt": 1000, "updatedAt": 5000, "label": "client-updated", "qty": 22 },
+          { "id": "r3", "createdAt": 1000, "updatedAt": 9000, "label": "server-fresh", "qty": 3 },
+          { "id": "r4", "createdAt": 5000, "updatedAt": 5000, "label": "client-new", "qty": 4 }
+        ]
+      }
+    },
+
+    "replayIdempotency": {
+      "$doc": "Scenario 5 - flush the SAME queued mutation twice, as a client would after an ambiguous network failure. The document version must advance (proving the second write really executed) while the data stays byte-for-byte semantically identical. `tags` covers the identity-less array path, whose UNION semantics is what keeps replay from duplicating elements.",
+      "docSuffix": "s5-replay",
+      "base": {
+        "title": "s5 base",
+        "createdAt": 1000,
+        "tags": ["a"],
+        "rows": [{ "id": "x", "createdAt": 1000, "updatedAt": 1000, "n": 1 }]
+      },
+      "mutation": {
+        "title": "s5 replayed",
+        "tags": ["a", "b"],
+        "rows": [
+          { "id": "x", "updatedAt": 2000, "n": 2 },
+          { "id": "y", "createdAt": 2000, "updatedAt": 2000, "n": 3 }
+        ]
+      },
+      "expected": {
+        "title": "s5 replayed",
+        "createdAt": 1000,
+        "tags": ["a", "b"],
+        "rows": [
+          { "id": "x", "createdAt": 1000, "updatedAt": 2000, "n": 2 },
+          { "id": "y", "createdAt": 2000, "updatedAt": 2000, "n": 3 }
+        ]
+      }
+    },
+
+    "failureMarking": {
+      "$doc": "Scenario 6 - a mutation aimed at a document that does not exist must come back 404 and be marked FAILED, never SYNCED. The doc suffix `missingSuffix` is deliberately never created. A second mutation against a real document then proves the store's pending/synced/failed accounting is per-mutation and not sticky.",
+      "missingSuffix": "s6-does-not-exist",
+      "okSuffix": "s6-ok",
+      "okBase": { "title": "s6 base", "createdAt": 1000 },
+      "mutationDoomed": { "title": "never lands", "updatedAt": 2000 },
+      "mutationOk": { "title": "s6 landed", "updatedAt": 2000 },
+      "expectedOk": { "title": "s6 landed", "createdAt": 1000, "updatedAt": 2000 }
+    }
+  }
+}
