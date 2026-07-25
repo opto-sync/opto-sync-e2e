@@ -43,6 +43,46 @@ export default {
       },
     },
     {
+      name: "the request schema enforces types on its known fields (400, with details)",
+      async fn(t, c) {
+        await c.reset();
+        // The server declares title:string, metadata/settings:object,
+        // updatedAt/syncedAt/createdAt:string|number, and passes everything else
+        // through untyped. A wrongly-typed KNOWN field is a 400, not a merge.
+        const bad = [
+          ["title as object", { title: { not: "a string" } }],
+          ["title as number", { title: 42 }],
+          ["metadata as string", { metadata: "not-an-object" }],
+          ["settings as array", { settings: [1, 2] }],
+          ["updatedAt as object", { updatedAt: { t: 1 } }],
+          ["updatedAt as boolean", { updatedAt: true }],
+        ];
+        for (const [label, payload] of bad) {
+          const res = await c.sync("doc-1", payload);
+          t.eq(res.status, 400, `${label} -> 400 (got ${res.status})`);
+        }
+        const withDetails = await c.sync("doc-1", { title: 42 });
+        t.ok(withDetails.body?.details != null, "400 body includes validation details");
+
+        // Unknown fields of ANY type pass through untouched.
+        const ok = await c.sync("doc-1", {
+          anythingGoes: { deeply: [1, { nested: true }] },
+          alsoFine: 3.14,
+        });
+        t.status(ok, 200, "unknown fields of any type are accepted (passthrough)");
+        t.deepEq(
+          (await c.data("doc-1")).anythingGoes,
+          { deeply: [1, { nested: true }] },
+          "passthrough field stored intact"
+        );
+        t.eq(
+          (await c.data("doc-1")).title,
+          "Project Alpha",
+          "the rejected requests never modified the document"
+        );
+      },
+    },
+    {
       name: "a rejected body does not modify the document",
       async fn(t, c) {
         await c.reset();
