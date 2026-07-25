@@ -141,6 +141,29 @@ services:
     profiles:
       - fulltest   # docker compose --profile fulltest --profile fullstack --profile dart --profile sagitta up
 
+  # --- Conformance Suite (real assertions, not curl+grep) ---
+  # Scenario-level e2e: deep merge, keyed-array reconciliation, jsonb
+  # round-trip fidelity, convergence under reordering, CAS conflicts,
+  # tombstones, unique-index identity. Run:
+  #   docker compose --profile conformance up --exit-code-from conformance
+  conformance:
+    image: node:22-alpine
+    working_dir: /test
+    depends_on:
+      postgres:
+        condition: service_healthy
+      node:
+        condition: service_started
+    environment:
+      - BASE_URL=http://node:3003
+    volumes:
+      - ./test:/test:ro
+    entrypoint: ["node", "/test/conformance/run.mjs"]
+    networks:
+      - syncer-net
+    profiles:
+      - conformance
+
 networks:
   syncer-net:
     driver: bridge
