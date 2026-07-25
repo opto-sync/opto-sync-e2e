@@ -23,7 +23,7 @@
 use axum::{
     extract::{Path, State},
     response::{Html, IntoResponse, Json},
-    routing::{get, post, put},
+    routing::{get, post},
     Router,
 };
 use maud::{html, Markup, DOCTYPE};
