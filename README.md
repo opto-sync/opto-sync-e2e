@@ -1,5 +1,8 @@
 # opto-sync-e2e
 
+[![E2E (docker)](https://github.com/opto-sync/opto-sync-e2e/actions/workflows/e2e-docker.yml/badge.svg)](https://github.com/opto-sync/opto-sync-e2e/actions/workflows/e2e-docker.yml)
+[![E2E (client-in-the-loop)](https://github.com/opto-sync/opto-sync-e2e/actions/workflows/e2e-clients.yml/badge.svg)](https://github.com/opto-sync/opto-sync-e2e/actions/workflows/e2e-clients.yml)
+
 End-to-end integration tests for [`syncer.c`](../syncer.c) — the zero-deserialization
 JSONB deep-merge engine — exercised through real HTTP servers in several
 languages, each merging documents via the native C core.
