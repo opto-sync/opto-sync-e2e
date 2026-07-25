@@ -72,7 +72,7 @@ fn defaults_match_the_server_policy() {
     );
 
     assert!(
-        opto_sync_client::core_version().as_str() >= "0.2.0",
+        opto_sync_client::core_version() >= "0.2.0",
         "the v0.2.0 core is required"
     );
 }
