@@ -5,6 +5,7 @@
     "dev": "vite"
   },
   "dependencies": {
-    "vite": "^5.2.0"
+    "vite": "^5.2.0",
+    "@opto-sync/client": "file:../../../opto-sync-clients/clients/ts"
   }
 }
