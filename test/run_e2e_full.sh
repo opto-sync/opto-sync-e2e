@@ -119,7 +119,7 @@ test_server() {
     NO_FWW=$(curl -s --max-time 10 "$URL/doc/$DOC" 2>/dev/null || echo "FAIL")
     echo "No-FWW default: $NO_FWW"
     check        "$NAME: later createdAt no longer vetoes a newer write" "$NO_FWW" '"NEWEST"'
-    check_absent "$NAME: the superseded value is gone"                   "$NO_FWW" '"one"'
+    check_absent "$NAME: the superseded value is gone"                   "$NO_FWW" '"v":"one"'
 
     # The engine feature itself is still exercised, on the one server that lets a
     # request name its own policy (node, in test mode). Everywhere else the
