@@ -145,6 +145,7 @@ async fn sync_document(
             resolve_by_timestamp: true,
             lww_keys: ts_key.as_ptr(),
             fww_keys: std::ptr::null(),
+            array_match_keys: std::ptr::null(),
         };
 
         let result_ptr =
