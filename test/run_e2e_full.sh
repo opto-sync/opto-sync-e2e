@@ -78,12 +78,39 @@ test_server() {
     echo "CRDT stale: $STALE"
     check "$NAME: CRDT stale update handled" "$STALE" '"merged":true'
 
-    # Multi-timestamp and Array CRDT support check
+    # ── Keyed-array reconciliation (MERGE_BY_KEY) ────────────────────────
+    # Asserting only '"merged":true' here would pass even under REPLACE
+    # semantics, so seed a two-element array and then prove element-level
+    # behavior: stale element rejected, untouched element kept, new appended.
+    curl -s --max-time 10 -X POST "$URL/doc/$DOC/sync" \
+        -H "Content-Type: application/json" \
+        -d '{"rows": [{"id": 1, "createdAt": 100, "updatedAt": 500, "v": "one"},
+                      {"id": 2, "createdAt": 100, "updatedAt": 500, "v": "two"}]}' \
+        >/dev/null 2>&1 || true
+
     ARRAY_SYNC=$(curl -s --max-time 10 -X POST "$URL/doc/$DOC/sync" \
         -H "Content-Type: application/json" \
-        -d '{"arr": [{"id": 1, "createdAt": 100, "updatedAt": 999, "status": "new"}]}' 2>/dev/null || echo "FAIL")
+        -d '{"rows": [{"id": 2, "updatedAt": 100, "v": "STALE"},
+                      {"id": 3, "createdAt": 900, "updatedAt": 900, "v": "three"}]}' \
+        2>/dev/null || echo "FAIL")
     echo "Array Sync: $ARRAY_SYNC"
-    check "$NAME: Array multi-timestamp handled" "$ARRAY_SYNC" '"merged":true'
+    check "$NAME: keyed-array merge accepted" "$ARRAY_SYNC" '"merged":true'
+
+    ROWS=$(curl -s --max-time 10 "$URL/doc/$DOC" 2>/dev/null || echo "FAIL")
+    echo "Rows after: $ROWS"
+    check        "$NAME: keyed-array kept untouched element"   "$ROWS" '"one"'
+    check        "$NAME: keyed-array kept fresher element"     "$ROWS" '"two"'
+    check_absent "$NAME: keyed-array rejected stale element"   "$ROWS" 'STALE'
+    check        "$NAME: keyed-array appended new element"     "$ROWS" '"three"'
+
+    # First-Write-Wins: an element claiming a LATER createdAt for an existing
+    # identity must not overwrite the original.
+    curl -s --max-time 10 -X POST "$URL/doc/$DOC/sync" \
+        -H "Content-Type: application/json" \
+        -d '{"rows": [{"id": 1, "createdAt": 5000, "updatedAt": 5000, "v": "IMPOSTOR"}]}' \
+        >/dev/null 2>&1 || true
+    FWW=$(curl -s --max-time 10 "$URL/doc/$DOC" 2>/dev/null || echo "FAIL")
+    check_absent "$NAME: createdAt FWW rejected re-creation" "$FWW" 'IMPOSTOR'
 
     echo "--- $NAME done ---"
 }
