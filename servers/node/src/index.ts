@@ -222,6 +222,18 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: "32mb" }));
 
+// Express's default handler answers a body-parse failure with an HTML stack
+// trace that leaks server paths. Answer in JSON instead, and keep the 400.
+app.use((err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (err instanceof SyntaxError && "body" in err) {
+    return res.status(400).json({ error: "Malformed JSON body", detail: err.message });
+  }
+  if (err?.type === "entity.too.large") {
+    return res.status(413).json({ error: "Payload too large" });
+  }
+  return next(err);
+});
+
 app.get("/health", (_req, res) => {
   res.json({
     status: "ok",
