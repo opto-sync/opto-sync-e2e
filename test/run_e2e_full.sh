@@ -66,6 +66,13 @@ test_server() {
     echo "CRDT stale: $STALE"
     check "$NAME: CRDT stale update handled" "$STALE" '"merged":true'
 
+    # Multi-timestamp and Array CRDT support check
+    ARRAY_SYNC=$(curl -s --max-time 10 -X POST "$URL/doc/$DOC/sync" \
+        -H "Content-Type: application/json" \
+        -d '{"arr": [{"id": 1, "createdAt": 100, "updatedAt": 999, "status": "new"}]}' 2>/dev/null || echo "FAIL")
+    echo "Array Sync: $ARRAY_SYNC"
+    check "$NAME: Array multi-timestamp handled" "$ARRAY_SYNC" '"merged":true'
+
     echo "--- $NAME done ---"
 }
 

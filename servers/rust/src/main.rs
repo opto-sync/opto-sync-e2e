@@ -143,7 +143,9 @@ async fn sync_document(
             max_depth: 0,
             detect_circular_refs: false,
             resolve_by_timestamp: true,
-            timestamp_key: ts_key.as_ptr(),
+            lww_keys: ts_key.as_ptr(),
+            fww_keys: std::ptr::null(),
+            array_match_keys: std::ptr::null(),
         };
 
         let result_ptr =
@@ -247,10 +249,12 @@ async fn main() {
         eprintln!("Warning: SUPABASE_URL not set");
         "http://localhost:54321".to_string()
     });
-    let supabase_key = std::env::var("SUPABASE_ANON_KEY").unwrap_or_else(|_| {
-        eprintln!("Warning: SUPABASE_ANON_KEY not set");
-        "".to_string()
-    });
+    let supabase_key = std::env::var("SUPABASE_KEY")
+        .or_else(|_| std::env::var("SUPABASE_ANON_KEY")) // legacy fallback
+        .unwrap_or_else(|_| {
+            eprintln!("Warning: SUPABASE_KEY not set");
+            "".to_string()
+        });
 
     let state = Arc::new(AppState {
         http: Client::new(),

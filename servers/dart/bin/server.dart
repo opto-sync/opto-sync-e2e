@@ -3,7 +3,7 @@ import 'dart:io';
 import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart' as io;
 import 'package:shelf_router/shelf_router.dart';
-import 'package:syncer_dart/syncer.dart';
+import 'package:syncer/syncer.dart';
 
 // In-memory "database"
 class Doc {
@@ -39,7 +39,7 @@ Future<void> main() async {
     libraryPath = '/usr/lib/libsyncer.so'; // Default path in Docker
   }
   
-  // Syncer class from syncer_dart binding (merge method)
+  // Syncer class from syncer binding (merge method)
   final syncer = Syncer(libraryPath);
   print('[dart-server] FFI initialized');
 
@@ -88,7 +88,7 @@ Future<void> main() async {
         payload,
         options: MergeOptions(
           resolveByTimestamp: true,
-          timestampKey: 'updatedAt',
+          lwwKeys: 'updatedAt',
         ),
       );
       

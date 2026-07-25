@@ -97,7 +97,9 @@ async fn sync_doc(
             max_depth: 0,
             detect_circular_refs: false,
             resolve_by_timestamp: true,
-            timestamp_key: ts_key.as_ptr(),
+            lww_keys: ts_key.as_ptr(),
+            fww_keys: std::ptr::null(),
+            array_match_keys: std::ptr::null(),
         };
 
         let result_ptr =

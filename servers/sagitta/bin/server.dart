@@ -3,7 +3,7 @@ import 'dart:io';
 import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart' as io;
 import 'package:shelf_router/shelf_router.dart';
-import 'package:syncer_dart/syncer.dart';
+import 'package:syncer/syncer.dart';
 
 // ── In-memory store ───────────────────────────────────────────────────────
 
@@ -152,7 +152,7 @@ Future<void> main() async {
         payload,
         options: MergeOptions(
           resolveByTimestamp: true,
-          timestampKey: 'updatedAt',
+          lwwKeys: 'updatedAt',
         ),
       );
 
