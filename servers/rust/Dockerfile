@@ -17,7 +17,7 @@ COPY opto-sync-e2e/servers/rust/ /build/app/
 WORKDIR /build/app
 RUN sed -i 's|../../../syncer.c/bindings/rust|../syncer-rs|g' Cargo.toml
 RUN sed -i 's|../../core|../syncer-core|g' ../syncer-rs/build.rs
-RUN cargo build --release 2>&1 || echo "Build placeholder — server source not yet complete"
+RUN cargo build --release
 
 # --- Stage 2: Runtime ---
 FROM alpine:3.20
