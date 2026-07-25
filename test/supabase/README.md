@@ -64,7 +64,7 @@ Rust-side unit tests (prefix normalization, merge policy) run with
 | create + round trip | create through `rust-mash`, read back through `rust-mash`, then read the row **directly out of PostgREST** and compare; `updated_at` is a server-side trigger value `rust-mash` never sent |
 | deep merge | nested key added, nested sibling preserved, untouched branch preserved verbatim, version bumped — and the merged jsonb **actually persisted**, verified by a direct PostgREST read |
 | keyed arrays | reconciliation by `id`: matched element updated, omitted fields kept, unmentioned element untouched, new identity appended last, order preserved |
-| LWW / FWW | stale element (older `updatedAt`) rejected and the rejection is what PostgREST stores; element with newer `createdAt` rejected wholesale (FWW), older `createdAt` accepted; document-level LWW rejects a stale whole payload |
+| LWW | stale element (older `updatedAt`) rejected and the rejection is what PostgREST stores; an element carrying a *later* `createdAt` is **accepted** when its `updatedAt` is newer (`createdAt` is not a guarded key) and the element stays writable afterwards; document-level LWW rejects a stale whole payload |
 | idempotency | three identical syncs converge to identical data, no duplicated keyed elements, converged state persisted |
 | jsonb / REST fidelity | a **nanosecond integer** survives merge + jsonb + REST exactly (compared against the raw response text, so JS number handling cannot mask a loss), plus double precision, unicode and escaping |
 | errors / SSR | 404 on unknown document (GET and sync), 400 on a non-object body, the Maud/HTMX dashboard and `/docs` render off the REST layer |
