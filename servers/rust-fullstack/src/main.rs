@@ -92,8 +92,13 @@ async fn sync_doc(
         // Same policy as every other opto-sync server, so the conformance
         // expectations are uniform across runtimes. CStrings must outlive the
         // merge call — they are bound here, not inlined into the struct.
+        //
+        // `fww_keys` is a genuine NULL, deliberately (never a dangling pointer):
+        // FWW in the core is a NODE-LEVEL VETO — an incoming node whose FWW key
+        // is newer is dropped WHOLESALE, even when its `updatedAt` is the newest
+        // write anywhere. With "createdAt" here, a replica holding a later
+        // createdAt for a record could never write to it again, behind a 200 OK.
         let lww_keys = std::ffi::CString::new("updatedAt,syncedAt").unwrap();
-        let fww_keys = std::ffi::CString::new("createdAt").unwrap();
         let match_keys = std::ffi::CString::new("id").unwrap();
 
         let c_opts = syncer_rs::SyncerMergeOptionsC {
@@ -103,7 +108,7 @@ async fn sync_doc(
             detect_circular_refs: false,
             resolve_by_timestamp: true,
             lww_keys: lww_keys.as_ptr(),
-            fww_keys: fww_keys.as_ptr(),
+            fww_keys: std::ptr::null(),
             array_match_keys: match_keys.as_ptr(),
         };
 
