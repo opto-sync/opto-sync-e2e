@@ -398,12 +398,13 @@ async function main() {
     "nanosecond integer survives the merge + jsonb + REST round trip exactly",
     pRaw.raw.slice(0, 300)
   );
-  ok(pRaw.row?.pi === 3.141592653589793, "double precision preserved", String(pRaw.row?.pi));
-  ok(pRaw.row?.text === '日本語 — café ✓ "quoted"', "unicode and escaping preserved", String(pRaw.row?.text));
+  const pData = pRaw.row?.data || {};
+  ok(pData.pi === 3.141592653589793, "double precision preserved", String(pData.pi));
+  ok(pData.text === '日本語 — café ✓ "quoted"', "unicode and escaping preserved", String(pData.text));
   ok(
-    (pRaw.row?.items || [])[0]?.seen === true,
+    (pData.items || [])[0]?.seen === true,
     "equal-timestamp element still merges (LWW rejects only strictly-older)",
-    JSON.stringify(pRaw.row?.items)
+    JSON.stringify(pData.items)
   );
 
   // ══ 8. Error paths ════════════════════════════════════════════════════
