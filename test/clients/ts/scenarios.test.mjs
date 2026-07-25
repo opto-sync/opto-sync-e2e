@@ -89,50 +89,37 @@ async function flushOne(client, mutation, id) {
 }
 
 /* ==================================================================== */
-/* KNOWN DIVERGENCE — pinned so a fix cannot land silently              */
+/* Cross-tier policy agreement                                          */
 /* ==================================================================== */
 
-test(
-  '0. KNOWN DIVERGENCE: @opto-sync/client defaults to ArrayStrategy.REPLACE, ' +
-    'unlike the server and the Dart/Rust clients',
-  async () => {
-    // Not a server test — it is pure library behavior, so it runs even when the
-    // server is down. It exists to make the bug impossible to overlook.
-    assert.equal(
-      DEFAULT_RECONCILE_OPTIONS.arrayStrategy,
-      undefined,
-      'if this now has a value, the client default changed — delete this test and ' +
-        'drop SERVER_POLICY from support.mjs',
-    );
-    assert.equal(DEFAULT_RECONCILE_OPTIONS.arrayMatchKeys, undefined);
+test('0. client defaults match the server policy on every tier', async () => {
+  // Pure library behavior, so it runs even with the server down. This started
+  // life as a bug pin: @opto-sync/client omitted arrayStrategy and so fell
+  // back to the binding's REPLACE default, which dropped local-only array
+  // elements and applied stale ones. The default now matches the server and
+  // the Dart/Rust clients; this test keeps all four tiers locked together.
+  assert.equal(DEFAULT_RECONCILE_OPTIONS.arrayStrategy, ArrayStrategy.MERGE_BY_KEY);
+  assert.equal(DEFAULT_RECONCILE_OPTIONS.arrayMatchKeys, 'id');
+  assert.equal(DEFAULT_RECONCILE_OPTIONS.resolveByTimestamp, true);
+  assert.equal(DEFAULT_RECONCILE_OPTIONS.lwwKeys, 'updatedAt,syncedAt');
+  assert.equal(DEFAULT_RECONCILE_OPTIONS.fwwKeys, 'createdAt');
 
-    // The consequence, demonstrated: silent local data loss plus a stale write
-    // being applied. Dart's FfiSyncer and Rust's ReconcileOptions::default()
-    // both produce the MERGE_BY_KEY result below instead.
-    const localCopy = {
-      rows: [
-        { id: 'r1', label: 'local-only-row' },
-        { id: 'r2', updatedAt: 9000, label: 'fresh-local' },
-      ],
-    };
-    const staleIncoming = { rows: [{ id: 'r2', updatedAt: 1, label: 'stale-server' }] };
+  // Explicit SERVER_POLICY and the client's own defaults must be equivalent:
+  // local-only rows survive and a stale incoming element is rejected.
+  const localCopy = {
+    rows: [
+      { id: 'r1', label: 'local-only-row' },
+      { id: 'r2', updatedAt: 9000, label: 'fresh-local' },
+    ],
+  };
+  const staleIncoming = { rows: [{ id: 'r2', updatedAt: 1, label: 'stale-server' }] };
 
-    const withDefaults = reconcileIncoming(localCopy, staleIncoming);
-    assert.deepEqual(
-      withDefaults,
-      { rows: [{ id: 'r2', updatedAt: 1, label: 'stale-server' }] },
-      'documenting the bug: the default reconcile DROPS r1 and APPLIES the stale r2',
-    );
-
-    const withServerPolicy = reconcileIncoming(localCopy, staleIncoming, SERVER_POLICY);
-    assert.deepEqual(
-      withServerPolicy,
-      localCopy,
-      'with the server policy the local rows survive and the stale write is rejected',
-    );
-    assert.equal(ArrayStrategy.MERGE_BY_KEY, 4, 'SERVER_POLICY.arrayStrategy must stay in sync');
-  },
-);
+  assert.deepEqual(reconcileIncoming(localCopy, staleIncoming), localCopy);
+  assert.deepEqual(
+    reconcileIncoming(localCopy, staleIncoming, SERVER_POLICY),
+    reconcileIncoming(localCopy, staleIncoming),
+  );
+});
 
 /* ==================================================================== */
 /* Scenario 1 — offline queue -> flush -> server merge                  */

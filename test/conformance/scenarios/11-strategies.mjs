@@ -85,22 +85,75 @@ export default {
           "UNION keeps {b:2} and {b:22}: they are different VALUES, not the same identity"
         );
 
-        // A byte-identical element IS deduped — that is the difference from APPEND.
-        await c.sync("s2", { arr: [{ id: "c", v: 3 }] }, {
-          options: { arrayStrategy: 2, resolveByTimestamp: false },
-        });
-        t.eq(
-          (await c.data("s2")).arr.length,
-          4,
-          "an identical element is deduped (UNION is idempotent for equal values)"
-        );
-
-        // Scalars: the clearest demonstration of set semantics.
+        // Scalars: set semantics work exactly as documented, and are idempotent.
         await c.putDoc("s2s", { arr: [1, 2, 3] });
         await c.sync("s2s", { arr: [3, 4] }, {
           options: { arrayStrategy: 2, resolveByTimestamp: false },
         });
         t.deepEq((await c.data("s2s")).arr, [1, 2, 3, 4], "scalar UNION: [1,2,3] ∪ [3,4]");
+        await c.sync("s2s", { arr: [3, 4] }, {
+          options: { arrayStrategy: 2, resolveByTimestamp: false },
+        });
+        t.deepEq(
+          (await c.data("s2s")).arr,
+          [1, 2, 3, 4],
+          "scalar UNION is idempotent on replay"
+        );
+
+        // Single-key objects also dedup reliably (no key order to disagree about).
+        await c.putDoc("s2o", { arr: [{ only: 1 }] });
+        await c.sync("s2o", { arr: [{ only: 1 }] }, {
+          options: { arrayStrategy: 2, resolveByTimestamp: false },
+        });
+        t.eq((await c.data("s2o")).arr.length, 1, "a single-key object element is deduped");
+      },
+    },
+    {
+      name: "UNION dedup of MULTI-KEY objects is key-order sensitive through jsonb",
+      async fn(t, c) {
+        // The core dedups by comparing SERIALIZED forms (strcmp), not by
+        // structural equality. Postgres jsonb re-orders object keys to
+        // (length, then bytes), so a stored element's serialization generally
+        // does NOT match the client's key order — and the "same" element is
+        // appended again. Demonstrated both ways below.
+        await c.putDoc("s2k", { arr: [{ id: "c", v: 3 }] });
+        const raw = await c.rawDoc("s2k");
+        t.contains(
+          raw.text,
+          '{"v": 3, "id": "c"}',
+          "jsonb stored the element as {v, id} — shorter key first, not our {id, v}"
+        );
+
+        // Client key order id,v — differs from the stored form.
+        await c.sync("s2k", { arr: [{ id: "c", v: 3 }] }, {
+          options: { arrayStrategy: 2, resolveByTimestamp: false },
+        });
+        const mismatched = (await c.data("s2k")).arr.length;
+
+        // Client key order v,id — matches the stored jsonb form exactly.
+        await c.putDoc("s2k2", { arr: [{ id: "c", v: 3 }] });
+        await c.sync("s2k2", { arr: [{ v: 3, id: "c" }] }, {
+          options: { arrayStrategy: 2, resolveByTimestamp: false },
+        });
+        t.eq(
+          (await c.data("s2k2")).arr.length,
+          1,
+          "dedup DOES work when the client's key order happens to match jsonb's"
+        );
+
+        t.limitation(
+          mismatched === 2,
+          "UNION failed to dedup a structurally identical object element (array grew to 2)",
+          "Cause: the core's UNION dedup compares serialized JSON text (strcmp) rather than " +
+            "structural equality, and Postgres jsonb normalizes key order to (length, bytes). " +
+            "A client whose key order differs from jsonb's therefore gets duplicates, making " +
+            "arrayStrategy=2 behave like APPEND and NOT idempotent for multi-key objects. " +
+            "Unaffected: scalars, single-key objects, and MERGE_BY_KEY (strategy 4), which " +
+            "matches on an identity key instead of on bytes."
+        );
+        if (mismatched !== 2) {
+          t.eq(mismatched, 1, "UNION deduped the structurally identical element");
+        }
       },
     },
     {
