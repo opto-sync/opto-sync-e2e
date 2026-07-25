@@ -1,0 +1,4 @@
+# Build output: run.sh regenerates the bundle from opto-sync-clients on every
+# run, so committing it would only guarantee it goes stale.
+page/opto-sync-browser.mjs
+page/opto-sync-browser.mjs.gz
