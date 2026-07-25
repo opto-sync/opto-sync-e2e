@@ -99,7 +99,7 @@ async function main() {
   });
 
   check('default policy matches every other tier', () => {
-    assert.call(null, DEFAULT_RECONCILE_OPTIONS.arrayStrategy === ArrayStrategy.MERGE_BY_KEY, 'arrayStrategy');
+    assert(DEFAULT_RECONCILE_OPTIONS.arrayStrategy === ArrayStrategy.MERGE_BY_KEY, 'arrayStrategy');
     assert(DEFAULT_RECONCILE_OPTIONS.arrayMatchKeys === 'id', 'arrayMatchKeys');
     assert(DEFAULT_RECONCILE_OPTIONS.resolveByTimestamp === true, 'resolveByTimestamp');
     assert(DEFAULT_RECONCILE_OPTIONS.lwwKeys === 'updatedAt,syncedAt', 'lwwKeys');
