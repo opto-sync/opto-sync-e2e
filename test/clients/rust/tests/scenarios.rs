@@ -17,12 +17,9 @@ use serde_json::{json, Value};
 /// server is not reachable. Cargo has no first-class runtime skip, so this is the
 /// idiomatic pattern; the message is deliberately loud.
 macro_rules! skip_if_no_server {
-    () => {
+    ($name:literal) => {
         if let Some(reason) = probe_server() {
-            eprintln!(
-                "[rust] SKIPPING {} — server unavailable: {reason}",
-                std::any::type_name_of_val(&|| ())
-            );
+            eprintln!("[rust] SKIPPING {} — server unavailable: {reason}", $name);
             return;
         }
     };
