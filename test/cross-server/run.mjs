@@ -308,26 +308,27 @@ async function main() {
   for (const server of live) {
     const body = `{"xnum":{"nanoNum":${NANO},"nanoStr":"${NANO}"}}`;
     await syncRaw(server, body);
-    const doc = await getDoc(server);
-    const sub = doc.data?.xnum ?? {};
+    // Asserted against the RAW response text: JSON.parse in this very process
+    // would round a numeric int64 back to a double, making an exact server
+    // look lossy. Digit strings are safe to parse; numbers are not.
+    const raw = await getDocText(server);
 
     check(`phase1b: ${server.name} digit-string int64 exact`, () => {
-      assert.equal(String(sub.nanoStr), NANO);
+      assert.ok(raw.includes(`"nanoStr":"${NANO}"`), `raw response lacked "nanoStr":"${NANO}"`);
     });
 
-    if (server.int64Exact) {
-      check(`phase1b: ${server.name} numeric int64 exact`, () => {
-        assert.equal(String(sub.nanoNum), NANO);
-      });
-    } else {
-      check(`phase1b: ${server.name} numeric int64 rounds to double (documented)`, () => {
-        assert.equal(
-          String(sub.nanoNum),
-          NANO_AS_DOUBLE,
-          `expected the documented IEEE-754 rounding for a JS-runtime server; ` +
-            `if this server became exact, flip int64Exact to true`
-        );
-      });
+    const expectedNum = server.int64Exact ? NANO : NANO_AS_DOUBLE;
+    const label = server.int64Exact
+      ? `phase1b: ${server.name} numeric int64 exact`
+      : `phase1b: ${server.name} numeric int64 rounds to double (documented)`;
+    check(label, () => {
+      assert.ok(
+        raw.includes(`"nanoNum":${expectedNum}`),
+        `raw response lacked "nanoNum":${expectedNum}; ` +
+          `if this runtime's fidelity changed, update int64Exact for ${server.name}`
+      );
+    });
+    if (!server.int64Exact) {
       console.log(
         `   ℹ️  ${server.name}: numeric int64 rounded ${NANO} -> ${NANO_AS_DOUBLE} ` +
           `(host JSON layer uses doubles; use digit strings for ns precision)`
