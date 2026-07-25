@@ -30,7 +30,6 @@ import {
   statusCounts,
   syncBatch,
   syncDoc,
-  probeServer as _probe,
   BASE_URL,
 } from './support.mjs';
 
