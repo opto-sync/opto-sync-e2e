@@ -304,7 +304,7 @@ pub fn assert_json_eq_keyed(actual: &Value, expected: &Value, what: &str) {
 /* Queue accounting                                                   */
 /* ------------------------------------------------------------------ */
 
-use opto_sync_client::{InMemoryStore, MutationStatus, OptoSyncClient};
+use opto_sync_client::{InMemoryStore, MutationStatus, MutationStore, OptoSyncClient};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct StatusCounts {
