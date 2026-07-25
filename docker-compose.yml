@@ -33,6 +33,13 @@ services:
       postgres:
         condition: service_healthy
     restart: unless-stopped
+    # Opt-in: rust-mash only functions with Supabase credentials or the
+    # PostgREST override (docker-compose.supabase.yml, which re-declares these
+    # profiles so --profile supabasetest pulls it in). Without a profile it was
+    # built and started by the fulltest/conformance/crossserver runs that never
+    # exercise it, pointed at a placeholder URL where every request fails.
+    profiles:
+      - mash
 
   # --- Full-Stack Rust (Axum SSR + syncer-rs C FFI) ---
   rust-fullstack:
@@ -112,7 +119,6 @@ services:
   test-runner:
     image: curlimages/curl:8.7.1
     depends_on:
-      - rust-mash
       - node
     volumes:
       - ./test:/test:ro
@@ -126,7 +132,6 @@ services:
   test-runner-full:
     image: curlimages/curl:8.7.1
     depends_on:
-      - rust-mash
       - node
       - rust-fullstack
       - dart
