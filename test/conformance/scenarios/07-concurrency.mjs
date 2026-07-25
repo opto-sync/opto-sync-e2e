@@ -3,7 +3,7 @@
  *
  * The server does optimistic concurrency: read (data, version), merge, then
  * `UPDATE … WHERE version = <the version we read>`. Losing that race means
- * re-reading and merging again, bounded by MAX_CAS_ATTEMPTS = 5.
+ * re-reading and merging again, bounded by MAX_CAS_ATTEMPTS = 12 (SYNCER_CAS_ATTEMPTS).
  *
  * ── The invariant that actually matters ───────────────────────────────────
  * "All 20 parallel writes succeed" is NOT a property this server has: with 20-way
@@ -94,11 +94,11 @@ export default {
       async fn(t, c) {
         const { results, ok, conflicted } = await contend(t, c, { n: 5 });
         t.eq(ok.length, 5, "all 5 parallel syncs return 200");
-        t.eq(conflicted.length, 0, "the 5-attempt CAS budget absorbs 5-way contention");
+        t.eq(conflicted.length, 0, "the CAS budget absorbs 5-way contention");
         const attempts = results.map((r) => r.body?.attempts);
         t.ok(
           attempts.every((a) => Number.isInteger(a) && a >= 1 && a <= 5),
-          `every response reports attempts in 1..5 (got ${JSON.stringify(attempts)})`
+          `every response reports attempts within the budget (got ${JSON.stringify(attempts)})`
         );
         t.ok(
           attempts.some((a) => a > 1),

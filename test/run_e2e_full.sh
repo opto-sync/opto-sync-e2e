@@ -1,12 +1,13 @@
 #!/bin/sh
 # Full E2E tests - covers all in-memory servers.
-# rust-mash requires live Supabase credentials and is validated by: docker compose --profile test up
+# rust-mash is opt-in (profile `mash`) and is validated by the Supabase path:
+#   docker compose -f docker-compose.yml -f docker-compose.supabase.yml --profile supabasetest ...
 set -e
 
 echo "==========================================="
 echo " opto-sync Full E2E Integration Tests"
 echo " Testing: Node, Rust Fullstack, Dart, Sagitta"
-echo " (rust-mash tested separately via --profile test)"
+echo " (rust-mash covered by test/supabase, not here)"
 echo "==========================================="
 echo "Waiting for all servers to start..."
 sleep 10
@@ -118,7 +119,7 @@ test_server() {
 # ─────────────────────────────────────────────────────────────
 # Test each server (in-memory, no Supabase required)
 # ─────────────────────────────────────────────────────────────
-test_server "Node (Express+Drizzle+native-C)" "http://node:3003" "doc-1"
+test_server "Node (Express+pg+native-C)" "http://node:3003" "doc-1"
 test_server "Rust Fullstack (Axum SSR)" "http://rust-fullstack:3002" "doc-a"
 test_server "Dart Shelf (C FFI)" "http://dart:3004" "doc1"
 test_server "Sagitta (Dart SSR)" "http://sagitta:3005" "doc-s1"

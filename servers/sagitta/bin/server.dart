@@ -54,9 +54,17 @@ Future<void> main() async {
   try {
     syncer = Syncer(libPath);
     nativeLoaded = true;
-    print('[sagitta] Native C FFI loaded');
+    print('[sagitta] Native C FFI loaded (core ${syncer.version})');
   } catch (e) {
-    print('[sagitta] Warning: native FFI not loaded: $e');
+    // Fail closed, like the node and dart servers: a server that boots without
+    // the merge engine answers every sync with a 500, which reads as a flaky
+    // suite rather than the misconfiguration it is. Refuse to start unless
+    // SYNCER_REQUIRE_NATIVE=0 explicitly allows a degraded boot.
+    print('[sagitta] FATAL: native FFI not loaded: $e');
+    if (Platform.environment['SYNCER_REQUIRE_NATIVE'] != '0') {
+      exit(1);
+    }
+    print('[sagitta] SYNCER_REQUIRE_NATIVE=0, continuing without the engine');
   }
 
   final app = Router();

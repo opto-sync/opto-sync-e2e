@@ -54,7 +54,7 @@ Rust-side unit tests (prefix normalization, merge policy) run with
 
 ## What it asserts
 
-77 assertions across nine groups:
+77 assertions:
 
 | Group | Asserts |
 | --- | --- |

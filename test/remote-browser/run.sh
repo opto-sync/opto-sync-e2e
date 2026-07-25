@@ -38,11 +38,20 @@ case "$TARGET" in
     kube() { kubectl --context dd-ec2-runtime -n "$NS" "$@"; }
     # stdin-consuming variant
     kube_apply() { kubectl --context dd-ec2-runtime -n "$NS" apply -f -; }
+    kube_create() { kubectl --context dd-ec2-runtime -n "$NS" create -f -; }
     ;;
   hetzner)
     SSH_HOST="${SSH_HOST:-hetzner-k8s-bastion}"
-    kube() { ssh -o BatchMode=yes "$SSH_HOST" "sudo -n kubectl -n $NS $*"; }
+    # Each argument is shell-quoted before it crosses SSH: jsonpath contains
+    # parentheses, quotes and braces that the remote shell would otherwise try
+    # to interpret.
+    kube() {
+      local quoted=() a
+      for a in "$@"; do quoted+=("$(printf '%q' "$a")"); done
+      ssh -o BatchMode=yes "$SSH_HOST" "sudo -n kubectl -n $NS ${quoted[*]}"
+    }
     kube_apply() { ssh -o BatchMode=yes "$SSH_HOST" "sudo -n kubectl -n $NS apply -f -"; }
+    kube_create() { ssh -o BatchMode=yes "$SSH_HOST" "sudo -n kubectl -n $NS create -f -"; }
     ;;
   *)
     echo "usage: $0 [aws|hetzner]" >&2
@@ -62,7 +71,12 @@ if [ "$BUILD" = "1" ]; then
       --outfile="$BUNDLE" )
 fi
 [ -f "$BUNDLE" ] || { echo "missing $BUNDLE (run with BUILD=1)" >&2; exit 1; }
-echo "bundle: $(wc -c <"$BUNDLE") bytes"
+# Pre-gzip: `kubectl apply` embeds the whole object in a 256KiB-capped
+# annotation, and a 340KB bundle blows through it. Gzipped it is ~100KB, which
+# also keeps the ConfigMap small on a single-node cluster's etcd. The runner
+# serves it with Content-Encoding: gzip.
+gzip -9 -c "$BUNDLE" > "$BUNDLE.gz"
+echo "bundle: $(wc -c <"$BUNDLE") bytes raw, $(wc -c <"$BUNDLE.gz") bytes gzipped"
 
 # ---------------------------------------------------------------------------
 # Find a grid pod whose `selenium` container is actually ready. On Hetzner the
@@ -84,22 +98,15 @@ log "creating ConfigMap $NAME"
 kube delete configmap "$NAME" --ignore-not-found >/dev/null 2>&1 || true
 # --dry-run + apply keeps this declarative and avoids a 1MiB-limit surprise on
 # a stale object.
-if [ "$TARGET" = "aws" ]; then
-  kubectl --context dd-ec2-runtime -n "$NS" create configmap "$NAME" \
-    --from-file="$HERE/page/index.html" \
-    --from-file="$HERE/page/suite.mjs" \
-    --from-file="$BUNDLE" \
-    --from-file="$HERE/runner.mjs" \
-    --dry-run=client -o yaml | kube_apply
-else
-  # Build the ConfigMap locally, then pipe the YAML to the remote kubectl.
-  kubectl create configmap "$NAME" \
-    --from-file="$HERE/page/index.html" \
-    --from-file="$HERE/page/suite.mjs" \
-    --from-file="$BUNDLE" \
-    --from-file="$HERE/runner.mjs" \
-    --dry-run=client -o yaml | kube_apply
-fi
+# `create -f -`, not `apply`: apply would record the entire object (bundle
+# included) in the kubectl.kubernetes.io/last-applied-configuration annotation,
+# which is capped at 256KiB.
+kubectl create configmap "$NAME" \
+  --from-file="$HERE/page/index.html" \
+  --from-file="$HERE/page/suite.mjs" \
+  --from-file="$BUNDLE.gz" \
+  --from-file="$HERE/runner.mjs" \
+  --dry-run=client -o yaml | kube_create
 
 cleanup() {
   if [ "$KEEP" = "1" ]; then
@@ -158,6 +165,11 @@ spec:
               cpu: 500m
               memory: 512Mi
           securityContext:
+            # Satisfies the cluster's `restricted` PodSecurity level so this
+            # Job does not log a policy warning. Nothing here needs root: it
+            # serves read-only files and binds a port above 1024.
+            runAsNonRoot: true
+            runAsUser: 1000
             allowPrivilegeEscalation: false
             capabilities:
               drop: ['ALL']
@@ -177,8 +189,8 @@ spec:
                 path: index.html
               - key: suite.mjs
                 path: suite.mjs
-              - key: opto-sync-browser.mjs
-                path: opto-sync-browser.mjs
+              - key: opto-sync-browser.mjs.gz
+                path: opto-sync-browser.mjs.gz
 YAML
 )
 printf '%s\n' "$JOB_YAML" | kube_apply

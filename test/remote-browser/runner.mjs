@@ -60,15 +60,29 @@ function servePage() {
     try {
       const rel = normalize(decodeURIComponent(new URL(req.url, 'http://x').pathname)).replace(/^(\.\.[/\\])+/, '');
       const file = join(PAGE_DIR, rel === '/' || rel === '.' ? 'index.html' : rel);
-      const info = await stat(file).catch(() => null);
+      let info = await stat(file).catch(() => null);
+      let served = file;
+      let gzipped = false;
+      if (!info || !info.isFile()) {
+        // Large assets are shipped pre-gzipped so they fit comfortably in a
+        // ConfigMap; the browser decompresses them natively.
+        const gz = `${file}.gz`;
+        const gzInfo = await stat(gz).catch(() => null);
+        if (gzInfo?.isFile()) {
+          info = gzInfo;
+          served = gz;
+          gzipped = true;
+        }
+      }
       if (!info || !info.isFile()) {
         res.writeHead(404, { 'content-type': 'text/plain' });
         return res.end('not found');
       }
-      const body = await readFile(file);
+      const body = await readFile(served);
       res.writeHead(200, {
         'content-type': MIME[extname(file)] || 'application/octet-stream',
         'content-length': body.length,
+        ...(gzipped ? { 'content-encoding': 'gzip' } : {}),
         // Same-origin isolation headers are not needed: the suite uses no
         // SharedArrayBuffer, and requiring them would complicate the origin.
         'cache-control': 'no-store',

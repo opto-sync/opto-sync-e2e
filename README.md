@@ -26,7 +26,7 @@ build context (slow) and can shadow in-image dependency installs.
 |------------------|------|------------------------------------------------------------------------|---------------------|
 | `rust-mash`      | 3001 | Rust: Maud + Axum + Supabase REST + HTMX, merges via `syncer-rs` C FFI | Supabase (REST API) |
 | `rust-fullstack` | 3002 | Rust: Axum SSR + `syncer-rs` C FFI                                     | in-memory           |
-| `node`           | 3003 | Node: Express + `@opto-sync/syncer` native C addon + Drizzle           | Postgres            |
+| `node`           | 3003 | Node: Express + `@opto-sync/syncer` native C addon, raw `pg` + SQL     | Postgres            |
 | `dart`           | 3004 | Dart: Shelf + `dart:ffi` to the C core                                 | in-memory           |
 | `sagitta`        | 3005 | Dart: Sagitta SSR stack + `dart:ffi`                                   | in-memory           |
 
@@ -72,7 +72,7 @@ Copy `.env.example` to `.env` and fill in:
 Two curl-based test runners live in `test/` and run as compose profiles:
 
 ```sh
-# Default profile: node + rust-mash servers, runs test/run_e2e.sh
+# Default profile: postgres + node, runs test/run_e2e.sh
 docker compose --profile test up --build
 
 # Full suite: also builds rust-fullstack, dart and sagitta,
