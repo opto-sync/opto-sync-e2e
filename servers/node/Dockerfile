@@ -27,6 +27,10 @@ RUN sed -i 's|file:../../../syncer.c/bindings/typescript|file:../syncer-ts|g' pa
 
 # Install node-gyp globally and install dependencies (with native addon build)
 RUN npm install -g node-gyp
+# The binding's install script (node-gyp rebuild) runs inside /build/syncer-ts,
+# where the app-level hoisted node_modules is not on the resolution path — so
+# node-addon-api must be installed locally there first.
+RUN cd /build/syncer-ts && npm install --no-audit --no-fund
 RUN npm install --verbose
 
 # Verify the native addon compiled
