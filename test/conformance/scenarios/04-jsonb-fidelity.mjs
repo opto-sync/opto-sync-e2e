@@ -79,8 +79,8 @@ export default {
         );
         t.deepEq(
           Object.keys(JSON.parse(raw.text).nested),
-          ["ax", "cccc", "yyy"],
-          "nested objects are reordered by the same rule"
+          ["ax", "yyy", "cccc"],
+          "nested objects are reordered by the same rule (ax=2, yyy=3, cccc=4)"
         );
       },
     },
