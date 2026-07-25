@@ -89,6 +89,52 @@ async function flushOne(client, mutation, id) {
 }
 
 /* ==================================================================== */
+/* KNOWN DIVERGENCE — pinned so a fix cannot land silently              */
+/* ==================================================================== */
+
+test(
+  '0. KNOWN DIVERGENCE: @opto-sync/client defaults to ArrayStrategy.REPLACE, ' +
+    'unlike the server and the Dart/Rust clients',
+  async () => {
+    // Not a server test — it is pure library behavior, so it runs even when the
+    // server is down. It exists to make the bug impossible to overlook.
+    assert.equal(
+      DEFAULT_RECONCILE_OPTIONS.arrayStrategy,
+      undefined,
+      'if this now has a value, the client default changed — delete this test and ' +
+        'drop SERVER_POLICY from support.mjs',
+    );
+    assert.equal(DEFAULT_RECONCILE_OPTIONS.arrayMatchKeys, undefined);
+
+    // The consequence, demonstrated: silent local data loss plus a stale write
+    // being applied. Dart's FfiSyncer and Rust's ReconcileOptions::default()
+    // both produce the MERGE_BY_KEY result below instead.
+    const localCopy = {
+      rows: [
+        { id: 'r1', label: 'local-only-row' },
+        { id: 'r2', updatedAt: 9000, label: 'fresh-local' },
+      ],
+    };
+    const staleIncoming = { rows: [{ id: 'r2', updatedAt: 1, label: 'stale-server' }] };
+
+    const withDefaults = reconcileIncoming(localCopy, staleIncoming);
+    assert.deepEqual(
+      withDefaults,
+      { rows: [{ id: 'r2', updatedAt: 1, label: 'stale-server' }] },
+      'documenting the bug: the default reconcile DROPS r1 and APPLIES the stale r2',
+    );
+
+    const withServerPolicy = reconcileIncoming(localCopy, staleIncoming, SERVER_POLICY);
+    assert.deepEqual(
+      withServerPolicy,
+      localCopy,
+      'with the server policy the local rows survive and the stale write is rejected',
+    );
+    assert.equal(ArrayStrategy.MERGE_BY_KEY, 4, 'SERVER_POLICY.arrayStrategy must stay in sync');
+  },
+);
+
+/* ==================================================================== */
 /* Scenario 1 — offline queue -> flush -> server merge                  */
 /* ==================================================================== */
 
