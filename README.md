@@ -20,6 +20,16 @@ cp context.dockerignore ../.dockerignore
 Without it, host `node_modules/`, `target/`, and `build/` trees leak into the
 build context (slow) and can shadow in-image dependency installs.
 
+## Documentation
+
+- [Server guide](docs/SERVER_GUIDE.md) — how to build a sync server that is
+  actually correct: CAS with jittered retry, tombstones, unique-index identity,
+  batch replay, jsonb specifics
+- [Test topology](docs/TEST_TOPOLOGY.md) — every server and suite, and what each
+  uniquely catches
+- [Remote browser e2e](test/remote-browser/README.md) — the suite that runs in a
+  real browser on real Kubernetes clusters
+
 ## Servers
 
 | Service          | Port | Stack                                                                  | Storage             |

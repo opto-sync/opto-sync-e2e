@@ -24,10 +24,10 @@ export const LANG = 'ts';
 /**
  * The server's merge policy, stated explicitly (see GET /health defaultOptions).
  *
- * !! WHY THIS OBJECT HAS TO EXIST !!
+ * WHY THIS OBJECT STILL EXISTS
  *
  * @opto-sync/client's DEFAULT_RECONCILE_OPTIONS sets only resolveByTimestamp /
- * lwwKeys / fwwKeys. It does NOT set arrayStrategy or arrayMatchKeys, so the
+ * lwwKeys / fwwKeys. It now sets arrayStrategy and arrayMatchKeys itself, so this is equal to its defaults, so the
  * native core falls back to ArrayStrategy.REPLACE — while the server, the Dart
  * client (FfiSyncer defaults to mergeByKey + 'id') and the Rust client
  * (ReconcileOptions::default() -> MergeByKey + "id") all use MERGE_BY_KEY on

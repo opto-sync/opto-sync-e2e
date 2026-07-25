@@ -111,7 +111,7 @@ which is the load-bearing part:
 `fixtures/scenarios.json` and `fixtures/cross_client.json` are read **verbatim by
 all three languages** — same inputs, same expectations, no per-language
 templating (document ids live in the URL, never in a payload). Each `expected`
-value is derived by hand from the syncer.c v0.2.0 policy and the derivation is
+value is derived by hand from the syncer.c merge policy and the derivation is
 written out in the fixture's own `$comment`. If you change a payload, re-derive
 every expectation.
 
@@ -164,45 +164,20 @@ JSON strings** — everything is parsed first. Two flavors of equality are used:
   `OptoSyncDatabase` (Dart), `MutationStore` (Rust). Nothing was added to any
   client library to make these suites work.
 
-## Known divergence: `@opto-sync/client` defaults to `ArrayStrategy.REPLACE`
+## Cross-tier policy agreement (was: a known divergence)
 
-**This is a real bug, found by these suites, and it is not worked around
-silently.**
+`@opto-sync/client` once omitted `arrayStrategy` from its defaults and so fell
+back to the binding's `REPLACE`, while the Dart client, the Rust client and every
+server used `MERGE_BY_KEY` on `"id"`. Reconciling a server payload therefore
+dropped local array elements the server had never seen and applied elements the
+timestamp guard should have rejected.
 
-`DEFAULT_RECONCILE_OPTIONS` in `clients/ts/src/reconcile.ts` sets only
-`resolveByTimestamp`, `lwwKeys` and `fwwKeys`. It does **not** set
-`arrayStrategy` or `arrayMatchKeys`, so the native core falls back to
-`ArrayStrategy.REPLACE` — while the server, the Dart client (`FfiSyncer` defaults
-to `mergeByKey` + `'id'`) and the Rust client
-(`ReconcileOptions::default()` → `MergeByKey` + `"id"`) all use `MERGE_BY_KEY` on
-`"id"`.
-
-Out of the box the TypeScript client therefore reconciles arrays by wholesale
-replacement. Reconciling a server pull **silently drops local elements the server
-has not seen and applies elements the timestamp guard should have rejected**:
-
-```js
-const local    = { rows: [{ id: 'r1', label: 'local-only' },
-                          { id: 'r2', updatedAt: 9000, label: 'fresh' }] };
-const incoming = { rows: [{ id: 'r2', updatedAt: 1, label: 'stale' }] };
-
-reconcileIncoming(local, incoming);
-// => { rows: [ { id: 'r2', updatedAt: 1, label: 'stale' } ] }
-//    r1 is GONE and the stale r2 was APPLIED.
-
-reconcileIncoming(local, incoming, { arrayStrategy: 4, arrayMatchKeys: 'id' });
-// => local, unchanged (correct: identity-matched, stale write rejected)
-```
-
-Handling here, pending a decision by the library's owner:
-
-* `ts/support.mjs` exports `SERVER_POLICY` and every TypeScript client in the
-  suite is constructed with it, so all three languages are compared on equal
-  terms rather than one being scored against a different policy.
-* Test `0. KNOWN DIVERGENCE` in `ts/scenarios.test.mjs` **pins the current
-  default** and demonstrates the data loss. It is pure library behavior, so it
-  runs even when the server is down. **The moment the client default is fixed,
-  that test fails loudly** — at which point delete it and drop `SERVER_POLICY`.
+That is **fixed**: `DEFAULT_RECONCILE_OPTIONS` in
+`opto-sync-clients/clients/ts/src/reconcile-core.ts` now sets
+`arrayStrategy: MERGE_BY_KEY` and `arrayMatchKeys: 'id'`. Scenario `0` in
+`ts/scenarios.test.mjs` asserts the client's own defaults are equivalent to the
+explicit `SERVER_POLICY`, so a future divergence fails loudly instead of
+silently losing data.
 
 ## Minor API asymmetry (not a bug)
 
