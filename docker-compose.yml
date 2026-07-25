@@ -164,6 +164,27 @@ services:
     profiles:
       - conformance
 
+  # --- Cross-Server Convergence ---
+  # Proves four independent runtimes (Node/napi+jsonb, Rust/static-link,
+  # Dart/FFI x2) produce semantically identical documents from an identical
+  # mutation sequence, and that non-contending mutations converge regardless of
+  # apply order. Run:
+  #   docker compose --profile crossserver --profile fullstack --profile dart \
+  #     --profile sagitta up --exit-code-from cross-server
+  cross-server:
+    image: node:22-alpine
+    working_dir: /test
+    depends_on:
+      node:
+        condition: service_started
+    volumes:
+      - ./test:/test:ro
+    entrypoint: ["node", "/test/cross-server/run.mjs"]
+    networks:
+      - syncer-net
+    profiles:
+      - crossserver
+
 networks:
   syncer-net:
     driver: bridge
