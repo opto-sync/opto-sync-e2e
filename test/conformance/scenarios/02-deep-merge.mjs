@@ -104,19 +104,43 @@ export default {
       },
     },
     {
-      name: "type change string -> object, and array -> object",
+      name: "type change string -> object, array -> object, object -> array",
       async fn(t, c) {
         await c.reset();
-        await c.sync("doc-1", { title: { now: "an-object" } });
-        let d = await c.data("doc-1");
-        t.deepEq(d.title, { now: "an-object" }, "string replaced by an object");
+        // NOTE: these use schema-unconstrained paths. The server's request schema
+        // pins `title` to a string and `metadata`/`settings` to objects, so a
+        // type change on THOSE keys is a 400 rather than a merge — asserted
+        // separately in scenario 12. Everything else is passthrough.
+        await c.sync("doc-1", { custom: "a string" });
+        t.eq((await c.data("doc-1")).custom, "a string", "scalar established at a free key");
+
+        await c.sync("doc-1", { custom: { now: "an-object" } });
+        t.deepEq(
+          (await c.data("doc-1")).custom,
+          { now: "an-object" },
+          "string replaced by an object"
+        );
 
         await c.sync("doc-1", { metadata: { tags: { notAnArray: true } } });
-        d = await c.data("doc-1");
         t.deepEq(
-          d.metadata.tags,
+          (await c.data("doc-1")).metadata.tags,
           { notAnArray: true },
           "array replaced by an object (array strategies only apply array-vs-array)"
+        );
+
+        await c.sync("doc-1", { metadata: { owner: [1, 2, 3] } });
+        t.deepEq(
+          (await c.data("doc-1")).metadata.owner,
+          [1, 2, 3],
+          "object replaced by an array"
+        );
+
+        await c.sync("doc-1", { custom: 42 });
+        t.eq((await c.data("doc-1")).custom, 42, "object replaced by a number");
+        t.eq(
+          (await c.data("doc-1")).metadata.priority,
+          1,
+          "siblings survive every type change above"
         );
       },
     },
