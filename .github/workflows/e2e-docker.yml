@@ -1,0 +1,189 @@
+name: E2E (docker)
+
+# The docker-based e2e suites: full multi-runtime curl suite, the conformance
+# scenarios, cross-server convergence, and the Supabase/PostgREST path.
+#
+# LAYOUT (this is the load-bearing part): every service in docker-compose.yml
+# builds with `context: ../` -- the PARENT of this repo -- and the Dockerfiles
+# `COPY syncer.c/core/`, `COPY syncer.c/bindings/...` and
+# `COPY opto-sync-e2e/servers/...`. So the three repos must sit as siblings:
+#
+#   $GITHUB_WORKSPACE/          <- docker build context
+#     syncer.c/
+#     opto-sync-clients/        (not COPYd by any image; kept for layout parity)
+#     opto-sync-e2e/            <- this repo, compose working directory
+#
+# Docker only honors a .dockerignore at the CONTEXT root, so
+# opto-sync-e2e/context.dockerignore is copied to $GITHUB_WORKSPACE/.dockerignore
+# exactly as README.md's Setup section instructs. Without it, host
+# node_modules/target/build trees leak into the context and can shadow in-image
+# dependency installs.
+#
+# PLATFORM: ubuntu-latest. All images are Linux images that compile the core to
+# libsyncer.so themselves (see servers/*/Dockerfile) -- nothing here depends on
+# the macOS .dylib produced on the dev machines.
+#
+# Docker layer caching is intentionally NOT enabled: the images embed the C core
+# by COPYing syncer.c/, and a cross-run layer cache is one more place a stale
+# core could hide. These suites exist to catch exactly that.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  SYNCER_C_REF: main
+  CLIENTS_REF: main
+
+jobs:
+  suite:
+    name: e2e ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    # Two of the five images are static Rust/musl builds (rust-mash links
+    # OpenSSL statically), so a cold build is slow -- but nowhere near 6 hours.
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: fulltest (node + rust-fullstack + dart + sagitta)
+            id: fulltest
+          - name: conformance (scenarios vs Postgres-backed node)
+            id: conformance
+          - name: crossserver (4 runtimes converge)
+            id: crossserver
+          - name: supabase (PostgREST stand-in for the REST path)
+            id: supabase
+    steps:
+      - name: Checkout opto-sync-e2e
+        uses: actions/checkout@v4
+        with:
+          path: opto-sync-e2e
+
+      - name: Checkout syncer.c (sibling — every image COPYs syncer.c/)
+        uses: actions/checkout@v4
+        with:
+          repository: opto-sync/syncer.c
+          ref: ${{ env.SYNCER_C_REF }}
+          path: syncer.c
+
+      - name: Checkout opto-sync-clients (sibling — documented layout)
+        uses: actions/checkout@v4
+        with:
+          repository: opto-sync/opto-sync-clients
+          ref: ${{ env.CLIENTS_REF }}
+          path: opto-sync-clients
+
+      # README.md, "Setup": the build context is the parent directory, so the
+      # .dockerignore has to live there.
+      - name: Install .dockerignore at the build context root
+        run: |
+          cp opto-sync-e2e/context.dockerignore .dockerignore
+          echo "context root: $(pwd)"
+          ls -a
+
+      # .env is tracked in the repo, but compose hard-fails on a missing
+      # env_file, so make that impossible.
+      - name: Ensure .env exists
+        working-directory: opto-sync-e2e
+        run: |
+          [ -f .env ] || cp .env.example .env
+          echo "--- .env ---"
+          cat .env
+
+      - name: docker / compose versions
+        run: |
+          docker --version
+          docker compose version
+
+      # --- suites ------------------------------------------------------------
+      # `--exit-code-from <svc>` implies --abort-on-container-exit, so the job's
+      # exit status is the test runner's.
+      - name: fulltest — run_e2e_full.sh across all in-memory servers
+        if: matrix.id == 'fulltest'
+        working-directory: opto-sync-e2e
+        run: |
+          docker compose --profile fulltest --profile fullstack --profile dart --profile sagitta \
+            up --build --exit-code-from test-runner-full
+
+      - name: conformance — test/conformance/run.mjs vs node+Postgres
+        if: matrix.id == 'conformance'
+        working-directory: opto-sync-e2e
+        run: |
+          docker compose --profile conformance \
+            up --build --exit-code-from conformance
+
+      - name: crossserver — test/cross-server/run.mjs across 4 runtimes
+        if: matrix.id == 'crossserver'
+        working-directory: opto-sync-e2e
+        run: |
+          docker compose --profile crossserver --profile fullstack --profile dart --profile sagitta \
+            up --build --exit-code-from cross-server
+
+      # Two-step by design (test/supabase/README.md): the override file repoints
+      # rust-mash at the local PostgREST stand-in, and supabase-init must have
+      # completed (it creates the anon/authenticator roles and the
+      # supabase_sync_docs table) before the suite runs. Bringing rust-mash up
+      # from the main compose file alone leaves it on the .env placeholder and
+      # every request fails, so the override is mandatory here.
+      - name: supabase — bring up postgrest + rust-mash (override file)
+        if: matrix.id == 'supabase'
+        working-directory: opto-sync-e2e
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.supabase.yml \
+            up -d --build postgrest rust-mash
+
+      - name: supabase — run test/supabase/run.mjs in-network
+        if: matrix.id == 'supabase'
+        working-directory: opto-sync-e2e
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.supabase.yml \
+            --profile supabasetest run --rm supabase-test
+
+      # --- diagnostics + teardown -------------------------------------------
+      - name: Collect compose logs
+        if: failure()
+        working-directory: opto-sync-e2e
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.supabase.yml \
+            logs --no-color --timestamps > compose-logs.txt 2>&1 || true
+          docker compose -f docker-compose.yml -f docker-compose.supabase.yml \
+            ps -a > compose-ps.txt 2>&1 || true
+          tail -n 200 compose-logs.txt || true
+
+      - name: Upload compose logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compose-logs-${{ matrix.id }}
+          path: |
+            opto-sync-e2e/compose-logs.txt
+            opto-sync-e2e/compose-ps.txt
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Which suite broke
+        if: failure()
+        run: |
+          echo "::error title=opto-sync-e2e ${{ matrix.id }} FAILED::The '${{ matrix.id }}' e2e suite broke, not the other three. Full container logs are in the compose-logs-${{ matrix.id }} artifact."
+
+      # Safe here in a way it is NOT locally: this runner is ephemeral and owns
+      # the whole stack, so `down -v` cannot yank the shared Postgres out from
+      # under a concurrent suite (which is why test/supabase/README.md tells
+      # humans never to run it). `down` is project-wide, so it removes services
+      # from every profile regardless of which ones were selected for `up`.
+      - name: Tear down (always)
+        if: always()
+        working-directory: opto-sync-e2e
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.supabase.yml \
+            down -v --remove-orphans || true

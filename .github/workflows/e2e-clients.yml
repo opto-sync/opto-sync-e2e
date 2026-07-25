@@ -1,0 +1,210 @@
+name: E2E (client-in-the-loop)
+
+# test/clients/run_all.sh — the only e2e suite that runs on the HOST rather than
+# in a container: it drives the three real client libraries from
+# ../opto-sync-clients (ts / dart / rust) against a live node+Postgres server,
+# then makes all three agree on one document (scenario 7, cross-client
+# convergence). It needs node + dart + cargo locally, so it gets its own job.
+#
+# LAYOUT: run_all.sh resolves CLIENTS_ROOT as ../../../opto-sync-clients/clients
+# and the three suites path-depend on ../../../../opto-sync-clients/clients/*,
+# so all three repos are checked out as siblings under $GITHUB_WORKSPACE:
+#
+#   $GITHUB_WORKSPACE/
+#     syncer.c/
+#     opto-sync-clients/
+#     opto-sync-e2e/   <- this repo
+#
+# PLATFORM: ubuntu-latest. The core shared library built here is libsyncer.so;
+# SYNCER_LIB_PATH points at it explicitly so no .dylib default is ever hit.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  SYNCER_C_REF: main
+  CLIENTS_REF: main
+
+jobs:
+  client-in-the-loop:
+    name: test/clients/run_all.sh (ts + dart + rust vs live server)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout opto-sync-e2e
+        uses: actions/checkout@v4
+        with:
+          path: opto-sync-e2e
+
+      - name: Checkout syncer.c (sibling)
+        uses: actions/checkout@v4
+        with:
+          repository: opto-sync/syncer.c
+          ref: ${{ env.SYNCER_C_REF }}
+          path: syncer.c
+
+      - name: Checkout opto-sync-clients (sibling — the libraries under test)
+        uses: actions/checkout@v4
+        with:
+          repository: opto-sync/opto-sync-clients
+          ref: ${{ env.CLIENTS_REF }}
+          path: opto-sync-clients
+
+      # --- toolchains --------------------------------------------------------
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          # ~/.npm tarballs only — never node_modules or the compiled addon.
+          cache: npm
+          cache-dependency-path: opto-sync-clients/clients/ts/package-lock.json
+
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+
+      # The Dart client suite opens a real Drift/SQLite queue through
+      # package:sqlite3, which dlopen()s the system libsqlite3.
+      - name: Install libsqlite3 (Drift/sqlite3 FFI)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libsqlite3-0
+
+      # Rust stable is preinstalled on ubuntu-latest. Downloads only, no target/.
+      - name: Cache cargo registry (downloads only, never target/)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: cargo-registry-${{ runner.os }}-e2e-clients
+          restore-keys: cargo-registry-${{ runner.os }}-
+
+      # --- build what the suites need ----------------------------------------
+      # Dart FFI (both the client library and the e2e dart suite) needs the core
+      # shared library. On Linux: syncer.c/core/build/libsyncer.so.
+      - name: Build syncer.c core shared library
+        working-directory: syncer.c/core
+        run: |
+          mkdir -p build
+          cd build
+          cmake ..
+          make syncer
+          ls -l libsyncer.so
+
+      # WORKAROUND (verified): clients/ts declares
+      # "@opto-sync/syncer": "file:../../../syncer.c/bindings/typescript", which
+      # npm installs as a symlink WITHOUT installing that package's own deps
+      # (its package-lock.json has no node-addon-api entry). `npm install` in
+      # clients/ts then runs node-gyp inside the binding directory, where
+      # binding.gyp evaluates require('node-addon-api').include and dies with
+      # MODULE_NOT_FOUND on a fresh checkout. Install the binding's deps first.
+      - name: Install syncer.c TypeScript binding deps first (see comment)
+        working-directory: syncer.c/bindings/typescript
+        run: npm install
+
+      # run_all.sh hard-ABORTs if clients/ts/node_modules/fake-indexeddb is
+      # missing, and builds dist/ itself only as a fallback. Do both up front so
+      # a build error is reported as a build error.
+      - name: Build @opto-sync/client (dist/ + devDeps run_all.sh requires)
+        working-directory: opto-sync-clients/clients/ts
+        run: |
+          npm install
+          npm run build
+
+      # run_all.sh runs the Rust suite with `cargo test --offline` and
+      # `cargo run --offline`, but test/clients/rust/Cargo.lock is gitignored, so
+      # on a fresh checkout there is nothing to resolve offline FROM. Generate
+      # the lock and populate the registry while the network is still allowed.
+      - name: Pre-fetch Rust deps (run_all.sh uses --offline)
+        working-directory: opto-sync-e2e/test/clients/rust
+        run: |
+          cargo generate-lockfile
+          cargo fetch
+
+      # Same reasoning for Dart: run_all.sh tries `dart pub get --offline`
+      # first. Resolving online here makes that step a no-op.
+      - name: Pre-resolve Dart deps
+        working-directory: opto-sync-e2e/test/clients/dart
+        run: dart pub get
+
+      # --- the server the suite runs against ---------------------------------
+      - name: Install .dockerignore at the build context root
+        run: cp opto-sync-e2e/context.dockerignore .dockerignore
+
+      - name: Ensure .env exists
+        working-directory: opto-sync-e2e
+        run: '[ -f .env ] || cp .env.example .env'
+
+      # Only postgres + node: run_all.sh talks to the published port 3003 and
+      # deliberately never runs docker compose or POST /reset itself.
+      - name: Start postgres + node server
+        working-directory: opto-sync-e2e
+        run: docker compose up -d --build postgres node
+
+      - name: Wait for the node server to report a native core
+        run: |
+          for _ in $(seq 1 60); do
+            if curl -fsS --max-time 3 http://localhost:3003/health > /tmp/health.json; then
+              cat /tmp/health.json; echo
+              grep -q '"syncer":"native"' /tmp/health.json && exit 0
+              echo "server up but not native yet"
+            fi
+            sleep 2
+          done
+          echo "::error title=node server never became healthy::http://localhost:3003/health did not report {\"syncer\":\"native\"} within 120s"
+          exit 1
+
+      # --- the suite ---------------------------------------------------------
+      # OPTO_SYNC_REQUIRE_SERVER=1 turns "server unreachable" from a silent SKIP
+      # (exit 0) into a failure — without it this job could pass while testing
+      # nothing at all.
+      - name: test/clients/run_all.sh
+        working-directory: opto-sync-e2e
+        env:
+          OPTO_SYNC_REQUIRE_SERVER: '1'
+          OPTO_SYNC_SERVER_URL: http://localhost:3003
+          SYNCER_LIB_PATH: ${{ github.workspace }}/syncer.c/core/build/libsyncer.so
+        run: ./test/clients/run_all.sh
+
+      # --- diagnostics + teardown -------------------------------------------
+      - name: Collect compose logs
+        if: failure()
+        working-directory: opto-sync-e2e
+        run: |
+          docker compose logs --no-color --timestamps > compose-logs.txt 2>&1 || true
+          docker compose ps -a > compose-ps.txt 2>&1 || true
+          tail -n 200 compose-logs.txt || true
+
+      - name: Upload compose logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compose-logs-client-in-the-loop
+          path: |
+            opto-sync-e2e/compose-logs.txt
+            opto-sync-e2e/compose-ps.txt
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Which suite broke
+        if: failure()
+        run: |
+          echo "::error title=opto-sync-e2e client-in-the-loop FAILED::test/clients/run_all.sh broke (ts, dart or rust client vs the live node server) — the per-language PASS/FAIL summary is at the end of the run_all.sh step, and server logs are in the compose-logs-client-in-the-loop artifact."
+
+      # Ephemeral runner, so `down -v` is safe here (unlike locally, where the
+      # Postgres volume is shared with other suites).
+      - name: Tear down (always)
+        if: always()
+        working-directory: opto-sync-e2e
+        run: docker compose down -v --remove-orphans || true

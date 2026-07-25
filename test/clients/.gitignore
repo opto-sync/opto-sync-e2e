@@ -1,6 +1,5 @@
 # Build/dependency output for the three client-in-the-loop suites.
 rust/target/
-rust/Cargo.lock
 dart/.dart_tool/
 dart/pubspec.lock
 dart/build/

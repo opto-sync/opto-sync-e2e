@@ -82,6 +82,12 @@ services:
 
   # --- rust-mash repointed from cloud Supabase to local PostgREST ---------
   rust-mash:
+    # The base file marks rust-mash opt-in (profile `mash`) because it is inert
+    # without Supabase config. Re-declaring profiles here adds `supabasetest`,
+    # so this suite's documented invocation still brings it up.
+    profiles:
+      - mash
+      - supabasetest
     environment:
       # `environment:` wins over `env_file: .env`, so the placeholder cloud
       # values in .env are overridden here without editing that file.

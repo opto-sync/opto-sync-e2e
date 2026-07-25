@@ -1,5 +1,8 @@
 # opto-sync-e2e
 
+[![E2E (docker)](https://github.com/opto-sync/opto-sync-e2e/actions/workflows/e2e-docker.yml/badge.svg)](https://github.com/opto-sync/opto-sync-e2e/actions/workflows/e2e-docker.yml)
+[![E2E (client-in-the-loop)](https://github.com/opto-sync/opto-sync-e2e/actions/workflows/e2e-clients.yml/badge.svg)](https://github.com/opto-sync/opto-sync-e2e/actions/workflows/e2e-clients.yml)
+
 End-to-end integration tests for [`syncer.c`](../syncer.c) — the zero-deserialization
 JSONB deep-merge engine — exercised through real HTTP servers in several
 languages, each merging documents via the native C core.
@@ -111,3 +114,19 @@ here — they moved to [`../opto-sync-clients`](../opto-sync-clients). The
 `clients/` directory in this repo only holds thin e2e consumer stubs that
 path-depend on those packages (see `clients/README.md`) for future
 browser/device end-to-end runs.
+
+## CI
+
+Two workflows run on `ubuntu-latest` for every push to `main`, every pull
+request, and on demand. Both check out `syncer.c`, `opto-sync-clients` and this
+repo as siblings and install `context.dockerignore` at the build-context root,
+exactly as the Setup section above describes.
+
+- [`.github/workflows/e2e-docker.yml`](.github/workflows/e2e-docker.yml) — one
+  matrix leg per docker suite: `fulltest`, `conformance`, `crossserver`, and the
+  Supabase/PostgREST path. Each leg tears the stack down with
+  `docker compose down -v` and uploads full container logs on failure.
+- [`.github/workflows/e2e-clients.yml`](.github/workflows/e2e-clients.yml) — the
+  host-run `test/clients/run_all.sh` (ts + dart + rust clients against a live
+  `postgres` + `node` stack), with `OPTO_SYNC_REQUIRE_SERVER=1` so an
+  unreachable server fails instead of silently skipping.
