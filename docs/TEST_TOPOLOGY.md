@@ -63,9 +63,9 @@ lock that record forever. The node server still accepts
 `X-Syncer-Options: {"fwwKeys":"createdAt"}` per request in test mode, which is
 how the conformance suite keeps covering the engine feature.
 
-Verified per server: `servers/node/src/index.ts:144-150`,
-`servers/rust-fullstack/src/main.rs:95-107`, `servers/rust/src/main.rs:160-176`,
-`servers/dart/bin/server.dart:92-96`, `servers/sagitta/bin/server.dart:156-160`.
+Verified per server: `servers/node/src/index.ts:159-164`,
+`servers/rust-fullstack/src/main.rs:101-113`, `servers/rust/src/main.rs:174-197`,
+`servers/dart/bin/server.dart:89-103`, `servers/sagitta/bin/server.dart:161-175`.
 
 | Service | Port | Stack | Storage | Compose profile |
 |---|---|---|---|---|
