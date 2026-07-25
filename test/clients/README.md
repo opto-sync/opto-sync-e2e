@@ -104,7 +104,8 @@ which is the load-bearing part:
   object is dropped rather than partially applied.
 * `items.shared` is contested by all three; only `dart`'s write is fresh enough,
   and it deep-merges onto the base element so the original `createdAt` survives.
-* `createdAt` at the root is First-Write-Wins and survives every client.
+* `createdAt` at the root survives every client because no payload sends one —
+  it is an ordinary field, not a guarded key.
 
 ## Fixtures
 
