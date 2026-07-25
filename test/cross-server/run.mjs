@@ -299,6 +299,38 @@ async function main() {
     });
   }
 
+  // ── Phase 1b: numeric int64 fidelity per runtime ────────────────────────
+  // Sent as raw text so this process cannot be the thing that rounds it.
+  for (const server of live) {
+    const body = `{"xnum":{"nanoNum":${NANO},"nanoStr":"${NANO}"}}`;
+    await syncRaw(server, body);
+    const doc = await getDoc(server);
+    const sub = doc.data?.xnum ?? {};
+
+    check(`phase1b: ${server.name} digit-string int64 exact`, () => {
+      assert.equal(String(sub.nanoStr), NANO);
+    });
+
+    if (server.int64Exact) {
+      check(`phase1b: ${server.name} numeric int64 exact`, () => {
+        assert.equal(String(sub.nanoNum), NANO);
+      });
+    } else {
+      check(`phase1b: ${server.name} numeric int64 rounds to double (documented)`, () => {
+        assert.equal(
+          String(sub.nanoNum),
+          NANO_AS_DOUBLE,
+          `expected the documented IEEE-754 rounding for a JS-runtime server; ` +
+            `if this server became exact, flip int64Exact to true`
+        );
+      });
+      console.log(
+        `   ℹ️  ${server.name}: numeric int64 rounded ${NANO} -> ${NANO_AS_DOUBLE} ` +
+          `(host JSON layer uses doubles; use digit strings for ns precision)`
+      );
+    }
+  }
+
   // ── Phase 2: order independence for non-contending mutations ────────────
   const perms = permutations([0, 1, 2]);
   const permResults = [];
