@@ -57,27 +57,23 @@ async function flush() {
   const payload = FX.payloads[LANG];
   if (!payload) throw new Error(`fixture has no payload for "${LANG}"`);
 
-  const client = new OptoSyncClient({ databaseName: `opto-e2e-converge-${LANG}` });
-  try {
-    await client.db.delete();
-  } catch {
-    /* first run */
-  }
-  const fresh = new OptoSyncClient({ databaseName: `opto-e2e-converge-${LANG}` });
+  // fake-indexeddb is per-process, but name the DB uniquely anyway so a rerun
+  // can never observe a previous run's queue.
+  const client = new OptoSyncClient({ databaseName: `opto-e2e-converge-${LANG}-${Date.now()}` });
 
-  const mid = await fresh.queueMutation('docs', FX.docId, payload);
-  check((await fresh.pendingMutations()).length === 1, 'payload queued as pending');
+  const mid = await client.queueMutation('docs', FX.docId, payload);
+  check((await client.pendingMutations()).length === 1, 'payload queued as pending');
 
-  const [queued] = await fresh.pendingMutations();
+  const [queued] = await client.pendingMutations();
   const res = await syncDoc(FX.docId, JSON.parse(queued.jsonPayload));
-  await fresh.markMutation(mid, res.ok ? SYNC_STATUS.SYNCED : SYNC_STATUS.FAILED);
+  await client.markMutation(mid, res.ok ? SYNC_STATUS.SYNCED : SYNC_STATUS.FAILED);
   check(res.status === 200, `flushed to ${FX.docId} (HTTP ${res.status})`);
   check(res.json?.mergedWith === 'native-c-ffi', 'server merged with the native C core');
 
-  const counts = await statusCounts(fresh);
+  const counts = await statusCounts(client);
   check(counts.synced === 1 && counts.pending === 0 && counts.failed === 0,
     `queue drained (${JSON.stringify(counts)})`);
-  await fresh.db.delete();
+  await client.db.delete();
 }
 
 async function verify() {
