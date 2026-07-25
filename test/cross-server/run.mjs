@@ -19,6 +19,9 @@ import assert from "node:assert/strict";
 
 const HOST_MODE = process.env.HOST_MODE === "1";
 
+/** Comma-separated server names to exclude, e.g. SKIP_SERVERS=node. */
+const SKIP = new Set((process.env.SKIP_SERVERS ?? "").split(",").filter(Boolean));
+
 const SERVERS = [
   { name: "node",           url: HOST_MODE ? "http://localhost:3003" : "http://node:3003",           doc: "doc-1" },
   { name: "rust-fullstack", url: HOST_MODE ? "http://localhost:3002" : "http://rust-fullstack:3002", doc: "doc-a" },
