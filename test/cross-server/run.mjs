@@ -156,12 +156,14 @@ function sequentialPayloads(ns) {
         rows: [{ id: "a", createdAt: 99999, updatedAt: 99999, label: "IMPOSTOR" }],
       },
     },
-    // 4. Scalar arrays union under MERGE_BY_KEY; int64 nanosecond stamps and
-    //    unicode must survive every runtime's JSON layer intact.
+    // 4. Scalar arrays union under MERGE_BY_KEY; unicode and digit-string
+    //    timestamps must survive every runtime's JSON layer intact. (Numeric
+    //    int64 is probed separately — see phase 1b — because not every host
+    //    runtime can represent it.)
     {
       [ns]: {
         tags: ["y", "z"],
-        nano: 1689940800123456789,
+        nanoStr: NANO,
         "日本": { "ключ2": "ok" },
       },
     },
