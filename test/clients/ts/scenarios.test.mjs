@@ -9,7 +9,7 @@
  * and its reconcile output are what is under test.
  */
 import '../../../../opto-sync-clients/clients/ts/node_modules/fake-indexeddb/auto/index.mjs';
-import test, { after, before } from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
