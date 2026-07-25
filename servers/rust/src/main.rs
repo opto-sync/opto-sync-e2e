@@ -175,7 +175,14 @@ fn merge_with_policy(base: &str, incoming: &str) -> Option<String> {
     let c_base = std::ffi::CString::new(base).ok()?;
     let c_incoming = std::ffi::CString::new(incoming).ok()?;
     let lww = std::ffi::CString::new(MERGE_LWW_KEYS).ok()?;
-    let fww = std::ffi::CString::new(MERGE_FWW_KEYS).ok()?;
+    // `None` must become a genuine NULL pointer, not a dangling one: the core
+    // reads `opts->fww_keys` only when non-NULL, and a pointer into a dropped
+    // CString would be undefined behaviour. Binding the Option keeps the
+    // CString alive for the whole call when there IS one.
+    let fww = match MERGE_FWW_KEYS {
+        Some(keys) => Some(std::ffi::CString::new(keys).ok()?),
+        None => None,
+    };
     let match_keys = std::ffi::CString::new(MERGE_ARRAY_MATCH_KEYS).ok()?;
 
     let c_opts = syncer_rs::SyncerMergeOptionsC {
@@ -185,7 +192,7 @@ fn merge_with_policy(base: &str, incoming: &str) -> Option<String> {
         detect_circular_refs: false,
         resolve_by_timestamp: true,
         lww_keys: lww.as_ptr(),
-        fww_keys: fww.as_ptr(),
+        fww_keys: fww.as_ref().map_or(std::ptr::null(), |s| s.as_ptr()),
         array_match_keys: match_keys.as_ptr(),
     };
 
