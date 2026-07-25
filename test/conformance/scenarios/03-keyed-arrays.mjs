@@ -8,10 +8,10 @@
  *   ]
  *
  * Server policy: arrayStrategy=MERGE_BY_KEY, arrayMatchKeys="id",
- * resolveByTimestamp=true, lwwKeys="updatedAt,syncedAt", fwwKeys="createdAt".
+ * resolveByTimestamp=true, lwwKeys="updatedAt,syncedAt", and NO fwwKeys.
  *
- * Two properties of the core that these cases pin down and that are easy to get
- * wrong when reading the output:
+ * Three properties of the core that these cases pin down and that are easy to
+ * get wrong when reading the output:
  *
  *  1. A timestamp rejection is ALL-OR-NOTHING for the matched element. The core
  *     does not descend and does not even copy incoming-only keys. So a stale
@@ -20,7 +20,12 @@
  *
  *  2. lwwKeys is an OR-of-rejections, not a precedence list. If ANY lww key says
  *     the base is newer, the whole element is rejected — even if another lww key
- *     says the incoming is newer.
+ *     says the incoming is newer. The same holds ACROSS the lww and fww lists:
+ *     either list can veto on its own.
+ *
+ *  3. Consequently `fwwKeys` is not field protection, it is a node-level VETO —
+ *     which is why `createdAt` is NOT in the default policy. The FWW cases below
+ *     therefore ask for it explicitly via X-Syncer-Options.
  */
 
 const itemById = (items, id) =>
