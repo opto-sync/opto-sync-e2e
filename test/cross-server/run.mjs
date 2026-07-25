@@ -111,11 +111,15 @@ async function sync(server, payload) {
   return syncRaw(server, JSON.stringify(payload));
 }
 
-async function getDoc(server) {
+async function getDocText(server) {
   const res = await fetch(`${server.url}/doc/${server.doc}`, { signal: AbortSignal.timeout(20000) });
   const text = await res.text();
   if (!res.ok) throw new Error(`${server.name} get ${res.status}: ${text.slice(0, 300)}`);
-  return JSON.parse(text);
+  return text;
+}
+
+async function getDoc(server) {
+  return JSON.parse(await getDocText(server));
 }
 
 /**
