@@ -290,9 +290,9 @@ async function main() {
       assert.equal(sub["ключ"], "unicode-value");
       assert.equal(sub["日本"]["ключ2"], "ok");
     });
-    check(`phase1: ${server.name} preserved int64 nanosecond stamp`, () => {
+    check(`phase1: ${server.name} preserved digit-string nanosecond stamp`, () => {
       // Compared as text: a float round-trip would corrupt the low digits.
-      assert.equal(String(sub.nano), "1689940800123456789");
+      assert.equal(String(sub.nanoStr), NANO);
     });
     check(`phase1: ${server.name} exactly 3 keyed rows (no duplicates)`, () => {
       assert.equal(sub.rows.length, 3);
