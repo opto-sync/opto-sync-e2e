@@ -92,16 +92,23 @@ async function waitForServer(server, timeoutMs = 60000) {
   throw new Error(`${server.name} at ${server.url} never became healthy: ${lastErr}`);
 }
 
-async function sync(server, payload) {
+/** Send a body verbatim. Required for integers past 2^53: routing them
+ *  through JSON.stringify would round them in THIS process, before any
+ *  server could be blamed. */
+async function syncRaw(server, bodyText) {
   const res = await fetch(`${server.url}/doc/${server.doc}/sync`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+    body: bodyText,
     signal: AbortSignal.timeout(20000),
   });
   const text = await res.text();
   if (!res.ok) throw new Error(`${server.name} sync ${res.status}: ${text.slice(0, 300)}`);
   return JSON.parse(text);
+}
+
+async function sync(server, payload) {
+  return syncRaw(server, JSON.stringify(payload));
 }
 
 async function getDoc(server) {
