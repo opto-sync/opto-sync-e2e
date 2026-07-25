@@ -1,0 +1,11 @@
+# Build context for opto-sync-e2e docker images is this parent directory,
+# so this file (not opto-sync-e2e/.dockerignore) governs what images see.
+**/node_modules/
+**/target/
+**/.dart_tool/
+**/build/
+**/dist/
+**/.git/
+**/*.log
+**/.env
+**/*.dSYM/

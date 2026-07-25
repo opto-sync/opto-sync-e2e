@@ -4,6 +4,19 @@ End-to-end integration tests for [`syncer.c`](../syncer.c) — the zero-deserial
 JSONB deep-merge engine — exercised through real HTTP servers in several
 languages, each merging documents via the native C core.
 
+## Setup
+
+The docker build context is the **parent** directory (so images can copy
+`syncer.c/`). Docker only honors a `.dockerignore` at the context root, so
+copy the tracked template there once per clone:
+
+```sh
+cp context.dockerignore ../.dockerignore
+```
+
+Without it, host `node_modules/`, `target/`, and `build/` trees leak into the
+build context (slow) and can shadow in-image dependency installs.
+
 ## Servers
 
 | Service          | Port | Stack                                                                  | Storage             |
