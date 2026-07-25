@@ -17,8 +17,13 @@ WORKDIR /build/app
 # Fix binding.gyp: ../../core -> ../syncer-core (relative from /build/syncer-ts/)
 RUN sed -i 's|../../core|../syncer-core|g' /build/syncer-ts/binding.gyp
 
-# Fix the package.json dependency path to point to our copied syncer-ts
-RUN sed -i 's|file:../../../syncer.c/bindings/typescript|file:../syncer-ts|g' package.json
+# Fix the package.json dependency path to point to our copied syncer-ts.
+# The lockfile still references the original path after this rewrite, which
+# crashes npm's virtual-tree loader ("reading 'extraneous'") — drop it and
+# resolve fresh inside the image; also drop any node_modules copied from the
+# host (symlinked file: deps would be dangling here).
+RUN sed -i 's|file:../../../syncer.c/bindings/typescript|file:../syncer-ts|g' package.json \
+    && rm -rf package-lock.json node_modules
 
 # Install node-gyp globally and install dependencies (with native addon build)
 RUN npm install -g node-gyp
