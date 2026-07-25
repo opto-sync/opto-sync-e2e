@@ -140,7 +140,7 @@ and `/reset`s the server between them. Positional args select groups by number
 |---|---|---|
 | 1 | `01-health.mjs` | The native C core is live, not the JS fallback; `coreVersion` ≥ 0.2.0; `defaultOptions` is the documented policy; `/reset` restores four seed docs |
 | 2 | `02-deep-merge.mjs` | Recursive object merge, sibling preservation at every level, type-change replacement, `null` as a value, empty-object/array no-ops |
-| 3 | `03-keyed-arrays.mjs` | `MERGE_BY_KEY`: all-or-nothing element rejection, `lwwKeys` as an OR-of-rejections, `createdAt` FWW both directions, `42`/`"42"` identity normalization, nested keyed arrays, keyless UNION fallback |
+| 3 | `03-keyed-arrays.mjs` | `MERGE_BY_KEY`: all-or-nothing element rejection, `lwwKeys` as an OR-of-rejections, the default policy accepting a later `createdAt` (no FWW veto), explicit `fwwKeys` vetoing in both directions via `X-Syncer-Options`, `42`/`"42"` identity normalization, nested keyed arrays, keyless UNION fallback |
 | 4 | `04-jsonb-fidelity.mjs` | jsonb reorders keys but preserves semantics; `MAX_SAFE_INTEGER` exact; int64 rounding recorded as a `limitation()`; digit-string nanoseconds exact and LWW-correct; unicode; 40-level nesting; 2000-element arrays |
 | 5 | `05-idempotency.mjs` | Replaying a payload is idempotent in value while `version` advances; stale replays stay inert |
 | 6 | `06-convergence.mjs` | All 4! = 24 apply orders of four mutations converge to one document; parallel application matches the sequential outcome; and the documented boundary — a root-level `lww` key gates the whole document, making it order-*dependent* by design |
