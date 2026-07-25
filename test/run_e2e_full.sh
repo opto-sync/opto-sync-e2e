@@ -104,14 +104,36 @@ test_server() {
     check_absent "$NAME: keyed-array rejected stale element"   "$ROWS" 'STALE'
     check        "$NAME: keyed-array appended new element"     "$ROWS" '"three"'
 
-    # First-Write-Wins: an element claiming a LATER createdAt for an existing
-    # identity must not overwrite the original.
+    # createdAt is NOT a first-write-wins key in the default policy.
+    #
+    # It used to be, and that made FWW a node-level VETO rather than protection
+    # of one field: the core drops the ENTIRE incoming element when its FWW key
+    # is newer, however new its updatedAt is. Any replica that ended up holding a
+    # later createdAt for a record could then never write to that record again.
+    # So a payload carrying a later createdAt AND a newer updatedAt must now be
+    # APPLIED — element 1 goes from "one" to "NEWEST".
     curl -s --max-time 10 -X POST "$URL/doc/$DOC/sync" \
         -H "Content-Type: application/json" \
-        -d '{"rows": [{"id": 1, "createdAt": 5000, "updatedAt": 5000, "v": "IMPOSTOR"}]}' \
+        -d '{"rows": [{"id": 1, "createdAt": 5000, "updatedAt": 5000, "v": "NEWEST"}]}' \
         >/dev/null 2>&1 || true
-    FWW=$(curl -s --max-time 10 "$URL/doc/$DOC" 2>/dev/null || echo "FAIL")
-    check_absent "$NAME: createdAt FWW rejected re-creation" "$FWW" 'IMPOSTOR'
+    NO_FWW=$(curl -s --max-time 10 "$URL/doc/$DOC" 2>/dev/null || echo "FAIL")
+    echo "No-FWW default: $NO_FWW"
+    check        "$NAME: later createdAt no longer vetoes a newer write" "$NO_FWW" '"NEWEST"'
+    check_absent "$NAME: the superseded value is gone"                   "$NO_FWW" '"v":"one"'
+
+    # The engine feature itself is still exercised, on the one server that lets a
+    # request name its own policy (node, in test mode). Everywhere else the
+    # server owns the policy and there is nothing to opt into.
+    if echo "$HEALTH" | grep -q '"testMode":true'; then
+        curl -s --max-time 10 -X POST "$URL/doc/$DOC/sync" \
+            -H "Content-Type: application/json" \
+            -H 'X-Syncer-Options: {"fwwKeys":"createdAt"}' \
+            -d '{"rows": [{"id": 1, "createdAt": 9000, "updatedAt": 9000, "v": "VETOED"}]}' \
+            >/dev/null 2>&1 || true
+        FWW=$(curl -s --max-time 10 "$URL/doc/$DOC" 2>/dev/null || echo "FAIL")
+        echo "Explicit FWW: $FWW"
+        check_absent "$NAME: explicit fwwKeys still rejects a later createdAt" "$FWW" 'VETOED'
+    fi
 
     echo "--- $NAME done ---"
 }

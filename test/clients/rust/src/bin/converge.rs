@@ -110,9 +110,12 @@ fn verify(p: &mut Phase) {
         revision.get("priority").and_then(Value::as_u64) == Some(2),
         "rust's stale revision was rejected WHOLESALE",
     );
+    // Base-only root scalar: no client payload sends a root `createdAt`, so
+    // nothing can overwrite it. (`createdAt` is no longer a guarded key on any
+    // tier — FWW is a node-level veto and is opt-in.)
     p.check(
         server_final.get("createdAt").and_then(Value::as_u64) == Some(1000),
-        "createdAt (FWW) survived every client",
+        "base-only root createdAt untouched by every client",
     );
     p.check(items.len() == 5, "exactly three new identities appended");
 

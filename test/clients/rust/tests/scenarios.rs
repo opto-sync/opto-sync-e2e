@@ -44,14 +44,17 @@ fn reconcile_via(client: &OptoSyncClient<InMemoryStore>, local: &Value, incoming
 
 #[test]
 fn defaults_match_the_server_policy() {
-    // The Rust client is correct by default, unlike @opto-sync/client whose
-    // DEFAULT_RECONCILE_OPTIONS omits arrayStrategy and so falls back to
-    // REPLACE. Asserted because every other test here relies on it.
+    // The same policy the TypeScript and Dart clients and every opto-sync
+    // server use. Asserted because every other test here relies on it.
     let opts = ReconcileOptions::default();
     assert_eq!(opts.array_match_keys, "id");
     assert!(opts.resolve_by_timestamp);
     assert_eq!(opts.lww_keys, "updatedAt,syncedAt");
-    assert_eq!(opts.fww_keys, "createdAt");
+    // No FWW key. FWW in the core is a node-level VETO — an incoming node whose
+    // FWW key is newer is dropped WHOLESALE, however new its updatedAt is — so a
+    // default `createdAt` let a replica holding a later createdAt lock a record
+    // forever. Callers opt in per reconcile instead.
+    assert_eq!(opts.fww_keys, "");
     assert_eq!(opts.max_depth, 0);
     // ArrayStrategy has no Debug-stable discriminant to compare against, so
     // assert the OBSERVABLE consequence instead: a keyed array is merged by

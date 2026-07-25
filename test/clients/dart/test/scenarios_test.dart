@@ -58,16 +58,19 @@ Future<void> main() async {
     });
 
     test('0. the Dart client defaults to the SERVER\'s merge policy', () {
-      // The Dart client is correct by default, unlike @opto-sync/client whose
-      // DEFAULT_RECONCILE_OPTIONS omits arrayStrategy and so falls back to
-      // REPLACE. This asserts the default, because every other test here relies
-      // on it (no options are passed anywhere).
+      // This asserts the default, because every other test here relies on it
+      // (no options are passed anywhere). It is the same policy the TypeScript
+      // and Rust clients and every opto-sync server use.
       final s = newSyncer();
       expect(s.arrayStrategy, ArrayMergeStrategy.mergeByKey);
       expect(s.arrayMatchKeys, 'id');
       expect(s.resolveByTimestamp, isTrue);
       expect(s.lwwKeys, 'updatedAt,syncedAt');
-      expect(s.fwwKeys, 'createdAt');
+      // No FWW key. FWW in the core is a node-level VETO — an incoming node
+      // whose FWW key is newer is dropped WHOLESALE, however new its updatedAt
+      // is — so a default `createdAt` let a replica holding a later createdAt
+      // lock a record forever. Callers opt in per merge instead.
+      expect(s.fwwKeys, anyOf(isNull, isEmpty));
       expect(s.nativeVersion, matches(RegExp(r'^\d+\.\d+\.\d+$')));
     });
 

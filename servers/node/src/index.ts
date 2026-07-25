@@ -140,13 +140,27 @@ if (!mergeJson && REQUIRE_NATIVE) {
   process.exit(1);
 }
 
-/** Server-owned default merge policy. */
+/**
+ * Server-owned default merge policy.
+ *
+ * No `fwwKeys`, deliberately. First-write-wins in the C core is a NODE-LEVEL
+ * VETO: should_reject_by_crdt_rules drops the ENTIRE incoming node when its FWW
+ * key is newer than the base's, regardless of how new its `updatedAt` is.
+ *
+ *   base     {"doc":{"createdAt":100,"updatedAt":100,"v":"base"}}
+ *   incoming {"doc":{"createdAt":200,"updatedAt":999999,"v":"NEWEST WRITE"}}
+ *   result   {"doc":{"createdAt":100,"updatedAt":100,"v":"base"}}
+ *
+ * With `createdAt` in this policy, any replica that ended up holding a later
+ * `createdAt` for a record could never write to that record again — silently,
+ * behind a 200 OK. Clients that genuinely want the veto ask for it explicitly
+ * (in test mode, via `X-Syncer-Options: {"fwwKeys":"createdAt"}`).
+ */
 const DEFAULT_MERGE_OPTIONS = {
   arrayStrategy: ArrayStrategy.MERGE_BY_KEY,
   arrayMatchKeys: "id",
   resolveByTimestamp: true,
   lwwKeys: "updatedAt,syncedAt",
-  fwwKeys: "createdAt",
 };
 
 const POLLUTING_KEYS = new Set(["__proto__", "constructor", "prototype"]);

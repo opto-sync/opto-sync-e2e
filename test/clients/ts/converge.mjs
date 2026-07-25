@@ -92,7 +92,10 @@ async function verify() {
   check(serverFinal.revision.owner === 'dart' && serverFinal.revision.updatedAt === 4000,
     'guarded object follows updatedAt, NOT flush order: rust flushed last but is stale');
   check(serverFinal.revision.priority === 2, "rust's stale revision was rejected WHOLESALE");
-  check(serverFinal.createdAt === 1000, 'createdAt (FWW) survived every client');
+  // Base-only root scalar: no client payload sends a root `createdAt`, so
+  // nothing can overwrite it. (This used to be attributed to FWW; `createdAt` is
+  // no longer a guarded key on any tier — see SERVER_POLICY.)
+  check(serverFinal.createdAt === 1000, 'base-only root createdAt untouched by every client');
   check(serverFinal.items.length === 5, 'exactly three new identities appended');
   const shared = serverFinal.items.find((i) => i.id === 'shared');
   check(shared.label === 'dart-shared' && shared.qty === 20 && shared.createdAt === 1000,

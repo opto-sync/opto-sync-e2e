@@ -188,7 +188,14 @@ async function main() {
   ok(pol.arrayMatchKeys === "id", "arrayMatchKeys is 'id'", String(pol.arrayMatchKeys));
   ok(pol.resolveByTimestamp === true, "resolveByTimestamp enabled");
   ok(pol.lwwKeys === "updatedAt,syncedAt", "lwwKeys are updatedAt,syncedAt", String(pol.lwwKeys));
-  ok(pol.fwwKeys === "createdAt", "fwwKeys is createdAt", String(pol.fwwKeys));
+  // No FWW key, deliberately: FWW in the core is a node-level VETO, so any
+  // default FWW key lets a replica holding a newer value for it lock a record
+  // permanently. See the "createdAt is not first-write-wins" section below.
+  ok(
+    pol.fwwKeys === null || pol.fwwKeys === undefined,
+    "fwwKeys is unset (no key may veto a write for being NEWER)",
+    JSON.stringify(pol.fwwKeys)
+  );
 
   // ══ 2. The REST layer is real, and its auth is really enforced ═════════
   section("REST layer");
@@ -307,31 +314,43 @@ async function main() {
     ok(row.data.items.length === 3, "stale sync did not duplicate elements", `len ${row.data.items.length}`);
   }
 
-  section("createdAt first-write-wins");
+  section("createdAt is NOT first-write-wins (no FWW key in the default policy)");
   const docF = id("fww");
   await createDoc(docF, {
     items: [{ id: "a", createdAt: 1000, updatedAt: 2000, label: "orig", qty: 1 }],
   });
-  // updatedAt is NEWER (so LWW would accept) but createdAt is newer too — FWW
-  // must reject the element wholesale. Without FWW the label would change.
+  // updatedAt is NEWER, and createdAt is newer too. `createdAt` used to be an FWW
+  // key, and FWW in the core is a NODE-LEVEL VETO: the element was dropped
+  // WHOLESALE — the newer updatedAt bought it nothing. Any replica that ended up
+  // holding a later createdAt for a record could then never write to that record
+  // again, silently, behind a 200. So this write must now be APPLIED.
   const f1 = await sync(docF, {
     items: [{ id: "a", createdAt: 9999, updatedAt: 5000, label: "rewritten", qty: 42 }],
   });
   const f1a = (f1.json?.document?.data?.items || [])[0];
-  ok(f1a?.label === "orig", "element with newer createdAt rejected wholesale", JSON.stringify(f1a));
-  ok(f1a?.createdAt === 1000, "original createdAt preserved", String(f1a?.createdAt));
-  ok(f1a?.qty === 1, "FWW rejection also blocks the sibling fields in that element");
+  ok(f1a?.label === "rewritten", "a newer write is not vetoed by its createdAt", JSON.stringify(f1a));
+  ok(f1a?.createdAt === 9999, "createdAt is an ordinary field now", String(f1a?.createdAt));
+  ok(f1a?.qty === 42, "the whole incoming element landed");
   {
     const { row } = await restRow(docF);
-    eq(row.data.items[0], f1a, "FWW rejection persisted through the REST layer");
+    eq(row.data.items[0], f1a, "the accepted merge persisted through the REST layer");
   }
-  // Symmetric case: an OLDER createdAt is the earlier write, so it wins.
+  // ...and the element is still writable afterwards — the property that a
+  // node-level FWW veto silently destroys.
   const f2 = await sync(docF, {
     items: [{ id: "a", createdAt: 500, updatedAt: 6000, qty: 7 }],
   });
   const f2a = (f2.json?.document?.data?.items || [])[0];
-  ok(f2a?.createdAt === 500, "older createdAt accepted (first write wins)", String(f2a?.createdAt));
+  ok(f2a?.updatedAt === 6000, "element remains writable (LWW alone decides)", String(f2a?.updatedAt));
+  ok(f2a?.createdAt === 500, "createdAt follows the write like any other field", String(f2a?.createdAt));
   ok(f2a?.qty === 7, "accepted element's other fields merged");
+  // Genuinely stale writes are still rejected — LWW is untouched by this change.
+  const f3 = await sync(docF, {
+    items: [{ id: "a", createdAt: 1, updatedAt: 10, label: "STALE" }],
+  });
+  const f3a = (f3.json?.document?.data?.items || [])[0];
+  ok(f3a?.updatedAt === 6000, "stale updatedAt still rejected wholesale", String(f3a?.updatedAt));
+  ok(f3a?.label !== "STALE", "stale element contributes nothing");
 
   section("document-level LWW");
   const docL = id("root");

@@ -346,7 +346,9 @@ impl Routes {
         doc_id: &str,
         payload: &Value,
     ) -> u64 {
-        let id = client.queue_mutation(payload.to_string());
+        let id = client
+            .queue_mutation(payload.to_string())
+            .expect("queue_mutation must accept a well-formed JSON payload");
         self.0.insert(id, doc_id.to_string());
         id
     }

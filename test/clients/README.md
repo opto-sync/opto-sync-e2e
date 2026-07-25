@@ -104,7 +104,8 @@ which is the load-bearing part:
   object is dropped rather than partially applied.
 * `items.shared` is contested by all three; only `dart`'s write is fresh enough,
   and it deep-merges onto the base element so the original `createdAt` survives.
-* `createdAt` at the root is First-Write-Wins and survives every client.
+* `createdAt` at the root survives every client because no payload sends one —
+  it is an ordinary field, not a guarded key.
 
 ## Fixtures
 
@@ -119,9 +120,15 @@ The policy, shared by the server and all three clients:
 
 ```
 arrayStrategy      = MERGE_BY_KEY (4)      lwwKeys = "updatedAt,syncedAt"
-arrayMatchKeys     = "id"                  fwwKeys = "createdAt"
+arrayMatchKeys     = "id"                  fwwKeys = (unset)
 resolveByTimestamp = true
 ```
+
+There is deliberately **no FWW key**. FWW in the core is a *node-level veto*: an
+incoming node whose FWW key is newer is rejected **wholesale**, however new its
+`updatedAt` is. With `createdAt` in this policy, a replica that ended up holding
+a later `createdAt` for a record could never write to that record again —
+silently, behind a 200. Callers opt into `fwwKeys` per merge instead.
 
 Three properties of the core that the fixtures lean on:
 

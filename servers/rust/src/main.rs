@@ -37,13 +37,26 @@ use tower_http::cors::CorsLayer;
 //
 // Clients cannot dictate conflict resolution. This mirrors the node server's
 // DEFAULT_MERGE_OPTIONS so the Supabase path exercises the same semantics as
-// the Postgres path: keyed-array reconciliation by `id`, last-write-wins on
-// updatedAt/syncedAt, first-write-wins on createdAt.
+// the Postgres path: keyed-array reconciliation by `id` and last-write-wins on
+// updatedAt/syncedAt.
+//
+// There is NO first-write-wins key, deliberately. FWW in the C core is a
+// NODE-LEVEL VETO: `should_reject_by_crdt_rules` drops the ENTIRE incoming node
+// when its FWW key is newer than the base's, regardless of how new its
+// `updatedAt` is.
+//
+//   base     {"doc":{"createdAt":100,"updatedAt":100,"v":"base"}}
+//   incoming {"doc":{"createdAt":200,"updatedAt":999999,"v":"NEWEST WRITE"}}
+//   result   {"doc":{"createdAt":100,"updatedAt":100,"v":"base"}}
+//
+// With `createdAt` in the policy, any replica that ended up holding a later
+// `createdAt` for a record could never write to that record again — silently,
+// behind a 200 OK.
 const MERGE_ARRAY_STRATEGY: syncer_rs::ArrayMergeStrategy =
     syncer_rs::ArrayMergeStrategy::MergeByKey;
 const MERGE_ARRAY_MATCH_KEYS: &str = "id";
 const MERGE_LWW_KEYS: &str = "updatedAt,syncedAt";
-const MERGE_FWW_KEYS: &str = "createdAt";
+const MERGE_FWW_KEYS: Option<&str> = None;
 
 #[derive(Clone)]
 struct AppState {
@@ -162,7 +175,14 @@ fn merge_with_policy(base: &str, incoming: &str) -> Option<String> {
     let c_base = std::ffi::CString::new(base).ok()?;
     let c_incoming = std::ffi::CString::new(incoming).ok()?;
     let lww = std::ffi::CString::new(MERGE_LWW_KEYS).ok()?;
-    let fww = std::ffi::CString::new(MERGE_FWW_KEYS).ok()?;
+    // `None` must become a genuine NULL pointer, not a dangling one: the core
+    // reads `opts->fww_keys` only when non-NULL, and a pointer into a dropped
+    // CString would be undefined behaviour. Binding the Option keeps the
+    // CString alive for the whole call when there IS one.
+    let fww = match MERGE_FWW_KEYS {
+        Some(keys) => Some(std::ffi::CString::new(keys).ok()?),
+        None => None,
+    };
     let match_keys = std::ffi::CString::new(MERGE_ARRAY_MATCH_KEYS).ok()?;
 
     let c_opts = syncer_rs::SyncerMergeOptionsC {
@@ -172,7 +192,7 @@ fn merge_with_policy(base: &str, incoming: &str) -> Option<String> {
         detect_circular_refs: false,
         resolve_by_timestamp: true,
         lww_keys: lww.as_ptr(),
-        fww_keys: fww.as_ptr(),
+        fww_keys: fww.as_ref().map_or(std::ptr::null(), |s| s.as_ptr()),
         array_match_keys: match_keys.as_ptr(),
     };
 
@@ -213,6 +233,7 @@ async fn health(State(state): State<Arc<AppState>>) -> Json<Value> {
             "arrayMatchKeys": MERGE_ARRAY_MATCH_KEYS,
             "resolveByTimestamp": true,
             "lwwKeys": MERGE_LWW_KEYS,
+            // null — no FWW key; see the note on MERGE_FWW_KEYS.
             "fwwKeys": MERGE_FWW_KEYS,
         }
     }))

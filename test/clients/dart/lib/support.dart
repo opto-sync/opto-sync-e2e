@@ -110,10 +110,11 @@ List<dynamic> arr(Map<String, dynamic> parent, String key) =>
 /* ------------------------------------------------------------------ */
 
 /// The Dart client's FfiSyncer already defaults to the server's policy
-/// (mergeByKey on 'id', resolveByTimestamp, lww updatedAt/syncedAt, fww
-/// createdAt), so the defaults are used deliberately and unmodified — that IS
-/// the assertion. Contrast @opto-sync/client, whose defaults omit
-/// arrayStrategy and therefore fall back to REPLACE.
+/// (mergeByKey on 'id', resolveByTimestamp, lww updatedAt/syncedAt, and NO fww
+/// key), so the defaults are used deliberately and unmodified — that IS the
+/// assertion. `createdAt` is deliberately not an FWW key on any tier: FWW is a
+/// node-level veto, so it would let a replica holding a later createdAt lock a
+/// record permanently.
 FfiSyncer newSyncer() => FfiSyncer(libraryPath: locateCoreLibrary());
 
 /// A client over a private in-memory queue.

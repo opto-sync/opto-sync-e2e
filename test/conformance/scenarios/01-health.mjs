@@ -57,6 +57,9 @@ export default {
       async fn(t, c) {
         const h = (await c.health()).body ?? {};
         t.eq(h.testMode, true, "testMode is true (enables /reset + X-Syncer-Options)");
+        // No fwwKeys, deliberately: FWW in the core is a node-level VETO, so a
+        // default FWW key would let a stale replica permanently lock a record
+        // (see scenario 3). It stays available per request via X-Syncer-Options.
         t.deepEq(
           h.defaultOptions,
           {
@@ -64,9 +67,8 @@ export default {
             arrayMatchKeys: "id",
             resolveByTimestamp: true,
             lwwKeys: "updatedAt,syncedAt",
-            fwwKeys: "createdAt",
           },
-          "server-owned default policy is MERGE_BY_KEY/id + LWW(updatedAt,syncedAt) + FWW(createdAt)"
+          "server-owned default policy is MERGE_BY_KEY/id + LWW(updatedAt,syncedAt) + NO FWW key"
         );
       },
     },

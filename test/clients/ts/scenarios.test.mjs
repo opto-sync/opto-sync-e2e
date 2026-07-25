@@ -102,7 +102,9 @@ test('0. client defaults match the server policy on every tier', async () => {
   assert.equal(DEFAULT_RECONCILE_OPTIONS.arrayMatchKeys, 'id');
   assert.equal(DEFAULT_RECONCILE_OPTIONS.resolveByTimestamp, true);
   assert.equal(DEFAULT_RECONCILE_OPTIONS.lwwKeys, 'updatedAt,syncedAt');
-  assert.equal(DEFAULT_RECONCILE_OPTIONS.fwwKeys, 'createdAt');
+  // No FWW key on any tier: FWW is a node-level veto, so a default FWW key
+  // lets a replica holding a later `createdAt` lock a record forever.
+  assert.equal(DEFAULT_RECONCILE_OPTIONS.fwwKeys, undefined);
 
   // Explicit SERVER_POLICY and the client's own defaults must be equivalent:
   // local-only rows survive and a stale incoming element is rejected.

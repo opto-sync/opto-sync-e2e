@@ -53,13 +53,19 @@ expectations uniform across runtimes:
 
 ```
 arrayStrategy      = MERGE_BY_KEY (4)      lwwKeys = "updatedAt,syncedAt"
-arrayMatchKeys     = "id"                  fwwKeys = "createdAt"
+arrayMatchKeys     = "id"                  fwwKeys = (unset)
 resolveByTimestamp = true
 ```
 
-Verified per server: `servers/node/src/index.ts:144-150`,
-`servers/rust-fullstack/src/main.rs:95-107`, `servers/rust/src/main.rs:160-176`,
-`servers/dart/bin/server.dart:92-96`, `servers/sagitta/bin/server.dart:156-160`.
+There is deliberately no FWW key: FWW in the core is a node-level *veto*, so a
+default `createdAt` would let a replica holding a later `createdAt` for a record
+lock that record forever. The node server still accepts
+`X-Syncer-Options: {"fwwKeys":"createdAt"}` per request in test mode, which is
+how the conformance suite keeps covering the engine feature.
+
+Verified per server: `servers/node/src/index.ts:159-164`,
+`servers/rust-fullstack/src/main.rs:101-113`, `servers/rust/src/main.rs:174-197`,
+`servers/dart/bin/server.dart:89-103`, `servers/sagitta/bin/server.dart:161-175`.
 
 | Service | Port | Stack | Storage | Compose profile |
 |---|---|---|---|---|
@@ -118,7 +124,7 @@ per sync request instead.
 | Suite | Runner | Target(s) | What it uniquely catches |
 |---|---|---|---|
 | `test/run_e2e.sh` | `curlimages/curl:8.7.1`, service `test-runner`, profile `test` | `node` only | Smoke: the node server is up, seeded, and deep-merges. Fast enough to run on every change; grep-based, so it cannot distinguish *which* merge policy ran. |
-| `test/run_e2e_full.sh` | same image, service `test-runner-full`, profile `fulltest` | `node`, `rust-fullstack`, `dart`, `sagitta` | Element-level keyed-array behaviour on **all four** runtimes: stale element rejected (`check_absent 'STALE'`), untouched element kept, new element appended, `createdAt` FWW re-creation refused. Asserting only `"merged":true` would pass under `REPLACE`; these assertions do not. |
+| `test/run_e2e_full.sh` | same image, service `test-runner-full`, profile `fulltest` | `node`, `rust-fullstack`, `dart`, `sagitta` | Element-level keyed-array behaviour on **all four** runtimes: stale element rejected (`check_absent 'STALE'`), untouched element kept, new element appended, and a later `createdAt` **not** vetoing a newer write (plus, on the node server only, an explicit `X-Syncer-Options: {"fwwKeys":"createdAt"}` request proving the veto is still reachable). Asserting only `"merged":true` would pass under `REPLACE`; these assertions do not. |
 | `test/conformance/` | `node:22-alpine`, service `conformance`, profile `conformance` | `node` + Postgres | 12 scenario groups (below). The only suite that inspects **stored jsonb text** via `/doc/:id/raw`, and the only one that exercises tombstones, CAS conflicts, unique-index identity, the strategy matrix and the robustness/prototype-pollution cases. |
 | `test/cross-server/` | `node:22-alpine`, service `cross-server`, profile `crossserver` | `node`, `rust-fullstack`, `dart`, `sagitta` | Four runtimes must produce **semantically identical** documents from one mutation sequence, after different HTTP stacks, different JSON serializers, and (for node) a real jsonb round trip. Also pins per-runtime int64 fidelity. |
 | `test/clients/` | host shell, `test/clients/run_all.sh` | `node` (via published port) | The three **real client libraries** from `../opto-sync-clients` against a live server: offline queue lifecycle, flush/replay, pull-back reconcile, cross-client convergence. The only suite that can catch a client whose *default merge policy* disagrees with the server's — and it did. |
@@ -134,7 +140,7 @@ and `/reset`s the server between them. Positional args select groups by number
 |---|---|---|
 | 1 | `01-health.mjs` | The native C core is live, not the JS fallback; `coreVersion` ≥ 0.2.0; `defaultOptions` is the documented policy; `/reset` restores four seed docs |
 | 2 | `02-deep-merge.mjs` | Recursive object merge, sibling preservation at every level, type-change replacement, `null` as a value, empty-object/array no-ops |
-| 3 | `03-keyed-arrays.mjs` | `MERGE_BY_KEY`: all-or-nothing element rejection, `lwwKeys` as an OR-of-rejections, `createdAt` FWW both directions, `42`/`"42"` identity normalization, nested keyed arrays, keyless UNION fallback |
+| 3 | `03-keyed-arrays.mjs` | `MERGE_BY_KEY`: all-or-nothing element rejection, `lwwKeys` as an OR-of-rejections, the default policy accepting a later `createdAt` (no FWW veto), explicit `fwwKeys` vetoing in both directions via `X-Syncer-Options`, `42`/`"42"` identity normalization, nested keyed arrays, keyless UNION fallback |
 | 4 | `04-jsonb-fidelity.mjs` | jsonb reorders keys but preserves semantics; `MAX_SAFE_INTEGER` exact; int64 rounding recorded as a `limitation()`; digit-string nanoseconds exact and LWW-correct; unicode; 40-level nesting; 2000-element arrays |
 | 5 | `05-idempotency.mjs` | Replaying a payload is idempotent in value while `version` advances; stale replays stay inert |
 | 6 | `06-convergence.mjs` | All 4! = 24 apply orders of four mutations converge to one document; parallel application matches the sequential outcome; and the documented boundary — a root-level `lww` key gates the whole document, making it order-*dependent* by design |

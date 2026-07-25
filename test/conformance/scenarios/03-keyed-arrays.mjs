@@ -8,10 +8,10 @@
  *   ]
  *
  * Server policy: arrayStrategy=MERGE_BY_KEY, arrayMatchKeys="id",
- * resolveByTimestamp=true, lwwKeys="updatedAt,syncedAt", fwwKeys="createdAt".
+ * resolveByTimestamp=true, lwwKeys="updatedAt,syncedAt", and NO fwwKeys.
  *
- * Two properties of the core that these cases pin down and that are easy to get
- * wrong when reading the output:
+ * Three properties of the core that these cases pin down and that are easy to
+ * get wrong when reading the output:
  *
  *  1. A timestamp rejection is ALL-OR-NOTHING for the matched element. The core
  *     does not descend and does not even copy incoming-only keys. So a stale
@@ -20,7 +20,12 @@
  *
  *  2. lwwKeys is an OR-of-rejections, not a precedence list. If ANY lww key says
  *     the base is newer, the whole element is rejected — even if another lww key
- *     says the incoming is newer.
+ *     says the incoming is newer. The same holds ACROSS the lww and fww lists:
+ *     either list can veto on its own.
+ *
+ *  3. Consequently `fwwKeys` is not field protection, it is a node-level VETO —
+ *     which is why `createdAt` is NOT in the default policy. The FWW cases below
+ *     therefore ask for it explicitly via X-Syncer-Options.
  */
 
 const itemById = (items, id) =>
@@ -163,15 +168,46 @@ export default {
       },
     },
     {
-      name: "createdAt is FIRST-write-wins: a LATER creation claim is rejected",
+      name: "DEFAULT policy: a later createdAt does NOT veto a newer write",
       async fn(t, c) {
         await c.reset();
-        // base a.createdAt = 1000. Incoming claims createdAt 5000 (later).
-        // FWW rejects when base < incoming, so the whole element is dropped —
-        // note this happens even though updatedAt(9000) says it is fresh.
-        await c.sync("doc-rows", {
-          items: [{ id: "a", createdAt: 5000, updatedAt: 9000, label: "CLAIMS-LATER-CREATION" }],
+        // base a = { createdAt: 1000, updatedAt: 2000, label: "alpha", qty: 1 }.
+        // Incoming claims a LATER createdAt (5000) and a newer updatedAt (9000).
+        // Under the server's default policy nothing may reject a node for being
+        // NEWER, so this must land. When `createdAt` was an FWW key, it did not:
+        // the element was dropped WHOLESALE, and a replica holding a later
+        // createdAt could never write to the record again — silently, behind 200.
+        const res = await c.sync("doc-rows", {
+          items: [{ id: "a", createdAt: 5000, updatedAt: 9000, label: "NEWEST-WRITE" }],
         });
+        t.status(res, 200, "sync succeeds");
+        const a = itemById((await c.data("doc-rows")).items, "a");
+        t.eq(a.label, "NEWEST-WRITE", "the newest write lands under the default policy");
+        t.eq(a.updatedAt, 9000, "incoming updatedAt applied");
+        t.eq(a.createdAt, 5000, "incoming createdAt applied — it is not a guarded key");
+        t.eq(a.qty, 1, "still a MERGE: base-only field retained");
+
+        // ...and the record is not write-locked afterwards.
+        await c.sync("doc-rows", {
+          items: [{ id: "a", createdAt: 6000, updatedAt: 10000, label: "AND-AGAIN" }],
+        });
+        const a2 = itemById((await c.data("doc-rows")).items, "a");
+        t.eq(a2.label, "AND-AGAIN", "the element stays writable");
+      },
+    },
+    {
+      name: "explicit fwwKeys is a NODE-LEVEL VETO: a LATER creation claim is rejected wholesale",
+      async fn(t, c) {
+        await c.reset();
+        // Same payload as the case above, with fwwKeys requested explicitly.
+        // FWW rejects when base < incoming, so the whole element is dropped —
+        // note this happens even though updatedAt(9000) says it is fresh. That
+        // asymmetry is exactly why this is opt-in rather than the default.
+        await c.sync(
+          "doc-rows",
+          { items: [{ id: "a", createdAt: 5000, updatedAt: 9000, label: "CLAIMS-LATER-CREATION" }] },
+          { options: { fwwKeys: "createdAt" } }
+        );
         const a = itemById((await c.data("doc-rows")).items, "a");
         t.eq(a.label, "alpha", "element claiming a LATER createdAt is rejected");
         t.eq(a.createdAt, 1000, "original createdAt is preserved (first write wins)");
@@ -179,12 +215,14 @@ export default {
       },
     },
     {
-      name: "createdAt FWW: an EARLIER creation claim is accepted (it becomes the first write)",
+      name: "explicit fwwKeys: an EARLIER creation claim is accepted (it becomes the first write)",
       async fn(t, c) {
         await c.reset();
-        await c.sync("doc-rows", {
-          items: [{ id: "a", createdAt: 500, updatedAt: 9000, label: "CLAIMS-EARLIER" }],
-        });
+        await c.sync(
+          "doc-rows",
+          { items: [{ id: "a", createdAt: 500, updatedAt: 9000, label: "CLAIMS-EARLIER" }] },
+          { options: { fwwKeys: "createdAt" } }
+        );
         const a = itemById((await c.data("doc-rows")).items, "a");
         t.eq(a.label, "CLAIMS-EARLIER", "element claiming an EARLIER createdAt is accepted");
         t.eq(a.createdAt, 500, "createdAt moves earlier — the true first write wins");
