@@ -53,9 +53,15 @@ expectations uniform across runtimes:
 
 ```
 arrayStrategy      = MERGE_BY_KEY (4)      lwwKeys = "updatedAt,syncedAt"
-arrayMatchKeys     = "id"                  fwwKeys = "createdAt"
+arrayMatchKeys     = "id"                  fwwKeys = (unset)
 resolveByTimestamp = true
 ```
+
+There is deliberately no FWW key: FWW in the core is a node-level *veto*, so a
+default `createdAt` would let a replica holding a later `createdAt` for a record
+lock that record forever. The node server still accepts
+`X-Syncer-Options: {"fwwKeys":"createdAt"}` per request in test mode, which is
+how the conformance suite keeps covering the engine feature.
 
 Verified per server: `servers/node/src/index.ts:144-150`,
 `servers/rust-fullstack/src/main.rs:95-107`, `servers/rust/src/main.rs:160-176`,
