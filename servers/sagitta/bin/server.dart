@@ -161,11 +161,17 @@ Future<void> main() async {
         options: MergeOptions(
           // Same policy as every other opto-sync server, so the conformance
           // expectations are uniform across runtimes.
+          //
+          // No fwwKeys, deliberately: FWW is a node-level VETO in the core —
+          // an incoming node whose FWW key is newer is dropped WHOLESALE, even
+          // when its updatedAt is the newest write anywhere. With `createdAt`
+          // here, a replica holding a later createdAt for a record could never
+          // write to that record again, silently and behind a 200 OK.
           arrayStrategy: ArrayMergeStrategy.mergeByKey,
           arrayMatchKeys: 'id',
           resolveByTimestamp: true,
           lwwKeys: 'updatedAt,syncedAt',
-          fwwKeys: 'createdAt',
+          fwwKeys: null,
         ),
       );
 
