@@ -73,7 +73,10 @@ const DEFAULT_MERGE_OPTIONS = {
   arrayMatchKeys: "id",
   resolveByTimestamp: true,
   lwwKeys: "updatedAt,syncedAt",
-  fwwKeys: "createdAt",
+  // No fwwKeys. FWW in the core is a NODE-LEVEL VETO: an incoming node whose
+  // FWW key is newer is dropped WHOLESALE, however new its updatedAt is. With
+  // `createdAt` here, a replica holding a later createdAt for a record could
+  // never write to that record again — silently, behind a 200 OK.
 };
 ```
 
