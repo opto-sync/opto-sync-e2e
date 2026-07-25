@@ -184,6 +184,10 @@ async function main() {
 
   const live = [];
   for (const server of SERVERS) {
+    if (SKIP.has(server.name)) {
+      console.log(`   skipped: ${server.name} (SKIP_SERVERS)`);
+      continue;
+    }
     try {
       await waitForServer(server);
       live.push(server);
