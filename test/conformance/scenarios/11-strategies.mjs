@@ -141,19 +141,16 @@ export default {
           "dedup DOES work when the client's key order happens to match jsonb's"
         );
 
-        t.limitation(
-          mismatched === 2,
-          "UNION failed to dedup a structurally identical object element (array grew to 2)",
-          "Cause: the core's UNION dedup compares serialized JSON text (strcmp) rather than " +
-            "structural equality, and Postgres jsonb normalizes key order to (length, bytes). " +
-            "A client whose key order differs from jsonb's therefore gets duplicates, making " +
-            "arrayStrategy=2 behave like APPEND and NOT idempotent for multi-key objects. " +
-            "Unaffected: scalars, single-key objects, and MERGE_BY_KEY (strategy 4), which " +
-            "matches on an identity key instead of on bytes."
+        // Was a known limitation: UNION dedup compared serialized JSON with
+        // strcmp, so Postgres jsonb's key-order normalization ((length, bytes))
+        // defeated it — strategy 2 degraded to APPEND and lost idempotency for
+        // multi-key objects. The core now compares structurally (object keys as
+        // an unordered set, arrays still ordered), so key order is irrelevant.
+        t.eq(
+          mismatched,
+          1,
+          "UNION dedups a structurally identical element regardless of key order"
         );
-        if (mismatched !== 2) {
-          t.eq(mismatched, 1, "UNION deduped the structurally identical element");
-        }
       },
     },
     {

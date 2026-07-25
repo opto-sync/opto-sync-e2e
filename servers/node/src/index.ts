@@ -491,6 +491,7 @@ app.post("/profile/sync", async (req, res) => {
       if (updated.rows.length > 0) {
         return res.json({ merged: true, created: false, attempts: attempt, profile: updated.rows[0] });
       }
+      await casBackoff(attempt);
     }
     res.status(409).json({ error: "Concurrent update, retry the sync", conflict: true });
   } catch (err: any) {
@@ -522,6 +523,13 @@ app.post("/reset", async (_req, res) => {
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// Terminal handler: any unhandled route error answers JSON, never HTML.
+app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error("[node-server] unhandled error:", err?.message);
+  if (res.headersSent) return;
+  res.status(err?.status ?? 500).json({ error: err?.message ?? "internal error" });
 });
 
 // ── Initialization ───────────────────────────────────────────────────────

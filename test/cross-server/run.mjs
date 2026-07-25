@@ -42,6 +42,14 @@ const SERVERS = [
   { name: "sagitta",        url: HOST_MODE ? "http://localhost:3005" : "http://sagitta:3005",        doc: "doc-s1",  int64Exact: true  },
 ];
 
+/**
+ * Namespace every run uniquely. The in-memory servers accumulate state
+ * indefinitely (they have no /reset), so a fixed key would make this suite
+ * compare a fresh server against one carrying keys from an earlier run — a
+ * spurious "runtimes disagree" failure. Set NS_SUFFIX to pin it.
+ */
+const RUN = process.env.NS_SUFFIX ?? `p${process.pid}`;
+
 const NANO = "1689940800123456789";
 /** What an IEEE-754 double does to NANO — the only acceptable lossy result. */
 const NANO_AS_DOUBLE = "1689940800123456800";
@@ -242,7 +250,7 @@ async function main() {
   }
 
   // ── Phase 1: identical sequence must yield identical subtree ────────────
-  const ns1 = `xconv_${process.env.NS_SUFFIX ?? "seq"}`;
+  const ns1 = `xconv_${RUN}`;
   const results1 = {};
   for (const server of live) {
     for (const payload of sequentialPayloads(ns1)) {
@@ -306,7 +314,9 @@ async function main() {
   // ── Phase 1b: numeric int64 fidelity per runtime ────────────────────────
   // Sent as raw text so this process cannot be the thing that rounds it.
   for (const server of live) {
-    const body = `{"xnum":{"nanoNum":${NANO},"nanoStr":"${NANO}"}}`;
+    // Distinct key name: phase 1 already wrote `nanoStr`, so reusing it here
+    // would let this assertion pass on phase 1's value instead of its own.
+    const body = `{"xnum_${RUN}":{"nanoNum":${NANO},"nanoStrRaw":"${NANO}"}}`;
     await syncRaw(server, body);
     // Asserted against the RAW response text: JSON.parse in this very process
     // would round a numeric int64 back to a double, making an exact server
@@ -314,7 +324,7 @@ async function main() {
     const raw = await getDocText(server);
 
     check(`phase1b: ${server.name} digit-string int64 exact`, () => {
-      assert.ok(raw.includes(`"nanoStr":"${NANO}"`), `raw response lacked "nanoStr":"${NANO}"`);
+      assert.ok(raw.includes(`"nanoStrRaw":"${NANO}"`), `raw response lacked "nanoStrRaw":"${NANO}"`);
     });
 
     const expectedNum = server.int64Exact ? NANO : NANO_AS_DOUBLE;
@@ -340,7 +350,7 @@ async function main() {
   const perms = permutations([0, 1, 2]);
   const permResults = [];
   for (let p = 0; p < perms.length; p++) {
-    const ns = `xcomm_${p}`;
+    const ns = `xcomm_${RUN}_${p}`;
     const payloads = commutativePayloads(ns);
     const perServer = {};
     for (const server of live) {

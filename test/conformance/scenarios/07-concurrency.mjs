@@ -130,13 +130,17 @@ export default {
             `${ok.length}/20 acknowledged`
         );
 
-        t.limitation(
-          conflicted.length > 0,
-          `${conflicted.length}/20 parallel syncs exhausted the 5-attempt CAS budget and got 409`,
-          "MAX_CAS_ATTEMPTS=5 is not enough for 20-way contention on one row. No data is " +
-            "lost or corrupted (the 409 is an honest 'retry me'), but clients must implement " +
-            "their own retry. Measured threshold: 0 conflicts at N<=5, conflicts appear from N~8."
+        // Was a known limitation: with a 5-attempt budget and no backoff, 20-way
+        // contention produced 25-60% 409s because every loser retried in lockstep.
+        // The server now uses a 12-attempt budget with full-jitter backoff, so
+        // ordinary contention is absorbed server-side. Asserted, not merely warned,
+        // so a regression in the retry policy is caught here.
+        t.eq(
+          conflicted.length,
+          0,
+          "no writer should exhaust the CAS budget under 20-way contention"
         );
+        t.eq(ok.length, 20, "every concurrent writer is acknowledged")
       },
     },
     {

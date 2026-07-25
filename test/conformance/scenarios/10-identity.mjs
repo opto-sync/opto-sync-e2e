@@ -159,14 +159,14 @@ export default {
         );
         t.eq(data.email, email, "email field present on the merged row");
 
-        t.limitation(
-          conflicted.length > 0,
-          `${conflicted.length}/${N} parallel first-writes for a new email exhausted the retry budget (409)`,
-          "The /profile/sync loop spends attempts from the same MAX_CAS_ATTEMPTS=5 budget on " +
-            "BOTH the unique-violation retry and the subsequent version CAS, so a writer that " +
-            "loses the INSERT race starts its CAS contention already down one attempt. One row " +
-            "and one created:true are still guaranteed by the unique index; the 409 is an " +
-            "honest 'retry me' with no data loss."
+        // Was a known limitation: the unique-violation retry and the version CAS
+        // shared a 5-attempt budget, so a writer losing the INSERT race began its
+        // CAS already down one attempt. The budget is now 12 with full-jitter
+        // backoff on both paths, so first-write races resolve server-side.
+        t.eq(
+          conflicted.length,
+          0,
+          "no first-writer should exhaust the retry budget racing on a new email"
         );
       },
     },
