@@ -53,7 +53,7 @@ services:
     profiles:
       - fullstack
 
-  # --- Node.js Server (Express + Drizzle) ---
+  # --- Node.js Server (Express + Postgres jsonb + native C addon) ---
   node:
     build:
       context: ../
@@ -64,6 +64,11 @@ services:
       - .env
     environment:
       - SERVER_PORT=3003
+      # Refuse to start without the native addon: a JS fallback merge would
+      # let the whole suite pass without exercising the C core.
+      - SYNCER_REQUIRE_NATIVE=1
+      # Enables /reset and the X-Syncer-Options header for the conformance suite.
+      - E2E_ALLOW_OPTION_OVERRIDE=1
     networks:
       - syncer-net
     depends_on:
