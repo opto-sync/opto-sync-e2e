@@ -233,6 +233,7 @@ async fn health(State(state): State<Arc<AppState>>) -> Json<Value> {
             "arrayMatchKeys": MERGE_ARRAY_MATCH_KEYS,
             "resolveByTimestamp": true,
             "lwwKeys": MERGE_LWW_KEYS,
+            // null — no FWW key; see the note on MERGE_FWW_KEYS.
             "fwwKeys": MERGE_FWW_KEYS,
         }
     }))
