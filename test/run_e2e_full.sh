@@ -24,6 +24,18 @@ check() {
     fi
 }
 
+# Negative assertion: the pattern must NOT appear. Stale-write rejection can
+# only be proven by absence, so `check` alone cannot express it.
+check_absent() {
+    if echo "$2" | grep -q "$3"; then
+        echo "❌ FAIL: $1 — did NOT expect '$3' in: $2"
+        FAIL=$((FAIL + 1))
+    else
+        echo "✅ $1"
+        PASS=$((PASS + 1))
+    fi
+}
+
 # ─────────────────────────────────────────────────────────────
 # Helper: test a server's sync endpoints
 # Usage: test_server <name> <base_url> <doc_id>
