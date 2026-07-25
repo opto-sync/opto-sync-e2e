@@ -26,28 +26,23 @@ export const LANG = 'ts';
  *
  * WHY THIS OBJECT STILL EXISTS
  *
- * @opto-sync/client's DEFAULT_RECONCILE_OPTIONS sets only resolveByTimestamp /
- * lwwKeys / fwwKeys. It now sets arrayStrategy and arrayMatchKeys itself, so this is equal to its defaults, so the
- * native core falls back to ArrayStrategy.REPLACE — while the server, the Dart
- * client (FfiSyncer defaults to mergeByKey + 'id') and the Rust client
- * (ReconcileOptions::default() -> MergeByKey + "id") all use MERGE_BY_KEY on
- * "id". Out of the box the TypeScript client therefore reconciles arrays by
- * wholesale replacement: pulling a server document silently DROPS local
- * elements the server has not seen and APPLIES elements the timestamp guard
- * should have rejected.
+ * It is equal to @opto-sync/client's DEFAULT_RECONCILE_OPTIONS, and that equality
+ * is itself asserted (test 0 in scenarios.test.mjs). Spelling the server's policy
+ * out here means a future drift between the two — in either direction — shows up
+ * as a named failure rather than as a puzzling divergence deep in a scenario, and
+ * it lets the Dart and Rust suites be configured from the same literal so the
+ * three languages are compared on equal terms.
  *
- * See the "KNOWN DIVERGENCE" test in scenarios.test.mjs, which pins the current
- * default so that fixing the client fails loudly here instead of drifting.
- *
- * Every client in this suite is configured with the server's policy so the three
- * languages are compared on equal terms.
+ * There is NO fwwKeys, on every tier. `createdAt` used to be here; FWW in the
+ * core is a node-level VETO (an incoming node whose FWW key is newer is dropped
+ * WHOLESALE, however new its updatedAt is), so a replica holding a later
+ * createdAt for a record could never write to that record again.
  */
 export const SERVER_POLICY = Object.freeze({
   arrayStrategy: 4, // ArrayStrategy.MERGE_BY_KEY
   arrayMatchKeys: 'id',
   resolveByTimestamp: true,
   lwwKeys: 'updatedAt,syncedAt',
-  fwwKeys: 'createdAt',
 });
 
 /* ------------------------------------------------------------------ */
