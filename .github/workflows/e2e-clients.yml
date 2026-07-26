@@ -73,12 +73,19 @@ jobs:
         with:
           sdk: stable
 
-      # Dart opens real SQLite. Gleam calls the actual BEAM Rustler/C NIF.
-      - name: Install SQLite and BEAM system libraries
+      # Rustler 0.38 requires Elixir 1.15+; Ubuntu 24.04's apt package remains
+      # on 1.14 and fails before compiling the NIF.
+      - name: Install pinned OTP and Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: '27.3'
+          elixir-version: '1.18.4'
+
+      # Dart opens real SQLite.
+      - name: Install SQLite system library
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends \
-            elixir erlang-dev erlang-eunit libsqlite3-0
+          sudo apt-get install -y --no-install-recommends libsqlite3-0
 
       - name: Install pinned Gleam compiler
         run: |

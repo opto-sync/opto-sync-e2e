@@ -117,6 +117,19 @@ jobs:
           docker --version
           docker compose version
 
+      # These profiles start additional containers from the same image as the
+      # `node` service. Compose may try to pull those aliases before `node` has
+      # finished building, even with `up --build`, so materialize the shared
+      # image first on each isolated runner that exercises an alias.
+      - name: Build shared Node image for profile aliases
+        if: >-
+          matrix.id == 'auth' ||
+          matrix.id == 'jwt-auth' ||
+          matrix.id == 'operations' ||
+          matrix.id == 'recovery'
+        working-directory: opto-sync-e2e
+        run: docker compose build node
+
       # --- suites ------------------------------------------------------------
       # `--exit-code-from <svc>` implies --abort-on-container-exit, so the job's
       # exit status is the test runner's.
