@@ -8,10 +8,20 @@
 //! prints a clear reason and returns instead of hanging on a dead socket.
 
 use opto_sync_client::{
+    parse_hlc,
+    protocol::{
+        Change, ProtocolQueue, PullResponse, PushRequest, PushResponse, SnapshotRecord,
+        SnapshotResponse,
+    },
+    protocol_sync::{
+        ProtocolQueuePersistence, ProtocolSyncCallbacks, ProtocolSyncDriver, ProtocolSyncOptions,
+        ProtocolTransport, PullResult, ResetRequired, TransportFailure,
+    },
     reconcile, InMemoryStore, MutationStatus, MutationStore, OptoSyncClient, ReconcileOptions,
 };
 use opto_sync_client_e2e::*;
 use serde_json::{json, Value};
+use std::collections::BTreeMap;
 
 /// Print a clear reason and return, rather than hanging or failing, when the
 /// server is not reachable. Cargo has no first-class runtime skip, so this is the
@@ -36,6 +46,128 @@ fn reconcile_via(client: &OptoSyncClient<InMemoryStore>, local: &Value, incoming
         .reconcile_incoming(&local.to_string(), &incoming.to_string())
         .expect("reconcile must not fail on valid JSON");
     serde_json::from_str(&merged).expect("the core must return valid JSON")
+}
+
+fn expected_with_queued_stamp(expected: &Value, payload: &Value) -> Value {
+    let stamp = payload
+        .get("updatedAt")
+        .and_then(Value::as_str)
+        .expect("queueMutation must stamp a root updatedAt");
+    assert!(
+        parse_hlc(stamp).is_some(),
+        "queued updatedAt must be a valid HLC: {stamp}"
+    );
+    let mut out = expected
+        .as_object()
+        .expect("fixture expectation must be an object")
+        .clone();
+    out.insert("updatedAt".to_string(), Value::String(stamp.to_string()));
+    Value::Object(out)
+}
+
+struct LiveProtocolTransport;
+
+impl ProtocolTransport for LiveProtocolTransport {
+    type Error = String;
+
+    fn push(
+        &mut self,
+        request: &PushRequest,
+    ) -> Result<PushResponse, TransportFailure<Self::Error>> {
+        let response = protocol_push(&serde_json::to_value(request).unwrap());
+        if !response.ok() {
+            return Err(TransportFailure {
+                source: format!("push HTTP {} {}", response.status, response.body),
+                retryable: response.status >= 500 || response.status == 429,
+                retry_after: None,
+            });
+        }
+        serde_json::from_str(&response.body)
+            .map_err(|error| TransportFailure::permanent(error.to_string()))
+    }
+
+    fn pull(
+        &mut self,
+        checkpoint: &str,
+        limit: usize,
+    ) -> Result<PullResult, TransportFailure<Self::Error>> {
+        let response = protocol_pull(checkpoint, limit);
+        if response.status == 409 && response.json()["error"] == "RESET_REQUIRED" {
+            return serde_json::from_str::<ResetRequired>(&response.body)
+                .map(PullResult::ResetRequired)
+                .map_err(|error| TransportFailure::permanent(error.to_string()));
+        }
+        if !response.ok() {
+            return Err(TransportFailure {
+                source: format!("pull HTTP {} {}", response.status, response.body),
+                retryable: response.status >= 500 || response.status == 429,
+                retry_after: None,
+            });
+        }
+        serde_json::from_str::<PullResponse>(&response.body)
+            .map(PullResult::Changes)
+            .map_err(|error| TransportFailure::permanent(error.to_string()))
+    }
+
+    fn snapshot(
+        &mut self,
+        _reset: &ResetRequired,
+    ) -> Result<SnapshotResponse, TransportFailure<Self::Error>> {
+        let response = protocol_snapshot();
+        if !response.ok() {
+            return Err(TransportFailure {
+                source: format!("snapshot HTTP {} {}", response.status, response.body),
+                retryable: response.status >= 500 || response.status == 429,
+                retry_after: None,
+            });
+        }
+        serde_json::from_str(&response.body)
+            .map_err(|error| TransportFailure::permanent(error.to_string()))
+    }
+}
+
+#[derive(Default)]
+struct MemoryProtocolStore {
+    records: BTreeMap<String, Value>,
+}
+
+impl ProtocolSyncCallbacks for MemoryProtocolStore {
+    type Error = &'static str;
+
+    fn apply_changes(&mut self, changes: &[Change]) -> Result<(), Self::Error> {
+        for change in changes {
+            match &change.record {
+                Some(record) => {
+                    self.records
+                        .insert(change.record_id.clone(), record.clone());
+                }
+                None => {
+                    self.records.remove(&change.record_id);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn replace_authoritative(&mut self, records: &[SnapshotRecord]) -> Result<(), Self::Error> {
+        self.records.clear();
+        for record in records {
+            self.records
+                .insert(record.record_id.clone(), record.record.clone());
+        }
+        Ok(())
+    }
+}
+
+struct QueuePersistence<'a>(&'a mut Option<Value>);
+
+impl ProtocolQueuePersistence for QueuePersistence<'_> {
+    type Error = serde_json::Error;
+
+    fn persist(&mut self, queue: &ProtocolQueue) -> Result<(), Self::Error> {
+        *self.0 = Some(serde_json::to_value(queue)?);
+        Ok(())
+    }
 }
 
 /* ==================================================================== */
@@ -100,6 +232,9 @@ fn scenario_1a_offline_queue_flushed_individually() {
         .iter()
         .map(|m| routes.queue(&mut client, &id, m))
         .collect();
+    let last_payload: Value =
+        serde_json::from_str(&client.store().pending().last().unwrap().payload).unwrap();
+    let expected = expected_with_queued_stamp(field(fx, "expected"), &last_payload);
 
     assert_eq!(
         client.store().pending().len(),
@@ -108,7 +243,12 @@ fn scenario_1a_offline_queue_flushed_individually() {
     );
     assert_eq!(
         status_counts(&client),
-        StatusCounts { total: 3, pending: 3, synced: 0, failed: 0 },
+        StatusCounts {
+            total: 3,
+            pending: 3,
+            synced: 0,
+            failed: 0
+        },
         "nothing may be marked synced before a flush"
     );
     assert!(
@@ -119,7 +259,11 @@ fn scenario_1a_offline_queue_flushed_individually() {
     // Back online: flush in queue order.
     for mutation_id in &queued {
         let res = flush_one(&mut client, &routes, *mutation_id);
-        assert_eq!(res.status, 200, "sync of mutation {mutation_id}: {}", res.body);
+        assert_eq!(
+            res.status, 200,
+            "sync of mutation {mutation_id}: {}",
+            res.body
+        );
         let body = res.json();
         assert_eq!(body.get("merged"), Some(&Value::Bool(true)));
         assert_eq!(
@@ -132,12 +276,17 @@ fn scenario_1a_offline_queue_flushed_individually() {
     assert!(client.store().pending().is_empty(), "queue must be drained");
     assert_eq!(
         status_counts(&client),
-        StatusCounts { total: 3, pending: 0, synced: 3, failed: 0 }
+        StatusCounts {
+            total: 3,
+            pending: 0,
+            synced: 3,
+            failed: 0
+        }
     );
 
     assert_json_eq(
         &get_doc_data(&id),
-        field(fx, "expected"),
+        &expected,
         "server document after individual flush",
     );
 }
@@ -157,6 +306,8 @@ fn scenario_1b_offline_queue_flushed_via_batch() {
 
     let pending = client.store().pending();
     assert_eq!(pending.len(), 3);
+    let last_payload: Value = serde_json::from_str(&pending.last().unwrap().payload).unwrap();
+    let expected = expected_with_queued_stamp(field(fx, "expected"), &last_payload);
 
     let batch: Vec<(String, Value)> = pending
         .iter()
@@ -174,12 +325,17 @@ fn scenario_1b_offline_queue_flushed_via_batch() {
     }
     assert_eq!(
         status_counts(&client),
-        StatusCounts { total: 3, pending: 0, synced: 3, failed: 0 }
+        StatusCounts {
+            total: 3,
+            pending: 0,
+            synced: 3,
+            failed: 0
+        }
     );
 
     assert_json_eq(
         &get_doc_data(&id),
-        field(fx, "expected"),
+        &expected,
         "server document after batch flush",
     );
 }
@@ -209,11 +365,14 @@ fn scenario_2_optimistic_write_then_pullback() {
 
     // Push, then pull the server's own view back.
     let mid = routes.queue(&mut client, &id, field(fx, "mutation"));
+    let queued_payload: Value =
+        serde_json::from_str(&client.store().pending().first().unwrap().payload).unwrap();
+    let expected = expected_with_queued_stamp(field(fx, "expected"), &queued_payload);
     let res = flush_one(&mut client, &routes, mid);
     assert_eq!(res.status, 200, "{}", res.body);
 
     let server_data = get_doc_data(&id);
-    assert_json_eq(&server_data, field(fx, "expected"), "server document after push");
+    assert_json_eq(&server_data, &expected, "server document after push");
 
     // Reconcile the pulled server state back into the local copy.
     let local_after_pullback = reconcile_via(&client, &local_after_optimistic, &server_data);
@@ -224,14 +383,58 @@ fn scenario_2_optimistic_write_then_pullback() {
     );
     assert_json_eq(
         &local_after_pullback,
-        field(fx, "expected"),
+        &expected,
         "local copy after pull-back vs expectation",
     );
 
     // The stored jsonb text is NOT the string we sent — proof that comparing raw
     // strings would be wrong, and that we never do.
     let raw: Value = serde_json::from_str(&get_doc_raw(&id)).unwrap();
-    assert_json_eq(&raw, field(fx, "expected"), "raw jsonb text parses to the same value");
+    assert_json_eq(&raw, &expected, "raw jsonb text parses to the same value");
+}
+
+#[test]
+fn scenario_2b_protocol_driver_runs_against_live_postgres() {
+    skip_if_no_server!("2b protocol driver");
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let id = format!("{}-{nonce}", doc_id("sync-driver"));
+    let mut queue = ProtocolQueue::new(format!("rust-driver-{nonce}")).unwrap();
+    let payload = json!({
+        "title": "scheduled Rust write",
+        "nested": {"value": 7}
+    });
+    queue
+        .queue_upsert("docs", &id, payload.clone(), Some("0".to_string()), false)
+        .unwrap();
+    let mut transport = LiveProtocolTransport;
+    let mut store = MemoryProtocolStore::default();
+    let mut persisted = None;
+    let mut persistence = QueuePersistence(&mut persisted);
+    let driver = ProtocolSyncDriver::new(ProtocolSyncOptions::default()).unwrap();
+
+    let result = driver
+        .sync_cycle(&mut queue, &mut transport, &mut store, &mut persistence)
+        .unwrap();
+    assert_eq!(result.pushed_mutations, 1);
+    assert_eq!(result.acknowledged_mutations, 1);
+    assert!(!result.has_more_pending);
+    assert_eq!(queue.pending().count(), 0);
+    assert_json_eq(
+        store.records.get(&id).expect("server echo missing"),
+        &payload,
+        "Rust checkpointed pull must contain the server echo",
+    );
+    assert_ne!(queue.checkpoint(), "0");
+    assert_eq!(
+        persisted
+            .as_ref()
+            .and_then(|state| state.get("checkpoint"))
+            .and_then(Value::as_str),
+        Some(queue.checkpoint())
+    );
 }
 
 /* ==================================================================== */
@@ -248,7 +451,11 @@ fn scenario_3_stale_rejection_round_trip() {
     // Server holds an OLDER state than the local copy.
     put_doc(&id, field(fx, "serverStale"));
     let stale = get_doc_data(&id);
-    assert_json_eq(&stale, field(fx, "serverStale"), "server precondition (stale)");
+    assert_json_eq(
+        &stale,
+        field(fx, "serverStale"),
+        "server precondition (stale)",
+    );
 
     let survived = reconcile_via(&client, field(fx, "local"), &stale);
     assert_json_eq(
@@ -298,13 +505,19 @@ fn scenario_4_keyed_array_through_full_stack() {
     );
 
     let mid = routes.queue(&mut client, &id, field(fx, "mutation"));
+    let queued_payload: Value =
+        serde_json::from_str(&client.store().pending().first().unwrap().payload).unwrap();
+    let expected = expected_with_queued_stamp(field(fx, "expected"), &queued_payload);
     assert_eq!(flush_one(&mut client, &routes, mid).status, 200);
 
     let server_data = get_doc_data(&id);
-    assert_json_eq(&server_data, field(fx, "expected"), "server keyed-array merge");
+    assert_json_eq(&server_data, &expected, "server keyed-array merge");
 
     let rows = server_data.get("rows").and_then(Value::as_array).unwrap();
-    let row = |id: &str| rows.iter().find(|r| r.get("id").and_then(Value::as_str) == Some(id));
+    let row = |id: &str| {
+        rows.iter()
+            .find(|r| r.get("id").and_then(Value::as_str) == Some(id))
+    };
     assert_eq!(rows.len(), 4, "exactly one new identity may be appended");
     assert_eq!(
         rows.iter()
@@ -332,7 +545,7 @@ fn scenario_4_keyed_array_through_full_stack() {
     // And the client's reconcile of the pulled state agrees.
     assert_json_eq(
         &reconcile_via(&client, &local_copy, &server_data),
-        field(fx, "expected"),
+        &expected,
         "client reconcile of the pulled keyed array",
     );
 }
@@ -351,15 +564,15 @@ fn scenario_5_replay_idempotency() {
     let mut client = new_client();
     let mut routes = Routes::new();
     let mid = routes.queue(&mut client, &id, field(fx, "mutation"));
-    let payload: Value =
-        serde_json::from_str(&client.store().pending()[0].payload).unwrap();
+    let payload: Value = serde_json::from_str(&client.store().pending()[0].payload).unwrap();
+    let expected = expected_with_queued_stamp(field(fx, "expected"), &payload);
 
     // First flush.
     assert_eq!(sync_doc(&id, &payload).status, 200);
     let after_first = get_doc_row(&id);
     assert_json_eq(
         after_first.get("data").unwrap(),
-        field(fx, "expected"),
+        &expected,
         "document after first flush",
     );
 
@@ -370,7 +583,10 @@ fn scenario_5_replay_idempotency() {
 
     let v1 = after_first.get("version").and_then(Value::as_u64).unwrap();
     let v2 = after_second.get("version").and_then(Value::as_u64).unwrap();
-    assert!(v2 > v1, "the replay must really have written (version {v1} -> {v2})");
+    assert!(
+        v2 > v1,
+        "the replay must really have written (version {v1} -> {v2})"
+    );
 
     assert_json_eq(
         after_second.get("data").unwrap(),
@@ -379,7 +595,7 @@ fn scenario_5_replay_idempotency() {
     );
     assert_json_eq(
         after_second.get("data").unwrap(),
-        field(fx, "expected"),
+        &expected,
         "document after replay",
     );
     let data = after_second.get("data").unwrap();
@@ -397,7 +613,12 @@ fn scenario_5_replay_idempotency() {
     assert!(client.store_mut().mark_synced(mid));
     assert_eq!(
         status_counts(&client),
-        StatusCounts { total: 1, pending: 0, synced: 1, failed: 0 }
+        StatusCounts {
+            total: 1,
+            pending: 0,
+            synced: 1,
+            failed: 0
+        }
     );
 }
 
@@ -426,7 +647,12 @@ fn scenario_6_failure_marking() {
 
     assert_eq!(
         status_counts(&client),
-        StatusCounts { total: 1, pending: 0, synced: 0, failed: 1 },
+        StatusCounts {
+            total: 1,
+            pending: 0,
+            synced: 0,
+            failed: 1
+        },
         "the failed mutation must be FAILED and must not count as pending or synced"
     );
     assert_eq!(client.store().all()[0].status, MutationStatus::Failed);
@@ -435,19 +661,77 @@ fn scenario_6_failure_marking() {
     let good = routes.queue(&mut client, &ok_id, field(fx, "mutationOk"));
     assert_eq!(
         status_counts(&client),
-        StatusCounts { total: 2, pending: 1, synced: 0, failed: 1 },
+        StatusCounts {
+            total: 2,
+            pending: 1,
+            synced: 0,
+            failed: 1
+        },
         "pending/failed accounting must be per-mutation"
     );
     assert_eq!(flush_one(&mut client, &routes, good).status, 200);
 
     assert_eq!(
         status_counts(&client),
-        StatusCounts { total: 2, pending: 0, synced: 1, failed: 1 },
+        StatusCounts {
+            total: 2,
+            pending: 0,
+            synced: 1,
+            failed: 1
+        },
         "final accounting: one synced, one failed, nothing pending"
     );
     assert_json_eq(
         &get_doc_data(&ok_id),
         field(fx, "expectedOk"),
         "the good mutation still landed",
+    );
+}
+
+#[test]
+fn scenario_8_protocol_envelope_round_trip_and_retry_deduplication() {
+    skip_if_no_server!("8 protocol v1 SDK envelope");
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let id = format!("{}-{}-{nonce}", doc_id("protocol-v1"), std::process::id());
+    let mut queue = ProtocolQueue::new(format!("rust-e2e-{}-{nonce}", std::process::id())).unwrap();
+    queue
+        .queue_upsert(
+            "docs",
+            &id,
+            json!({"title": "from-rust-sdk"}),
+            Some("0".to_string()),
+            false,
+        )
+        .unwrap();
+    let request = queue.push_request(100).unwrap();
+    let envelope = serde_json::to_value(&request).unwrap();
+    assert_eq!(envelope["mutations"][0]["operation"], "upsert");
+
+    let first = protocol_push(&envelope);
+    assert_eq!(first.status, 200, "{}", first.body);
+    assert_eq!(
+        first.json()["results"][0]["status"],
+        "applied",
+        "{}",
+        first.body
+    );
+    assert_eq!(
+        first.json()["results"][0]["document"]["record"]["title"],
+        "from-rust-sdk"
+    );
+    let acknowledged: PushResponse = serde_json::from_str(&first.body).unwrap();
+    assert_eq!(queue.acknowledge(&acknowledged, &request).unwrap(), 1);
+    assert_eq!(queue.pending().count(), 0);
+
+    let retry = protocol_push(&envelope);
+    assert_eq!(retry.status, 200, "{}", retry.body);
+    assert_eq!(retry.json()["results"][0]["status"], "duplicate");
+    assert_eq!(retry.json()["results"][0]["originalStatus"], "applied");
+    assert_eq!(
+        retry.json()["results"][0]["document"]["record"]["title"],
+        "from-rust-sdk"
     );
 }

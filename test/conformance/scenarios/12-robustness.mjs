@@ -21,6 +21,11 @@ export default {
             400,
             `malformed body ${JSON.stringify(body)} -> 400 (got ${res.status})`
           );
+          t.deepEq(
+            res.body,
+            { error: "Malformed JSON body" },
+            "malformed input does not echo parser details"
+          );
         }
       },
     },
@@ -249,11 +254,13 @@ export default {
       async fn(t, c) {
         const unknown = await c.request("/no/such/route");
         t.eq(unknown.status, 404, `unknown route -> 404 (got ${unknown.status})`);
+        t.deepEq(unknown.body, { error: "Not found" }, "unknown route returns JSON");
         const badMethod = await c.request("/health", { method: "DELETE" });
         t.ok(
           badMethod.status >= 400 && badMethod.status < 500,
           `DELETE /health -> 4xx, not 5xx (got ${badMethod.status})`
         );
+        t.deepEq(badMethod.body, { error: "Not found" }, "unsupported method returns JSON");
       },
     },
     {

@@ -31,7 +31,9 @@ pub fn base_url() -> &'static str {
 /* ------------------------------------------------------------------ */
 
 fn load_fixture(name: &str) -> Value {
-    let path = std::path::Path::new(MANIFEST_DIR).join("../fixtures").join(name);
+    let path = std::path::Path::new(MANIFEST_DIR)
+        .join("../fixtures")
+        .join(name);
     let text = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("cannot read fixture {}: {e}", path.display()));
     serde_json::from_str(&text)
@@ -70,7 +72,12 @@ pub fn field_str<'a>(fx: &'a Value, key: &str) -> &'a str {
 
 /// Namespaced document id so the three language suites never collide.
 pub fn doc_id(suffix: &str) -> String {
-    format!("{}-{}-{}", field_str(scenarios(), "docIdPrefix"), LANG, suffix)
+    format!(
+        "{}-{}-{}",
+        field_str(scenarios(), "docIdPrefix"),
+        LANG,
+        suffix
+    )
 }
 
 /* ------------------------------------------------------------------ */
@@ -131,7 +138,8 @@ fn encode_component(s: &str) -> String {
     // Document ids in this suite are `[A-Za-z0-9-]`; anything else is a
     // fixture bug worth failing on rather than silently mangling.
     assert!(
-        s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'),
+        s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'),
         "document id {s:?} needs percent-encoding; keep fixture ids URL-safe"
     );
     s.to_string()
@@ -151,7 +159,11 @@ pub fn probe_server() -> Option<String> {
         }
     };
     if !res.ok() {
-        return Some(format!("{}/health returned HTTP {}", base_url(), res.status));
+        return Some(format!(
+            "{}/health returned HTTP {}",
+            base_url(),
+            res.status
+        ));
     }
     let health = res.json();
     if health.get("status").and_then(Value::as_str) != Some("ok") {
@@ -172,16 +184,30 @@ pub fn probe_server() -> Option<String> {
 
 /// Create-or-replace a document outright (test setup, not a merge).
 pub fn put_doc(id: &str, payload: &Value) {
-    let res = request("PUT", &format!("/doc/{}", encode_component(id)), Some(payload))
-        .unwrap_or_else(|e| panic!("PUT /doc/{id}: {e}"));
-    assert!(res.ok(), "PUT /doc/{id} failed: HTTP {} {}", res.status, res.body);
+    let res = request(
+        "PUT",
+        &format!("/doc/{}", encode_component(id)),
+        Some(payload),
+    )
+    .unwrap_or_else(|e| panic!("PUT /doc/{id}: {e}"));
+    assert!(
+        res.ok(),
+        "PUT /doc/{id} failed: HTTP {} {}",
+        res.status,
+        res.body
+    );
 }
 
 /// The full row: `{ id, data, version, updated_at, deleted_at }`.
 pub fn get_doc_row(id: &str) -> Value {
     let res = request("GET", &format!("/doc/{}", encode_component(id)), None)
         .unwrap_or_else(|e| panic!("GET /doc/{id}: {e}"));
-    assert!(res.ok(), "GET /doc/{id} failed: HTTP {} {}", res.status, res.body);
+    assert!(
+        res.ok(),
+        "GET /doc/{id} failed: HTTP {} {}",
+        res.status,
+        res.body
+    );
     res.json()
 }
 
@@ -202,8 +228,12 @@ pub fn get_doc_raw(id: &str) -> String {
 }
 
 pub fn sync_doc(id: &str, payload: &Value) -> HttpResult {
-    request("POST", &format!("/doc/{}/sync", encode_component(id)), Some(payload))
-        .unwrap_or_else(|e| panic!("POST /doc/{id}/sync: {e}"))
+    request(
+        "POST",
+        &format!("/doc/{}/sync", encode_component(id)),
+        Some(payload),
+    )
+    .unwrap_or_else(|e| panic!("POST /doc/{id}/sync: {e}"))
 }
 
 /// POST /sync/batch — the shape an offline queue flushes in.
@@ -216,8 +246,36 @@ pub fn sync_batch(mutations: Vec<(String, Value)>) -> Value {
     });
     let res = request("POST", "/sync/batch", Some(&body))
         .unwrap_or_else(|e| panic!("POST /sync/batch: {e}"));
-    assert!(res.ok(), "POST /sync/batch failed: HTTP {} {}", res.status, res.body);
+    assert!(
+        res.ok(),
+        "POST /sync/batch failed: HTTP {} {}",
+        res.status,
+        res.body
+    );
     res.json()
+}
+
+/// POST one SDK-produced protocol v1 envelope without rewriting its fields.
+pub fn protocol_push(envelope: &Value) -> HttpResult {
+    request("POST", "/v1/sync/push", Some(envelope))
+        .unwrap_or_else(|e| panic!("POST /v1/sync/push: {e}"))
+}
+
+pub fn protocol_pull(checkpoint: &str, limit: usize) -> HttpResult {
+    request(
+        "GET",
+        &format!(
+            "/v1/sync/pull?checkpoint={}&limit={limit}",
+            encode_component(checkpoint)
+        ),
+        None,
+    )
+    .unwrap_or_else(|e| panic!("GET /v1/sync/pull: {e}"))
+}
+
+pub fn protocol_snapshot() -> HttpResult {
+    request("GET", "/v1/sync/snapshot", None)
+        .unwrap_or_else(|e| panic!("GET /v1/sync/snapshot: {e}"))
 }
 
 /* ------------------------------------------------------------------ */
@@ -241,7 +299,7 @@ pub fn normalize_keyed_arrays(value: &Value) -> Value {
                     .iter()
                     .all(|v| v.as_object().is_some_and(|o| o.contains_key("id")));
             if all_keyed {
-                mapped.sort_by_key(|v| ident_of(v));
+                mapped.sort_by_key(ident_of);
             }
             Value::Array(mapped)
         }
@@ -267,7 +325,8 @@ fn ident_of(v: &Value) -> String {
 }
 
 fn render(value: &Value) -> String {
-    serde_json::to_string_pretty(&normalize_keyed_arrays(value)).unwrap_or_else(|_| value.to_string())
+    serde_json::to_string_pretty(&normalize_keyed_arrays(value))
+        .unwrap_or_else(|_| value.to_string())
 }
 
 /// Structural equality over PARSED JSON. Postgres jsonb reorders object keys, so
@@ -318,9 +377,18 @@ pub fn status_counts(client: &OptoSyncClient<InMemoryStore>) -> StatusCounts {
     let all = client.store().all();
     StatusCounts {
         total: all.len(),
-        pending: all.iter().filter(|m| m.status == MutationStatus::Pending).count(),
-        synced: all.iter().filter(|m| m.status == MutationStatus::Synced).count(),
-        failed: all.iter().filter(|m| m.status == MutationStatus::Failed).count(),
+        pending: all
+            .iter()
+            .filter(|m| m.status == MutationStatus::Pending)
+            .count(),
+        synced: all
+            .iter()
+            .filter(|m| m.status == MutationStatus::Synced)
+            .count(),
+        failed: all
+            .iter()
+            .filter(|m| m.status == MutationStatus::Failed)
+            .count(),
     }
 }
 
@@ -384,6 +452,9 @@ pub fn flush_one(
     } else {
         client.store_mut().mark_failed(mutation_id)
     };
-    assert!(marked, "the store must acknowledge marking mutation {mutation_id}");
+    assert!(
+        marked,
+        "the store must acknowledge marking mutation {mutation_id}"
+    );
     res
 }

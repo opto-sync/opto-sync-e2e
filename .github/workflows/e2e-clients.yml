@@ -2,13 +2,14 @@ name: E2E (client-in-the-loop)
 
 # test/clients/run_all.sh — the only e2e suite that runs on the HOST rather than
 # in a container: it drives the three real client libraries from
-# ../opto-sync-clients (ts / dart / rust) against a live node+Postgres server,
-# then makes all three agree on one document (scenario 7, cross-client
-# convergence). It needs node + dart + cargo locally, so it gets its own job.
+# ../opto-sync-clients (ts / dart / rust / gleam) against a live node+Postgres
+# server, then makes the first three agree on one document (scenario 7,
+# cross-client
+# convergence). It needs all four toolchains locally, so it gets its own job.
 #
 # LAYOUT: run_all.sh resolves CLIENTS_ROOT as ../../../opto-sync-clients/clients
-# and the three suites path-depend on ../../../../opto-sync-clients/clients/*,
-# so all three repos are checked out as siblings under $GITHUB_WORKSPACE:
+# and the suites path-depend on ../../../../opto-sync-clients/clients/*,
+# so all three repositories are checked out as siblings under $GITHUB_WORKSPACE:
 #
 #   $GITHUB_WORKSPACE/
 #     syncer.c/
@@ -37,7 +38,7 @@ env:
 
 jobs:
   client-in-the-loop:
-    name: test/clients/run_all.sh (ts + dart + rust vs live server)
+    name: test/clients/run_all.sh (ts + dart + rust + gleam vs live server)
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -72,12 +73,19 @@ jobs:
         with:
           sdk: stable
 
-      # The Dart client suite opens a real Drift/SQLite queue through
-      # package:sqlite3, which dlopen()s the system libsqlite3.
-      - name: Install libsqlite3 (Drift/sqlite3 FFI)
+      # Dart opens real SQLite. Gleam calls the actual BEAM Rustler/C NIF.
+      - name: Install SQLite and BEAM system libraries
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends libsqlite3-0
+          sudo apt-get install -y --no-install-recommends \
+            elixir erlang-dev erlang-eunit libsqlite3-0
+
+      - name: Install pinned Gleam compiler
+        run: |
+          curl -fsSLO https://github.com/gleam-lang/gleam/releases/download/v1.16.0/gleam-v1.16.0-x86_64-unknown-linux-musl.tar.gz
+          curl -fsSLO https://github.com/gleam-lang/gleam/releases/download/v1.16.0/gleam-v1.16.0-x86_64-unknown-linux-musl.tar.gz.sha256
+          sha256sum -c gleam-v1.16.0-x86_64-unknown-linux-musl.tar.gz.sha256
+          sudo tar -xzf gleam-v1.16.0-x86_64-unknown-linux-musl.tar.gz -C /usr/local/bin gleam
 
       # Rust stable is preinstalled on ubuntu-latest. Downloads only, no target/.
       - name: Cache cargo registry (downloads only, never target/)
@@ -122,6 +130,13 @@ jobs:
           npm install
           npm run build
 
+      # The restart test closes and relaunches Chromium with one persistent
+      # profile to prove native IndexedDB survives an actual browser process,
+      # not merely a Dexie connection reopen.
+      - name: Install Chromium for IndexedDB process-restart coverage
+        working-directory: opto-sync-clients/clients/ts
+        run: npx playwright install --with-deps chromium
+
       # run_all.sh runs the Rust suite with `cargo test --offline` and
       # `cargo run --offline`, but test/clients/rust/Cargo.lock is gitignored, so
       # on a fresh checkout there is nothing to resolve offline FROM. Generate
@@ -137,6 +152,17 @@ jobs:
       - name: Pre-resolve Dart deps
         working-directory: opto-sync-e2e/test/clients/dart
         run: dart pub get
+
+      - name: Build BEAM NIF and pre-resolve Gleam live-client deps
+        run: |
+          cd syncer.c/bindings/beam
+          mix local.hex --force
+          mix local.rebar --force
+          mix deps.get
+          mix compile
+          cd ../../../opto-sync-e2e/test/clients/gleam
+          gleam deps download
+          gleam format --check src test
 
       # --- the server the suite runs against ---------------------------------
       - name: Install .dockerignore at the build context root
@@ -200,7 +226,7 @@ jobs:
       - name: Which suite broke
         if: failure()
         run: |
-          echo "::error title=opto-sync-e2e client-in-the-loop FAILED::test/clients/run_all.sh broke (ts, dart or rust client vs the live node server) — the per-language PASS/FAIL summary is at the end of the run_all.sh step, and server logs are in the compose-logs-client-in-the-loop artifact."
+          echo "::error title=opto-sync-e2e client-in-the-loop FAILED::test/clients/run_all.sh broke (ts, dart, rust, or gleam client vs the live node server) — the per-language PASS/FAIL summary is at the end of the run_all.sh step, and server logs are in the compose-logs-client-in-the-loop artifact."
 
       # Ephemeral runner, so `down -v` is safe here (unlike locally, where the
       # Postgres volume is shared with other suites).

@@ -87,8 +87,8 @@ async function verify() {
   checkEqual(serverFinal, FX.expectedFinal, 'final server document matches the predicted merge exactly');
 
   // Spot-check the load-bearing policy claims, so a failure names the rule.
-  check(serverFinal.title === 'rust title',
-    'unguarded root scalar follows arrival order (last flusher wins)');
+  check(serverFinal.updatedAt === 4000 && serverFinal.title === 'rust title',
+    'root LWW follows the deterministic payload timestamps');
   check(serverFinal.revision.owner === 'dart' && serverFinal.revision.updatedAt === 4000,
     'guarded object follows updatedAt, NOT flush order: rust flushed last but is stale');
   check(serverFinal.revision.priority === 2, "rust's stale revision was rejected WHOLESALE");

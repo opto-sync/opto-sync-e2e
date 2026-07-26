@@ -54,6 +54,30 @@ The node server **refuses to start without the native C addon**
 pass without ever exercising the core — the false confidence these tests exist
 to prevent.
 
+The protocol reference routes are open only in the explicit e2e mode used by
+the normal test stack. Outside e2e mode they fail closed until asymmetric JWT
+or exact static identities are configured. Each verified identity binds a
+subject and tenant to an exact set of client IDs; records, ledgers, pull pages,
+and snapshots are tenant-scoped. Run the production-mode adversarial checks
+with:
+
+```sh
+docker compose --profile auth up --build --exit-code-from auth-protocol
+docker compose --profile jwt-auth up --build \
+  --exit-code-from jwt-auth-protocol
+```
+
+See [Protocol authentication](docs/AUTHENTICATION.md) for locally verified
+Supabase JWT/JWKS mode, signed tenant/client claim mapping, static credentials,
+and rotation guidance. Applications with per-record ACLs must still enforce
+them in the application path or with database RLS.
+
+Protocol push/mutation/snapshot quotas, authenticated and unauthenticated rate
+limits, protected Prometheus metrics, privacy-preserving JSON audit events, and
+the concurrency probe are documented in [`docs/OPERATIONS.md`](docs/OPERATIONS.md).
+Transactional schema evolution and the automated dump/restore drill are in
+[`docs/MIGRATIONS_AND_RECOVERY.md`](docs/MIGRATIONS_AND_RECOVERY.md).
+
 ### Supabase / rust-mash
 
 `rust-mash` can run against a real Supabase project *or* against the local
@@ -96,7 +120,8 @@ docker compose --profile fulltest --profile fullstack --profile dart --profile s
 `run_e2e.sh` exercises the node server (health, seed docs, deep merge of
 nested objects). `run_e2e_full.sh` covers node, rust-fullstack, dart and
 sagitta, asserting element-level keyed-array behavior (stale element rejected,
-untouched element kept, new element appended, `createdAt` re-creation refused)
+untouched element kept, new element appended, and later `createdAt` accepted by
+the default no-FWW policy)
 rather than merely that a merge occurred.
 
 ### Deeper suites
@@ -104,6 +129,10 @@ rather than merely that a merge occurred.
 | Suite | What it proves | Run |
 |---|---|---|
 | `test/conformance/` | Scenario-level behavior against the Postgres-backed node server: jsonb round-trip fidelity, tombstones, CAS conflicts, unique-index identity, strategy matrix, robustness | `docker compose --profile conformance up --exit-code-from conformance` |
+| `test/protocol/run.mjs` | Protocol v1 idempotency, immutable mutation ids, transactional push, committed-but-response-lost retry recovery, durable rejection, commit-ordered protocol/direct-SQL capture through the canonical multi-table mirror, explicit tombstones, tenant-filtered pagination, compaction reset, and snapshot consistency | `docker compose --profile protocol up --exit-code-from protocol` |
+| `test/protocol/auth.mjs` | Production-mode bearer authentication, exact client binding, durable subject ownership, token rotation, cross-tenant pull/snapshot isolation, and separate compaction administration | `docker compose --profile auth up --exit-code-from auth-protocol` |
+| `test/protocol/operations.mjs` | Production-mode push/mutation/snapshot quotas, valid- and invalid-principal rate limiting, protected bounded-cardinality metrics, and structured audit paths | `docker compose --profile operations up --exit-code-from operations-protocol` |
+| `test/protocol/load.mjs` | 96 concurrent writers and ambiguous retries, ordered-log/snapshot correctness first, then configurable p95/max latency bounds | `docker compose --profile load up --exit-code-from protocol-load` |
 | `test/cross-server/` | Four runtimes produce semantically identical documents from one mutation sequence; non-contending mutations converge in any apply order | `docker compose --profile crossserver --profile fullstack --profile dart --profile sagitta up --exit-code-from cross-server` |
 | `test/clients/` | The client libraries in `../opto-sync-clients` (ts/dart/rust) syncing against a live server: offline queue, replay, pull-back reconcile, cross-client convergence | `test/clients/run_all.sh` (from the host) |
 | `test/supabase/` | The Supabase REST path end to end via a local PostgREST stand-in, with JWT auth enforced | see `test/supabase/README.md` |
@@ -136,9 +165,10 @@ repo as siblings and install `context.dockerignore` at the build-context root,
 exactly as the Setup section above describes.
 
 - [`.github/workflows/e2e-docker.yml`](.github/workflows/e2e-docker.yml) — one
-  matrix leg per docker suite: `fulltest`, `conformance`, `crossserver`, and the
-  Supabase/PostgREST path. Each leg tears the stack down with
-  `docker compose down -v` and uploads full container logs on failure.
+  matrix leg per docker suite: `fulltest`, `conformance`, `protocol`, static
+  `auth`, Supabase-compatible `jwt-auth`, `operations`, `load`, `recovery`,
+  `crossserver`, and the Supabase/PostgREST path. Each leg tears the stack down
+  with `docker compose down -v` and uploads full container logs on failure.
 - [`.github/workflows/e2e-clients.yml`](.github/workflows/e2e-clients.yml) — the
   host-run `test/clients/run_all.sh` (ts + dart + rust clients against a live
   `postgres` + `node` stack), with `OPTO_SYNC_REQUIRE_SERVER=1` so an

@@ -1,0 +1,37 @@
+{
+  "protocolVersion": 1,
+  "clients": {
+    "primary": "protocol.primary",
+    "delete": "protocol.delete",
+    "atomic": "protocol.atomic",
+    "unsupported": "protocol.unsupported",
+    "concurrentA": "protocol.concurrent-a",
+    "concurrentB": "protocol.concurrent-b"
+  },
+  "records": {
+    "primary": "protocol-primary",
+    "delete": "protocol-delete",
+    "atomic": "protocol-atomic",
+    "unsupportedRecovery": "protocol-supported",
+    "concurrentA": "protocol-concurrent-a",
+    "concurrentB": "protocol-concurrent-b"
+  },
+  "payloads": {
+    "primary": {
+      "title": "protocol write",
+      "updatedAt": "1721822400000-0000-protocol.primary"
+    },
+    "primaryConflict": {
+      "title": "must be rejected",
+      "updatedAt": "1721822400001-0000-protocol.primary"
+    },
+    "created": {
+      "title": "created through protocol",
+      "updatedAt": "1721822400100-0000-protocol.delete"
+    },
+    "resurrected": {
+      "title": "explicit resurrection",
+      "updatedAt": "1721822400200-0000-protocol.delete"
+    }
+  }
+}

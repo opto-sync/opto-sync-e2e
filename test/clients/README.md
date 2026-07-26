@@ -2,8 +2,9 @@
 
 The rest of the e2e suite exercises the **server**. These suites exercise the
 **client libraries that external projects actually import** — `@opto-sync/client`,
-`opto_sync_client` (Dart) and the `opto-sync-client` crate — against a live
-server, over HTTP, with every document round-tripping through Postgres `jsonb`.
+`opto_sync_client` (Dart and Gleam) and the `opto-sync-client` crate — against
+a live server, over HTTP, with every document round-tripping through Postgres
+`jsonb`.
 
 Before this directory existed, the client libraries were never run against a real
 server at all. Their own unit tests only prove the native merge does what the
@@ -19,17 +20,18 @@ otherwise touch the stack.
 
 ```sh
 cd opto-sync-e2e/test/clients
-./run_all.sh                 # all three languages + cross-client convergence
-./run_all.sh ts              # one language only (ts | dart | rust)
+./run_all.sh                 # all four languages + three-client convergence
+./run_all.sh ts              # one language only (ts | dart | rust | gleam)
 ./run_all.sh --no-converge   # scenarios 1-6 only
 ```
 
 Individual suites, if you prefer:
 
 ```sh
-(cd ts   && node --test)                                    # 8 tests
-(cd dart && dart test)                                      # 8 tests
-(cd rust && cargo test --offline --test scenarios)          # 8 tests
+(cd ts   && node --test)                                    # 10 tests
+(cd dart && dart test)                                      # 10 tests
+(cd rust && cargo test --offline --test scenarios)          # 10 tests
+(cd gleam && gleam test)                                    # protocol lifecycle
 ```
 
 | Variable | Default | Meaning |
@@ -59,10 +61,12 @@ Host toolchains only — no new Docker images.
 
 ## What is covered
 
-Seven scenarios, implemented in **all three languages** so uniform behavior is
-provable rather than assumed. Scenarios 1–6 are one test each (1 is split into
-`1a` individual / `1b` batched), plus a test `0` per language that pins the
-client's default merge policy. Scenario 7 is a cross-process orchestration.
+The full reconciliation scenarios are implemented in TypeScript, Dart, and
+Rust so
+uniform behavior is provable rather than assumed. Scenarios 1–6 are one test
+each (1 is split into `1a` individual / `1b` batched), test `0` pins the
+client's default merge policy, scenario 7 is a cross-process orchestration, and
+scenario 8 posts the exact protocol envelope produced by each SDK.
 
 | # | Scenario | What it proves |
 | --- | --- | --- |
@@ -74,10 +78,15 @@ client's default merge policy. Scenario 7 is a cross-process orchestration.
 | 5 | Replay / retry idempotency | The same queued mutation is flushed twice, as a client would after an ambiguous network failure. The document **version advances** (proving the second write really executed) while the data stays semantically identical — no duplicated keyed elements, no duplicated identity-less `tags` entries. |
 | 6 | Failure marking | A mutation against a document that does not exist returns 404 and is marked `FAILED`, never `SYNCED`. A following good mutation then proves pending/synced/failed accounting is per-mutation and not sticky. |
 | 7 | **Cross-client convergence** | All three clients queue **different** payloads against **one** fresh document, flushed `ts → dart → rust`. The final server document must be exactly what the merge policy predicts, and **each client's local reconcile of that final state must agree**. |
+| 8 | **Protocol v1 SDK round trip** | Each SDK builds its own `operation` envelope, posts it unchanged, drains the queue through `lastMutationId`, retries the identical envelope after an ambiguous outcome, and receives `duplicate` without a second effect. |
+| restart fault path | **Commit/ack and snapshot interruption** | Fresh processes reopen the durable queue after the server committed but before local acknowledgement. A deliberately partial snapshot replacement must leave checkpoint `"0"` and pending work intact; the next process repairs the snapshot, retries the identical envelope, receives `duplicate`, and persists both checkpoint and acknowledgement. TypeScript uses three Chromium processes with one native IndexedDB profile; Dart uses file-backed SQLite; Rust serializes `ProtocolQueue`. |
+| SDK schedulers | **Live pull/push/pull orchestration** | TypeScript and Dart `ProtocolSyncLoop`, plus Rust `ProtocolSyncDriver`, drain their real queue representations through the protocol server, apply the PostgreSQL change-log echo, durably advance the checkpoint, and leave no pending mutation. |
+| Gleam protocol lifecycle | **Typed SDK against live PostgreSQL** | The Gleam client builds and encodes its own queue envelope, receives a typed applied ack, retries the exact bytes for `duplicate`, pulls the captured change, invokes the NIF, then sends a tombstone with mutation id 2. |
 
 Every suite also asserts the server reported `mergedWith: "native-c-ffi"`, and
 `run_all.sh` aborts if `/health` says the server fell back to the JS merge —
 against a JS fallback these convergence assertions would be false confidence.
+The complete runner contains 13 orchestration steps.
 
 ### Scenario 7 in detail
 
@@ -97,8 +106,8 @@ converge/verify  rust      "
 The payloads are designed so that **flush order and timestamp order disagree**,
 which is the load-bearing part:
 
-* `title` is an unguarded root scalar → plain last-writer-wins → `rust` (flushed
-  last) wins.
+* each payload has a deterministic root `updatedAt` (`2000`, `3000`, `4000`),
+  so root LWW accepts all three in order and `rust`'s title wins.
 * `revision` is a guarded object → `dart` (`updatedAt` 4000) wins even though
   `rust` (`updatedAt` 3000) flushed **after** it, and `rust`'s whole `revision`
   object is dropped rather than partially applied.
@@ -162,7 +171,7 @@ JSON strings** — everything is parsed first. Two flavors of equality are used:
   is namespaced — `cl-<lang>-<scenario>` for scenarios 1–6, `cl-converge` for
   scenario 7 — and created with `PUT /doc/:id` immediately before use. As a
   bonus, the three language suites are independent and can run in parallel.
-* **The clients ship no transport.** All three libraries are queue + reconcile
+* **The clients ship no transport.** All four libraries are queue + reconcile
   only, so the HTTP layer lives in each suite's support module. What is under test
   is the library's queue lifecycle (`pending → synced/failed`) and its reconcile
   output — never a re-implementation of merging in test code.
@@ -217,4 +226,7 @@ test/clients/
     src/lib.rs                  HTTP, fixtures, comparison, Routes/flush helpers
     tests/scenarios.rs          scenarios 0-6   (cargo test)
     src/bin/converge.rs         scenario 7 phase runner
+  gleam/
+    src/live_support.gleam      e2e-only Erlang `httpc` transport
+    test/*                      live push/retry/pull/delete lifecycle
 ```

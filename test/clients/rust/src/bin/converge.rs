@@ -61,10 +61,16 @@ fn flush(p: &mut Phase) {
     let mut routes = Routes::new();
 
     let mid = routes.queue(&mut client, doc, payload());
-    p.check(client.store().pending().len() == 1, "payload queued as pending");
+    p.check(
+        client.store().pending().len() == 1,
+        "payload queued as pending",
+    );
 
     let res = flush_one(&mut client, &routes, mid);
-    p.check(res.status == 200, &format!("flushed to {doc} (HTTP {})", res.status));
+    p.check(
+        res.status == 200,
+        &format!("flushed to {doc} (HTTP {})", res.status),
+    );
     p.check(
         res.json().get("mergedWith").and_then(Value::as_str) == Some("native-c-ffi"),
         "server merged with the native C core",
@@ -98,8 +104,9 @@ fn verify(p: &mut Phase) {
     };
 
     p.check(
-        server_final.get("title").and_then(Value::as_str) == Some("rust title"),
-        "unguarded root scalar follows arrival order (last flusher wins)",
+        server_final.get("updatedAt").and_then(Value::as_u64) == Some(4000)
+            && server_final.get("title").and_then(Value::as_str) == Some("rust title"),
+        "root LWW follows the deterministic payload timestamps",
     );
     p.check(
         revision.get("owner").and_then(Value::as_str) == Some("dart")
@@ -172,7 +179,10 @@ fn main() -> ExitCode {
         return ExitCode::SUCCESS;
     }
 
-    let mut phase = Phase { name: name.clone(), checks: 0 };
+    let mut phase = Phase {
+        name: name.clone(),
+        checks: 0,
+    };
     // Assertion failures inside a phase must be a clean non-zero exit with a
     // single readable line, not a raw Rust panic dump in the orchestrator's log.
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(&mut phase)));

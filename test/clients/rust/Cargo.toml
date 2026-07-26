@@ -23,3 +23,7 @@ ureq = { version = "2.12", default-features = false }
 [[bin]]
 name = "converge"
 path = "src/bin/converge.rs"
+
+[[bin]]
+name = "protocol-restart"
+path = "src/bin/protocol_restart.rs"

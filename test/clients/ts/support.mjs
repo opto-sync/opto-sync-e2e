@@ -146,6 +146,24 @@ export async function syncBatch(mutations) {
   return res.json;
 }
 
+/** POST one SDK-produced protocol v1 envelope without rewriting its fields. */
+export function protocolPush(envelope) {
+  return request('POST', '/v1/sync/push', envelope);
+}
+
+/** Pull one protocol v1 page from the opaque durable checkpoint. */
+export function protocolPull(checkpoint, limit = 100) {
+  return request(
+    'GET',
+    `/v1/sync/pull?checkpoint=${encodeURIComponent(checkpoint)}&limit=${limit}`,
+  );
+}
+
+/** Fetch the current repeatable-read protocol v1 reset snapshot. */
+export function protocolSnapshot() {
+  return request('GET', '/v1/sync/snapshot');
+}
+
 /* ------------------------------------------------------------------ */
 /* Semantic comparison                                                */
 /* ------------------------------------------------------------------ */

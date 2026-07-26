@@ -1,0 +1,10 @@
+name = "opto_sync_gleam_e2e"
+version = "0.1.0"
+target = "erlang"
+
+[dependencies]
+gleam_stdlib = ">= 0.68.0 and < 2.0.0"
+opto_sync_client = { path = "../../../../opto-sync-clients/clients/gleam" }
+
+[dev-dependencies]
+gleeunit = ">= 1.9.0 and < 2.0.0"

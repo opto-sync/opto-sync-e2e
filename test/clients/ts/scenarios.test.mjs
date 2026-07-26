@@ -16,8 +16,11 @@ import {
   ArrayStrategy,
   DEFAULT_RECONCILE_OPTIONS,
   OptoSyncClient,
+  ProtocolSyncLoop,
   SYNC_STATUS,
+  SyncTransportError,
   engineVersion,
+  parseHlc,
   reconcileIncoming,
 } from '../../../../opto-sync-clients/clients/ts/dist/index.js';
 
@@ -30,6 +33,9 @@ import {
   getDocRaw,
   getDocRow,
   probeServer,
+  protocolPull,
+  protocolPush,
+  protocolSnapshot,
   putDoc,
   statusCounts,
   syncBatch,
@@ -86,6 +92,13 @@ async function flushOne(client, mutation, id) {
   const res = await syncDoc(id, JSON.parse(mutation.jsonPayload));
   await client.markMutation(mutation.id, res.ok ? SYNC_STATUS.SYNCED : SYNC_STATUS.FAILED);
   return res;
+}
+
+/** Add the HLC stamp that queueMutation injects into an otherwise unstamped payload. */
+function expectedWithQueuedStamp(expected, mutation) {
+  const stamp = JSON.parse(mutation.jsonPayload).updatedAt;
+  assert.ok(parseHlc(stamp), `queued updatedAt must be a valid HLC, got ${stamp}`);
+  return { ...expected, updatedAt: stamp };
 }
 
 /* ==================================================================== */
@@ -149,6 +162,7 @@ test('1a. offline queue flushed one-by-one: all synced, server has every contrib
 
   // Back online: flush in queue order.
   pending = (await client.pendingMutations()).sort((a, b) => a.id - b.id);
+  const expected = expectedWithQueuedStamp(fx.expected, pending.at(-1));
   for (const m of pending) {
     const res = await flushOne(client, m, id);
     assert.equal(res.status, 200, `sync of mutation ${m.id} should succeed: ${res.text}`);
@@ -160,7 +174,7 @@ test('1a. offline queue flushed one-by-one: all synced, server has every contrib
   assert.deepEqual(await statusCounts(client), { total: 3, pending: 0, synced: 3, failed: 0 });
   assert.deepEqual(queuedIds.length, 3);
 
-  assertDeepEqual(await getDocData(id), fx.expected, 'server document after individual flush');
+  assertDeepEqual(await getDocData(id), expected, 'server document after individual flush');
 });
 
 test('1b. offline queue flushed atomically via /sync/batch: same result', opts, async () => {
@@ -173,6 +187,7 @@ test('1b. offline queue flushed atomically via /sync/batch: same result', opts, 
 
   const pending = (await client.pendingMutations()).sort((a, b) => a.id - b.id);
   assert.equal(pending.length, 3);
+  const expected = expectedWithQueuedStamp(fx.expected, pending.at(-1));
 
   const result = await syncBatch(
     pending.map((m) => ({ docId: id, payload: JSON.parse(m.jsonPayload) })),
@@ -182,7 +197,7 @@ test('1b. offline queue flushed atomically via /sync/batch: same result', opts, 
   for (const m of pending) await client.markMutation(m.id, SYNC_STATUS.SYNCED);
   assert.deepEqual(await statusCounts(client), { total: 3, pending: 0, synced: 3, failed: 0 });
 
-  assertDeepEqual(await getDocData(id), fx.expected, 'server document after batch flush');
+  assertDeepEqual(await getDocData(id), expected, 'server document after batch flush');
 });
 
 /* ==================================================================== */
@@ -203,22 +218,105 @@ test('2. optimistic local write then server pull-back reconcile converges', opts
 
   // Push, then pull the server's own view back.
   const mid = await client.queueMutation('docs', id, fx.mutation);
-  const res = await syncDoc(id, fx.mutation);
+  const [queued] = await client.pendingMutations();
+  const expected = expectedWithQueuedStamp(fx.expected, queued);
+  const res = await flushOne(client, queued, id);
   assert.equal(res.status, 200, res.text);
-  await client.markMutation(mid, SYNC_STATUS.SYNCED);
+  assert.equal(queued.id, mid);
 
   const serverData = await getDocData(id);
-  assertDeepEqual(serverData, fx.expected, 'server document after push');
+  assertDeepEqual(serverData, expected, 'server document after push');
 
   // Reconcile the pulled server state back into the local copy.
   const localAfterPullback = client.reconcileIncoming('docs', id, serverData, localAfterOptimistic);
   assertDeepEqual(localAfterPullback, serverData, 'local copy after pull-back vs server');
-  assertDeepEqual(localAfterPullback, fx.expected, 'local copy after pull-back vs expectation');
+  assertDeepEqual(localAfterPullback, expected, 'local copy after pull-back vs expectation');
 
   // The stored jsonb text is NOT the string we sent — proof that comparing raw
   // strings would be wrong, and that we never do.
   const raw = await getDocRaw(id);
-  assertDeepEqual(JSON.parse(raw), fx.expected, 'raw jsonb text parses to the same value');
+  assertDeepEqual(JSON.parse(raw), expected, 'raw jsonb text parses to the same value');
+});
+
+test('2b. ProtocolSyncLoop drives the durable queue against live PostgreSQL', opts, async () => {
+  const id = docId(`sync-loop-${Date.now()}-${dbSeq}`);
+  const client = freshClient();
+  const payload = { title: 'scheduled offline write', nested: { value: 7 } };
+  await client.queueMutation('docs', id, payload, { baseRevision: '0' });
+
+  const authoritative = new Map();
+  const transport = {
+    async push(request, signal) {
+      const response = await fetch(`${BASE_URL}/v1/sync/push`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(request),
+        signal,
+      });
+      const body = await response.json();
+      if (!response.ok) {
+        throw new SyncTransportError(
+          body?.message ?? `push failed with HTTP ${response.status}`,
+          response.status >= 500 || response.status === 429,
+        );
+      }
+      return body;
+    },
+    async pull(checkpoint, limit) {
+      const response = await protocolPull(checkpoint, limit);
+      if (response.status === 409 && response.json?.error === 'RESET_REQUIRED') {
+        return response.json;
+      }
+      if (!response.ok) {
+        throw new SyncTransportError(
+          response.json?.message ?? `pull failed with HTTP ${response.status}`,
+          response.status >= 500 || response.status === 429,
+        );
+      }
+      return response.json;
+    },
+    async snapshot() {
+      const response = await protocolSnapshot();
+      if (!response.ok) {
+        throw new SyncTransportError(
+          response.json?.message ?? `snapshot failed with HTTP ${response.status}`,
+          response.status >= 500 || response.status === 429,
+        );
+      }
+      return response.json;
+    },
+  };
+  const loop = new ProtocolSyncLoop(client, transport, {
+    async applyChanges(changes) {
+      for (const entry of changes) {
+        if (entry.operation === 'delete') authoritative.delete(entry.recordId);
+        else authoritative.set(entry.recordId, entry.record);
+      }
+    },
+    async replaceAuthoritative(records) {
+      authoritative.clear();
+      for (const entry of records) {
+        authoritative.set(entry.recordId, entry.record);
+      }
+    },
+  });
+
+  client.setBackgroundSyncTrigger(() => loop.hint());
+  const result = await loop.syncNow();
+  const queuedPayload = JSON.parse(
+    (await client.db.localMutations.orderBy('id').last()).jsonPayload,
+  );
+
+  assert.equal(result.pushedMutations, 1);
+  assert.equal(result.acknowledgedMutations, 1);
+  assert.equal(result.hasMorePending, false);
+  assert.equal((await client.pendingMutations()).length, 0);
+  assertDeepEqual(
+    authoritative.get(id),
+    queuedPayload,
+    'checkpointed pull must contain the live server echo',
+  );
+  assert.notEqual(await client.pullCheckpoint(), '0');
 });
 
 /* ==================================================================== */
@@ -261,12 +359,14 @@ test('4. keyed array: untouched kept, fresh applied, stale rejected, new appende
   assertDeepEqual(localCopy, fx.expected, 'client-side keyed-array reconcile');
 
   const mid = await client.queueMutation('docs', id, fx.mutation);
-  const res = await syncDoc(id, fx.mutation);
+  const [queued] = await client.pendingMutations();
+  const expected = expectedWithQueuedStamp(fx.expected, queued);
+  const res = await flushOne(client, queued, id);
   assert.equal(res.status, 200, res.text);
-  await client.markMutation(mid, SYNC_STATUS.SYNCED);
+  assert.equal(queued.id, mid);
 
   const serverData = await getDocData(id);
-  assertDeepEqual(serverData, fx.expected, 'server keyed-array merge');
+  assertDeepEqual(serverData, expected, 'server keyed-array merge');
 
   const rows = serverData.rows;
   assert.equal(rows.length, 4, 'exactly one new identity may be appended');
@@ -278,7 +378,7 @@ test('4. keyed array: untouched kept, fresh applied, stale rejected, new appende
   // And the client's reconcile of the pulled state agrees.
   assertDeepEqual(
     client.reconcileIncoming('docs', id, serverData, localCopy),
-    fx.expected,
+    expected,
     'client reconcile of the pulled keyed array',
   );
 });
@@ -296,11 +396,12 @@ test('5. replaying the same queued mutation leaves the document semantically unc
   const mid = await client.queueMutation('docs', id, fx.mutation);
   const [queued] = await client.pendingMutations();
   const payload = JSON.parse(queued.jsonPayload);
+  const expected = expectedWithQueuedStamp(fx.expected, queued);
 
   // First flush.
   assert.equal((await syncDoc(id, payload)).status, 200);
   const afterFirst = await getDocRow(id);
-  assertDeepEqual(afterFirst.data, fx.expected, 'document after first flush');
+  assertDeepEqual(afterFirst.data, expected, 'document after first flush');
 
   // Ambiguous network failure: the client never learned the first attempt
   // landed, so it replays the very same payload.
@@ -312,7 +413,7 @@ test('5. replaying the same queued mutation leaves the document semantically unc
     `the replay must really have written (version ${afterFirst.version} -> ${afterSecond.version})`,
   );
   assertDeepEqual(afterSecond.data, afterFirst.data, 'replay must not change the document');
-  assertDeepEqual(afterSecond.data, fx.expected, 'document after replay');
+  assertDeepEqual(afterSecond.data, expected, 'document after replay');
   assert.equal(afterSecond.data.tags.length, 2, 'identity-less array elements must not duplicate on replay');
   assert.equal(afterSecond.data.rows.length, 2, 'keyed array elements must not duplicate on replay');
 
@@ -361,4 +462,30 @@ test('6. a mutation against a nonexistent document is marked failed, not synced'
     'final accounting: one synced, one failed, nothing pending',
   );
   assertDeepEqual(await getDocData(okId), fx.expectedOk, 'the good mutation still landed');
+});
+
+test('8. SDK protocol envelope round-trips and an ambiguous retry is deduplicated', opts, async () => {
+  const id = `${docId('protocol-v1')}-${process.pid}-${Date.now()}`;
+  const client = freshClient();
+  await client.queueMutation(
+    'docs',
+    id,
+    { title: 'from-ts-sdk' },
+    { baseRevision: '0' },
+  );
+
+  const envelope = await client.protocolPushRequest();
+  assert.equal(envelope.mutations[0].operation, 'upsert');
+  const first = await protocolPush(envelope);
+  assert.equal(first.status, 200, first.text);
+  assert.equal(first.json.results[0].status, 'applied', first.text);
+  assert.equal(first.json.results[0].document.record.title, 'from-ts-sdk');
+  assert.equal(await client.acknowledgePush(first.json, envelope), 1);
+  assert.equal((await client.pendingMutations()).length, 0);
+
+  const retry = await protocolPush(envelope);
+  assert.equal(retry.status, 200, retry.text);
+  assert.equal(retry.json.results[0].status, 'duplicate');
+  assert.equal(retry.json.results[0].originalStatus, 'applied');
+  assert.equal(retry.json.results[0].document.record.title, 'from-ts-sdk');
 });
