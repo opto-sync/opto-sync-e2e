@@ -10,7 +10,7 @@ name: E2E (docker)
 #
 #   $GITHUB_WORKSPACE/          <- docker build context
 #     syncer.c/
-#     opto-sync-clients/        (not COPYd by any image; kept for layout parity)
+#     opto-sync-clients/        (kept for shared-layout parity)
 #     opto-sync-e2e/            <- this repo, compose working directory
 #
 # Docker only honors a .dockerignore at the CONTEXT root, so
@@ -32,6 +32,15 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      syncer_ref:
+        description: 'Optional syncer.c ref for compatibility testing'
+        required: false
+        type: string
+      clients_ref:
+        description: 'Optional opto-sync-clients ref for compatibility testing'
+        required: false
+        type: string
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -41,10 +50,25 @@ permissions:
   contents: read
 
 env:
-  SYNCER_C_REF: main
-  CLIENTS_REF: main
+  # Ordinary CI is reproducible. Manual dispatch may opt into `main`, a PR
+  # branch, or another candidate SHA without making every E2E run follow mutable
+  # cross-repository state.
+  SYNCER_C_REF: 94324ecb8a4e1e05b07d6723e57433fe30ebc820
+  CLIENTS_REF: b1083e3db66121625c69f00baf34fc4142cf8ce7
 
 jobs:
+  repository-contract:
+    name: cross-repository CI contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout opto-sync-e2e
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify immutable refs and secret-safe workflow text
+        run: python3 scripts/check-ci-contract.py
+
   suite:
     name: e2e ${{ matrix.name }}
     runs-on: ubuntu-latest
@@ -80,20 +104,23 @@ jobs:
         uses: actions/checkout@v4
         with:
           path: opto-sync-e2e
+          persist-credentials: false
 
-      - name: Checkout syncer.c (sibling — every image COPYs syncer.c/)
+      - name: Checkout syncer.c (pinned sibling used by every image)
         uses: actions/checkout@v4
         with:
           repository: opto-sync/syncer.c
-          ref: ${{ env.SYNCER_C_REF }}
+          ref: ${{ github.event.inputs.syncer_ref || env.SYNCER_C_REF }}
           path: syncer.c
+          persist-credentials: false
 
-      - name: Checkout opto-sync-clients (sibling — documented layout)
+      - name: Checkout opto-sync-clients (pinned sibling for layout parity)
         uses: actions/checkout@v4
         with:
           repository: opto-sync/opto-sync-clients
-          ref: ${{ env.CLIENTS_REF }}
+          ref: ${{ github.event.inputs.clients_ref || env.CLIENTS_REF }}
           path: opto-sync-clients
+          persist-credentials: false
 
       # README.md, "Setup": the build context is the parent directory, so the
       # .dockerignore has to live there.
@@ -103,19 +130,25 @@ jobs:
           echo "context root: $(pwd)"
           ls -a
 
-      # .env is tracked in the repo, but compose hard-fails on a missing
-      # env_file, so make that impossible.
-      - name: Ensure .env exists
+      # Compose hard-fails on a missing env_file. Never print the file: a local
+      # or future CI override may contain credentials even though the checked-in
+      # example is non-secret.
+      - name: Ensure .env exists without logging values
         working-directory: opto-sync-e2e
         run: |
+          set -euo pipefail
           [ -f .env ] || cp .env.example .env
-          echo "--- .env ---"
-          cat .env
+          test -s .env
+          count="$(grep -Ec '^[A-Za-z_][A-Za-z0-9_]*=' .env || true)"
+          echo ".env is present with ${count} declared variable(s); values redacted"
 
-      - name: docker / compose versions
+      - name: Docker and Compose preflight
+        working-directory: opto-sync-e2e
         run: |
           docker --version
           docker compose version
+          docker compose config --quiet
+          docker compose -f docker-compose.yml -f docker-compose.supabase.yml config --quiet
 
       # These profiles start additional containers from the same image as the
       # `node` service. Compose may try to pull those aliases before `node` has
@@ -198,10 +231,8 @@ jobs:
 
       # Two-step by design (test/supabase/README.md): the override file repoints
       # rust-mash at the local PostgREST stand-in, and supabase-init must have
-      # completed (it creates the anon/authenticator roles and the
-      # supabase_sync_docs table) before the suite runs. Bringing rust-mash up
-      # from the main compose file alone leaves it on the .env placeholder and
-      # every request fails, so the override is mandatory here.
+      # completed before the suite runs. Bringing rust-mash up from the main
+      # compose file alone leaves it on the .env placeholder.
       - name: supabase — bring up postgrest + rust-mash (override file)
         if: matrix.id == 'supabase'
         working-directory: opto-sync-e2e
@@ -245,9 +276,7 @@ jobs:
 
       # Safe here in a way it is NOT locally: this runner is ephemeral and owns
       # the whole stack, so `down -v` cannot yank the shared Postgres out from
-      # under a concurrent suite (which is why test/supabase/README.md tells
-      # humans never to run it). `down` is project-wide, so it removes services
-      # from every profile regardless of which ones were selected for `up`.
+      # under a concurrent suite.
       - name: Tear down (always)
         if: always()
         working-directory: opto-sync-e2e
