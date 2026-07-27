@@ -1,8 +1,8 @@
 name: E2E (client-in-the-loop)
 
-# test/clients/run_all.sh is the host-side suite: it drives the four real client
-# libraries (TypeScript, Dart, Rust, and Gleam) against a live Node+Postgres
-# server, then requires cross-client convergence.
+# Drives the real TypeScript, Dart, Rust, and Gleam clients against a live
+# Node+Postgres server. The client repository contains its own pinned syncer.c
+# submodule; the separate sibling checkout is the server-side core under test.
 
 on:
   push:
@@ -27,10 +27,10 @@ permissions:
   contents: read
 
 env:
-  # Immutable defaults make this E2E commit reproducible. Manual dispatch can
-  # deliberately substitute `main`, a PR branch, or a candidate SHA.
-  SYNCER_C_REF: f6a56d070779404acf188ffac766e39741a15466
-  CLIENTS_REF: 48168bb8b081d627e91a406512565b9574d6af2d
+  # Exact pair certified by this E2E revision. The clients commit pins the same
+  # engine through its root syncer.c gitlink.
+  SYNCER_C_REF: 7795ce2d1342e17d934d2faafff5c8ed4322609e
+  CLIENTS_REF: 54874e9f7df6009fccd9034fce39306daef2c043
 
 jobs:
   client-in-the-loop:
@@ -44,7 +44,7 @@ jobs:
           path: opto-sync-e2e
           persist-credentials: false
 
-      - name: Checkout syncer.c (pinned sibling)
+      - name: Checkout syncer.c (pinned server core)
         uses: actions/checkout@v4
         with:
           repository: opto-sync/syncer.c
@@ -52,13 +52,30 @@ jobs:
           path: syncer.c
           persist-credentials: false
 
-      - name: Checkout opto-sync-clients (pinned libraries under test)
+      - name: Checkout opto-sync-clients and nested pinned core
         uses: actions/checkout@v4
         with:
           repository: opto-sync/opto-sync-clients
           ref: ${{ github.event.inputs.clients_ref || env.CLIENTS_REF }}
           path: opto-sync-clients
+          fetch-depth: 0
           persist-credentials: false
+          submodules: recursive
+
+      - name: Verify certified client and nested core pair
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_nested="$(git -C opto-sync-clients ls-tree HEAD syncer.c | awk '{print $3}')"
+          actual_nested="$(git -C opto-sync-clients/syncer.c rev-parse HEAD)"
+          server_core="$(git -C syncer.c rev-parse HEAD)"
+          test -n "$expected_nested"
+          test "$expected_nested" = "$actual_nested"
+          test "$actual_nested" = "$server_core"
+          test -f opto-sync-clients/syncer.c/core/include/syncer.h
+          git -C opto-sync-clients submodule status --recursive
+          printf 'clients=%s\nserver-core=%s\nnested-core=%s\n' \
+            "$(git -C opto-sync-clients rev-parse HEAD)" "$server_core" "$actual_nested"
 
       - uses: actions/setup-node@v4
         with:
@@ -98,7 +115,7 @@ jobs:
           key: cargo-registry-${{ runner.os }}-e2e-clients-${{ hashFiles('opto-sync-e2e/test/clients/rust/Cargo.lock') }}
           restore-keys: cargo-registry-${{ runner.os }}-e2e-clients-
 
-      - name: Build syncer.c core shared library
+      - name: Build server syncer.c shared library
         working-directory: syncer.c/core
         run: |
           mkdir -p build
@@ -107,8 +124,10 @@ jobs:
           make syncer
           ls -l libsyncer.so
 
-      - name: Install locked syncer.c TypeScript binding dependencies first
-        working-directory: syncer.c/bindings/typescript
+      # @opto-sync/client links the nested binding. npm does not install the
+      # linked package's own dependencies, so install its committed graph first.
+      - name: Install nested syncer.c TypeScript binding dependencies first
+        working-directory: opto-sync-clients/syncer.c/bindings/typescript
         run: npm ci
 
       - name: Build @opto-sync/client (dist plus locked dev dependencies)
@@ -121,8 +140,6 @@ jobs:
         working-directory: opto-sync-clients/clients/ts
         run: npx playwright install --with-deps chromium
 
-      # run_all.sh uses cargo in offline mode. Populate the committed graph
-      # without regenerating or mutating the lockfile.
       - name: Pre-fetch locked Rust dependencies
         working-directory: opto-sync-e2e/test/clients/rust
         run: cargo fetch --locked
@@ -172,7 +189,7 @@ jobs:
             fi
             sleep 2
           done
-          echo "::error title=node server never became healthy::http://localhost:3003/health did not report {\"syncer\":\"native\"} within 120s"
+          echo "::error title=node server never became healthy::http://localhost:3003/health did not report a native syncer core within 120s"
           exit 1
 
       - name: test/clients/run_all.sh
@@ -205,7 +222,7 @@ jobs:
       - name: Which suite broke
         if: failure()
         run: |
-          echo "::error title=opto-sync-e2e client-in-the-loop FAILED::test/clients/run_all.sh broke (ts, dart, rust, or gleam client vs the live node server) — the per-language PASS/FAIL summary is at the end of the run_all.sh step, and server logs are in the compose-logs-client-in-the-loop artifact."
+          echo "::error title=opto-sync-e2e client-in-the-loop FAILED::The live TypeScript, Dart, Rust, or Gleam client suite broke; inspect the run summary and compose logs."
 
       - name: Tear down (always)
         if: always()
