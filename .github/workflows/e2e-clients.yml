@@ -1,29 +1,23 @@
 name: E2E (client-in-the-loop)
 
-# test/clients/run_all.sh — the only e2e suite that runs on the HOST rather than
-# in a container: it drives the three real client libraries from
-# ../opto-sync-clients (ts / dart / rust / gleam) against a live node+Postgres
-# server, then makes the first three agree on one document (scenario 7,
-# cross-client
-# convergence). It needs all four toolchains locally, so it gets its own job.
-#
-# LAYOUT: run_all.sh resolves CLIENTS_ROOT as ../../../opto-sync-clients/clients
-# and the suites path-depend on ../../../../opto-sync-clients/clients/*,
-# so all three repositories are checked out as siblings under $GITHUB_WORKSPACE:
-#
-#   $GITHUB_WORKSPACE/
-#     syncer.c/
-#     opto-sync-clients/
-#     opto-sync-e2e/   <- this repo
-#
-# PLATFORM: ubuntu-latest. The core shared library built here is libsyncer.so;
-# SYNCER_LIB_PATH points at it explicitly so no .dylib default is ever hit.
+# test/clients/run_all.sh is the host-side suite: it drives the four real client
+# libraries (TypeScript, Dart, Rust, and Gleam) against a live Node+Postgres
+# server, then requires cross-client convergence.
 
 on:
   push:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      syncer_ref:
+        description: 'Optional syncer.c ref for compatibility testing'
+        required: false
+        type: string
+      clients_ref:
+        description: 'Optional opto-sync-clients ref for compatibility testing'
+        required: false
+        type: string
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -33,8 +27,10 @@ permissions:
   contents: read
 
 env:
-  SYNCER_C_REF: main
-  CLIENTS_REF: main
+  # Immutable defaults make this E2E commit reproducible. Manual dispatch can
+  # deliberately substitute `main`, a PR branch, or a candidate SHA.
+  SYNCER_C_REF: f6a56d070779404acf188ffac766e39741a15466
+  CLIENTS_REF: 48168bb8b081d627e91a406512565b9574d6af2d
 
 jobs:
   client-in-the-loop:
@@ -46,26 +42,27 @@ jobs:
         uses: actions/checkout@v4
         with:
           path: opto-sync-e2e
+          persist-credentials: false
 
-      - name: Checkout syncer.c (sibling)
+      - name: Checkout syncer.c (pinned sibling)
         uses: actions/checkout@v4
         with:
           repository: opto-sync/syncer.c
-          ref: ${{ env.SYNCER_C_REF }}
+          ref: ${{ github.event.inputs.syncer_ref || env.SYNCER_C_REF }}
           path: syncer.c
+          persist-credentials: false
 
-      - name: Checkout opto-sync-clients (sibling — the libraries under test)
+      - name: Checkout opto-sync-clients (pinned libraries under test)
         uses: actions/checkout@v4
         with:
           repository: opto-sync/opto-sync-clients
-          ref: ${{ env.CLIENTS_REF }}
+          ref: ${{ github.event.inputs.clients_ref || env.CLIENTS_REF }}
           path: opto-sync-clients
+          persist-credentials: false
 
-      # --- toolchains --------------------------------------------------------
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          # ~/.npm tarballs only — never node_modules or the compiled addon.
           cache: npm
           cache-dependency-path: opto-sync-clients/clients/ts/package-lock.json
 
@@ -73,15 +70,12 @@ jobs:
         with:
           sdk: stable
 
-      # Rustler 0.38 requires Elixir 1.15+; Ubuntu 24.04's apt package remains
-      # on 1.14 and fails before compiling the NIF.
       - name: Install pinned OTP and Elixir
         uses: erlef/setup-beam@v1
         with:
           otp-version: '27.3'
           elixir-version: '1.18.4'
 
-      # Dart opens real SQLite.
       - name: Install SQLite system library
         run: |
           sudo apt-get update -qq
@@ -94,7 +88,6 @@ jobs:
           sha256sum -c gleam-v1.16.0-x86_64-unknown-linux-musl.tar.gz.sha256
           sudo tar -xzf gleam-v1.16.0-x86_64-unknown-linux-musl.tar.gz -C /usr/local/bin gleam
 
-      # Rust stable is preinstalled on ubuntu-latest. Downloads only, no target/.
       - name: Cache cargo registry (downloads only, never target/)
         uses: actions/cache@v4
         with:
@@ -102,12 +95,9 @@ jobs:
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
-          key: cargo-registry-${{ runner.os }}-e2e-clients
-          restore-keys: cargo-registry-${{ runner.os }}-
+          key: cargo-registry-${{ runner.os }}-e2e-clients-${{ hashFiles('opto-sync-e2e/test/clients/rust/Cargo.lock') }}
+          restore-keys: cargo-registry-${{ runner.os }}-e2e-clients-
 
-      # --- build what the suites need ----------------------------------------
-      # Dart FFI (both the client library and the e2e dart suite) needs the core
-      # shared library. On Linux: syncer.c/core/build/libsyncer.so.
       - name: Build syncer.c core shared library
         working-directory: syncer.c/core
         run: |
@@ -117,50 +107,31 @@ jobs:
           make syncer
           ls -l libsyncer.so
 
-      # WORKAROUND (verified): clients/ts declares
-      # "@opto-sync/syncer": "file:../../../syncer.c/bindings/typescript", which
-      # npm installs as a symlink WITHOUT installing that package's own deps
-      # (its package-lock.json has no node-addon-api entry). `npm install` in
-      # clients/ts then runs node-gyp inside the binding directory, where
-      # binding.gyp evaluates require('node-addon-api').include and dies with
-      # MODULE_NOT_FOUND on a fresh checkout. Install the binding's deps first.
-      - name: Install syncer.c TypeScript binding deps first (see comment)
+      - name: Install locked syncer.c TypeScript binding dependencies first
         working-directory: syncer.c/bindings/typescript
-        run: npm install
+        run: npm ci
 
-      # run_all.sh hard-ABORTs if clients/ts/node_modules/fake-indexeddb is
-      # missing, and builds dist/ itself only as a fallback. Do both up front so
-      # a build error is reported as a build error.
-      - name: Build @opto-sync/client (dist/ + devDeps run_all.sh requires)
+      - name: Build @opto-sync/client (dist plus locked dev dependencies)
         working-directory: opto-sync-clients/clients/ts
         run: |
-          npm install
+          npm ci
           npm run build
 
-      # The restart test closes and relaunches Chromium with one persistent
-      # profile to prove native IndexedDB survives an actual browser process,
-      # not merely a Dexie connection reopen.
       - name: Install Chromium for IndexedDB process-restart coverage
         working-directory: opto-sync-clients/clients/ts
         run: npx playwright install --with-deps chromium
 
-      # run_all.sh runs the Rust suite with `cargo test --offline` and
-      # `cargo run --offline`, but test/clients/rust/Cargo.lock is gitignored, so
-      # on a fresh checkout there is nothing to resolve offline FROM. Generate
-      # the lock and populate the registry while the network is still allowed.
-      - name: Pre-fetch Rust deps (run_all.sh uses --offline)
+      # run_all.sh uses cargo in offline mode. Populate the committed graph
+      # without regenerating or mutating the lockfile.
+      - name: Pre-fetch locked Rust dependencies
         working-directory: opto-sync-e2e/test/clients/rust
-        run: |
-          cargo generate-lockfile
-          cargo fetch
+        run: cargo fetch --locked
 
-      # Same reasoning for Dart: run_all.sh tries `dart pub get --offline`
-      # first. Resolving online here makes that step a no-op.
-      - name: Pre-resolve Dart deps
+      - name: Pre-resolve Dart dependencies
         working-directory: opto-sync-e2e/test/clients/dart
         run: dart pub get
 
-      - name: Build BEAM NIF and pre-resolve Gleam live-client deps
+      - name: Build BEAM NIF and pre-resolve Gleam live-client dependencies
         run: |
           cd syncer.c/bindings/beam
           mix local.hex --force
@@ -171,17 +142,23 @@ jobs:
           gleam deps download
           gleam format --check src test
 
-      # --- the server the suite runs against ---------------------------------
       - name: Install .dockerignore at the build context root
         run: cp opto-sync-e2e/context.dockerignore .dockerignore
 
-      - name: Ensure .env exists
+      - name: Ensure .env exists without logging values
         working-directory: opto-sync-e2e
-        run: '[ -f .env ] || cp .env.example .env'
+        run: |
+          set -euo pipefail
+          [ -f .env ] || cp .env.example .env
+          test -s .env
+          count="$(grep -Ec '^[A-Za-z_][A-Za-z0-9_]*=' .env || true)"
+          echo ".env is present with ${count} declared variable(s); values redacted"
 
-      # Only postgres + node: run_all.sh talks to the published port 3003 and
-      # deliberately never runs docker compose or POST /reset itself.
-      - name: Start postgres + node server
+      - name: Validate Compose configuration
+        working-directory: opto-sync-e2e
+        run: docker compose config --quiet
+
+      - name: Start postgres and node server
         working-directory: opto-sync-e2e
         run: docker compose up -d --build postgres node
 
@@ -198,10 +175,6 @@ jobs:
           echo "::error title=node server never became healthy::http://localhost:3003/health did not report {\"syncer\":\"native\"} within 120s"
           exit 1
 
-      # --- the suite ---------------------------------------------------------
-      # OPTO_SYNC_REQUIRE_SERVER=1 turns "server unreachable" from a silent SKIP
-      # (exit 0) into a failure — without it this job could pass while testing
-      # nothing at all.
       - name: test/clients/run_all.sh
         working-directory: opto-sync-e2e
         env:
@@ -210,7 +183,6 @@ jobs:
           SYNCER_LIB_PATH: ${{ github.workspace }}/syncer.c/core/build/libsyncer.so
         run: ./test/clients/run_all.sh
 
-      # --- diagnostics + teardown -------------------------------------------
       - name: Collect compose logs
         if: failure()
         working-directory: opto-sync-e2e
@@ -235,8 +207,6 @@ jobs:
         run: |
           echo "::error title=opto-sync-e2e client-in-the-loop FAILED::test/clients/run_all.sh broke (ts, dart, rust, or gleam client vs the live node server) — the per-language PASS/FAIL summary is at the end of the run_all.sh step, and server logs are in the compose-logs-client-in-the-loop artifact."
 
-      # Ephemeral runner, so `down -v` is safe here (unlike locally, where the
-      # Postgres volume is shared with other suites).
       - name: Tear down (always)
         if: always()
         working-directory: opto-sync-e2e
