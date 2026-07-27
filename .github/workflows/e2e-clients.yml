@@ -1,11 +1,11 @@
 name: E2E (client-in-the-loop)
 
 # test/clients/run_all.sh — the only e2e suite that runs on the HOST rather than
-# in a container: it drives the three real client libraries from
+# in a container: it drives the four real client libraries from
 # ../opto-sync-clients (ts / dart / rust / gleam) against a live node+Postgres
 # server, then makes the first three agree on one document (scenario 7,
-# cross-client
-# convergence). It needs all four toolchains locally, so it gets its own job.
+# cross-client convergence). It needs all four toolchains locally, so it gets
+# its own job.
 #
 # LAYOUT: run_all.sh resolves CLIENTS_ROOT as ../../../opto-sync-clients/clients
 # and the suites path-depend on ../../../../opto-sync-clients/clients/*,
@@ -24,6 +24,15 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      syncer_ref:
+        description: 'Optional syncer.c ref for compatibility testing'
+        required: false
+        type: string
+      clients_ref:
+        description: 'Optional opto-sync-clients ref for compatibility testing'
+        required: false
+        type: string
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -33,8 +42,10 @@ permissions:
   contents: read
 
 env:
-  SYNCER_C_REF: main
-  CLIENTS_REF: main
+  # Immutable defaults make this E2E commit reproducible. Manual dispatch can
+  # deliberately substitute `main`, a PR branch, or a candidate SHA.
+  SYNCER_C_REF: 94324ecb8a4e1e05b07d6723e57433fe30ebc820
+  CLIENTS_REF: b1083e3db66121625c69f00baf34fc4142cf8ce7
 
 jobs:
   client-in-the-loop:
@@ -46,20 +57,23 @@ jobs:
         uses: actions/checkout@v4
         with:
           path: opto-sync-e2e
+          persist-credentials: false
 
-      - name: Checkout syncer.c (sibling)
+      - name: Checkout syncer.c (pinned sibling)
         uses: actions/checkout@v4
         with:
           repository: opto-sync/syncer.c
-          ref: ${{ env.SYNCER_C_REF }}
+          ref: ${{ github.event.inputs.syncer_ref || env.SYNCER_C_REF }}
           path: syncer.c
+          persist-credentials: false
 
-      - name: Checkout opto-sync-clients (sibling — the libraries under test)
+      - name: Checkout opto-sync-clients (pinned libraries under test)
         uses: actions/checkout@v4
         with:
           repository: opto-sync/opto-sync-clients
-          ref: ${{ env.CLIENTS_REF }}
+          ref: ${{ github.event.inputs.clients_ref || env.CLIENTS_REF }}
           path: opto-sync-clients
+          persist-credentials: false
 
       # --- toolchains --------------------------------------------------------
       - uses: actions/setup-node@v4
@@ -102,8 +116,8 @@ jobs:
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
-          key: cargo-registry-${{ runner.os }}-e2e-clients
-          restore-keys: cargo-registry-${{ runner.os }}-
+          key: cargo-registry-${{ runner.os }}-e2e-clients-${{ hashFiles('opto-sync-e2e/test/clients/rust/Cargo.lock') }}
+          restore-keys: cargo-registry-${{ runner.os }}-e2e-clients-
 
       # --- build what the suites need ----------------------------------------
       # Dart FFI (both the client library and the e2e dart suite) needs the core
@@ -117,24 +131,21 @@ jobs:
           make syncer
           ls -l libsyncer.so
 
-      # WORKAROUND (verified): clients/ts declares
-      # "@opto-sync/syncer": "file:../../../syncer.c/bindings/typescript", which
-      # npm installs as a symlink WITHOUT installing that package's own deps
-      # (its package-lock.json has no node-addon-api entry). `npm install` in
-      # clients/ts then runs node-gyp inside the binding directory, where
-      # binding.gyp evaluates require('node-addon-api').include and dies with
-      # MODULE_NOT_FOUND on a fresh checkout. Install the binding's deps first.
-      - name: Install syncer.c TypeScript binding deps first (see comment)
+      # clients/ts links the local native binding. npm does not install that
+      # linked package's own dependency graph, while binding.gyp evaluates
+      # require('node-addon-api').include. Install both committed lockfiles in
+      # dependency order so the addon matches this exact engine revision.
+      - name: Install locked syncer.c TypeScript binding dependencies first
         working-directory: syncer.c/bindings/typescript
-        run: npm install
+        run: npm ci
 
-      # run_all.sh hard-ABORTs if clients/ts/node_modules/fake-indexeddb is
+      # run_all.sh hard-aborts if clients/ts/node_modules/fake-indexeddb is
       # missing, and builds dist/ itself only as a fallback. Do both up front so
       # a build error is reported as a build error.
-      - name: Build @opto-sync/client (dist/ + devDeps run_all.sh requires)
+      - name: Build @opto-sync/client (dist/ + locked dev dependencies)
         working-directory: opto-sync-clients/clients/ts
         run: |
-          npm install
+          npm ci
           npm run build
 
       # The restart test closes and relaunches Chromium with one persistent
@@ -144,23 +155,19 @@ jobs:
         working-directory: opto-sync-clients/clients/ts
         run: npx playwright install --with-deps chromium
 
-      # run_all.sh runs the Rust suite with `cargo test --offline` and
-      # `cargo run --offline`, but test/clients/rust/Cargo.lock is gitignored, so
-      # on a fresh checkout there is nothing to resolve offline FROM. Generate
-      # the lock and populate the registry while the network is still allowed.
-      - name: Pre-fetch Rust deps (run_all.sh uses --offline)
+      # run_all.sh uses cargo in offline mode. The lockfile is committed, so
+      # populate the registry without regenerating or mutating the graph.
+      - name: Pre-fetch locked Rust dependencies
         working-directory: opto-sync-e2e/test/clients/rust
-        run: |
-          cargo generate-lockfile
-          cargo fetch
+        run: cargo fetch --locked
 
-      # Same reasoning for Dart: run_all.sh tries `dart pub get --offline`
-      # first. Resolving online here makes that step a no-op.
-      - name: Pre-resolve Dart deps
+      # Dart's e2e fixture is an application-local test package and currently has
+      # no committed lockfile. Resolve it before run_all.sh tries offline first.
+      - name: Pre-resolve Dart dependencies
         working-directory: opto-sync-e2e/test/clients/dart
         run: dart pub get
 
-      - name: Build BEAM NIF and pre-resolve Gleam live-client deps
+      - name: Build BEAM NIF and pre-resolve Gleam live-client dependencies
         run: |
           cd syncer.c/bindings/beam
           mix local.hex --force
@@ -175,9 +182,16 @@ jobs:
       - name: Install .dockerignore at the build context root
         run: cp opto-sync-e2e/context.dockerignore .dockerignore
 
-      - name: Ensure .env exists
+      - name: Ensure .env exists without logging values
         working-directory: opto-sync-e2e
-        run: '[ -f .env ] || cp .env.example .env'
+        run: |
+          set -euo pipefail
+          [ -f .env ] || cp .env.example .env
+          test -s .env
+
+      - name: Validate Compose configuration
+        working-directory: opto-sync-e2e
+        run: docker compose config --quiet
 
       # Only postgres + node: run_all.sh talks to the published port 3003 and
       # deliberately never runs docker compose or POST /reset itself.
