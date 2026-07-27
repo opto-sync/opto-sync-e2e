@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/opto-sync/opto-sync-e2e/release/opto-sync-release-set.schema.json",
+  "title": "Opto-sync coordinated release set",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "releaseSet", "packages", "certification", "rollback"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "releaseSet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "status", "createdAt"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^opto-sync-[0-9]{4}-[0-9]{2}-[0-9]{2}-[a-z0-9.-]+$" },
+        "status": { "enum": ["candidate", "approved", "published", "deprecated"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "packages": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["syncer", "clients", "e2e"],
+      "properties": {
+        "syncer": { "$ref": "#/$defs/package" },
+        "clients": {
+          "allOf": [
+            { "$ref": "#/$defs/package" },
+            {
+              "type": "object",
+              "required": ["embeddedSyncerSha"],
+              "properties": { "embeddedSyncerSha": { "$ref": "#/$defs/sha" } }
+            }
+          ]
+        },
+        "e2e": {
+          "allOf": [
+            { "$ref": "#/$defs/package" },
+            {
+              "type": "object",
+              "required": ["pinnedSyncerSha", "pinnedClientsSha"],
+              "properties": {
+                "pinnedSyncerSha": { "$ref": "#/$defs/sha" },
+                "pinnedClientsSha": { "$ref": "#/$defs/sha" }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "certification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requiredRuns", "artifactChecksums"],
+      "properties": {
+        "requiredRuns": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["repository", "workflow", "runId", "conclusion", "headSha"],
+            "properties": {
+              "repository": { "type": "string" },
+              "workflow": { "type": "string" },
+              "runId": { "type": "integer", "minimum": 1 },
+              "conclusion": { "const": "success" },
+              "headSha": { "$ref": "#/$defs/sha" }
+            }
+          }
+        },
+        "artifactChecksums": {
+          "type": "object",
+          "minProperties": 3,
+          "additionalProperties": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        }
+      }
+    },
+    "rollback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owner", "procedure", "partialReleasePolicy"],
+      "properties": {
+        "owner": { "type": "string", "minLength": 1 },
+        "procedure": { "type": "string", "minLength": 1 },
+        "partialReleasePolicy": { "type": "string", "minLength": 1 }
+      }
+    }
+  },
+  "$defs": {
+    "sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "package": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["repository", "sha", "tag", "version", "zedPackage"],
+      "properties": {
+        "repository": { "type": "string", "pattern": "^opto-sync/" },
+        "sha": { "$ref": "#/$defs/sha" },
+        "tag": { "type": "string", "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$" },
+        "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+        "zedPackage": { "type": "string", "pattern": "^opto-sync/" }
+      }
+    }
+  }
+}
