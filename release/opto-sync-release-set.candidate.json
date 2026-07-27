@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "releaseSet": {
+    "id": "opto-sync-2026-07-27-certified-candidate",
+    "status": "candidate",
+    "createdAt": "2026-07-27T00:00:00Z"
+  },
+  "packages": {
+    "syncer": {
+      "repository": "opto-sync/syncer.c",
+      "sha": "7795ce2d1342e17d934d2faafff5c8ed4322609e",
+      "tag": "v0.2.1",
+      "version": "0.2.1",
+      "zedPackage": "opto-sync/syncer"
+    },
+    "clients": {
+      "repository": "opto-sync/opto-sync-clients",
+      "sha": "54874e9f7df6009fccd9034fce39306daef2c043",
+      "tag": "v0.2.0",
+      "version": "0.2.0",
+      "zedPackage": "opto-sync/opto-sync-clients",
+      "embeddedSyncerSha": "7795ce2d1342e17d934d2faafff5c8ed4322609e"
+    },
+    "e2e": {
+      "repository": "opto-sync/opto-sync-e2e",
+      "sha": "1d47bd46cf3785416295daf6af84afb8053f1cfd",
+      "tag": "v0.1.0",
+      "version": "0.1.0",
+      "zedPackage": "opto-sync/opto-sync-e2e",
+      "pinnedSyncerSha": "7795ce2d1342e17d934d2faafff5c8ed4322609e",
+      "pinnedClientsSha": "54874e9f7df6009fccd9034fce39306daef2c043"
+    }
+  },
+  "certification": {
+    "requiredRuns": [
+      {
+        "repository": "opto-sync/syncer.c",
+        "workflow": "CI and Zed package contract",
+        "runId": 30242208216,
+        "conclusion": "success",
+        "headSha": "f6a56d070779404acf188ffac766e39741a15466"
+      },
+      {
+        "repository": "opto-sync/opto-sync-clients",
+        "workflow": "CI and Zed package contract",
+        "runId": 30265301843,
+        "conclusion": "success",
+        "headSha": "5bda7d35675aa29e1204df357808caa703cf35a8"
+      },
+      {
+        "repository": "opto-sync/opto-sync-e2e",
+        "workflow": "Docker and client-in-the-loop certification",
+        "runId": 30265770126,
+        "conclusion": "success",
+        "headSha": "babb6ae1200dd83f091f38fe891bf126835effb0"
+      }
+    ],
+    "artifactChecksums": {
+      "syncer": "0000000000000000000000000000000000000000000000000000000000000000",
+      "clients": "0000000000000000000000000000000000000000000000000000000000000000",
+      "e2e": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  },
+  "rollback": {
+    "owner": "REQUIRED_BEFORE_APPROVAL",
+    "procedure": "REQUIRED_BEFORE_APPROVAL",
+    "partialReleasePolicy": "Stop publication, do not replace immutable versions, and follow the documented deprecation/yank procedure before resuming."
+  }
+}
