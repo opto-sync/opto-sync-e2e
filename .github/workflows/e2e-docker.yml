@@ -46,11 +46,10 @@ permissions:
   contents: read
 
 env:
-  # Ordinary CI is reproducible. Manual dispatch may opt into `main`, a PR
-  # branch, or another candidate SHA without making every E2E run follow mutable
-  # cross-repository state.
-  SYNCER_C_REF: f6a56d070779404acf188ffac766e39741a15466
-  CLIENTS_REF: 48168bb8b081d627e91a406512565b9574d6af2d
+  # Certified pair: the client commit records this same engine as its nested
+  # mode-160000 gitlink. Manual dispatch may test candidate branches or SHAs.
+  SYNCER_C_REF: 7795ce2d1342e17d934d2faafff5c8ed4322609e
+  CLIENTS_REF: 54874e9f7df6009fccd9034fce39306daef2c043
 
 jobs:
   repository-contract:
