@@ -28,6 +28,7 @@ jobs:
         with:
           path: package
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Checkout pinned Zed CLI
         uses: actions/checkout@v4
@@ -35,6 +36,7 @@ jobs:
           repository: zed-pkg/zed-cli
           ref: c636fb8f6b08695c6b4fe94e2481f4d57270b2d7
           path: zed-cli
+          persist-credentials: false
 
       - name: Checkout pinned Zed interfaces
         uses: actions/checkout@v4
@@ -42,6 +44,7 @@ jobs:
           repository: zed-pkg/zed-interfaces
           ref: 415e871b1fb3dd97744c134351408a3224805dfb
           path: zed-interfaces
+          persist-credentials: false
 
       - name: Build pinned Zed CLI
         run: cargo build --locked --release --manifest-path zed-cli/Cargo.toml --bin zed
