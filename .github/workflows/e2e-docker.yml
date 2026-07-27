@@ -1,27 +1,9 @@
 name: E2E (docker)
 
-# The docker-based e2e suites: full multi-runtime curl suite, the conformance
-# scenarios, cross-server convergence, and the Supabase/PostgREST path.
-#
-# LAYOUT (this is the load-bearing part): every service in docker-compose.yml
-# builds with `context: ../` -- the PARENT of this repo -- and the Dockerfiles
-# `COPY syncer.c/core/`, `COPY syncer.c/bindings/...` and
-# `COPY opto-sync-e2e/servers/...`. So the three repos must sit as siblings:
-#
-#   $GITHUB_WORKSPACE/          <- docker build context
-#     syncer.c/
-#     opto-sync-clients/        (kept for shared-layout parity)
-#     opto-sync-e2e/            <- this repo, compose working directory
-#
-# Docker only honors a .dockerignore at the CONTEXT root, so
-# opto-sync-e2e/context.dockerignore is copied to $GITHUB_WORKSPACE/.dockerignore
-# exactly as README.md's Setup section instructs. Without it, host
-# node_modules/target/build trees leak into the context and can shadow in-image
-# dependency installs.
-#
-# Docker layer caching is intentionally NOT enabled: the images embed the C core
-# by COPYing syncer.c/, and a cross-run layer cache is one more place a stale
-# core could hide. These suites exist to catch exactly that.
+# Full multi-runtime, protocol, auth, operations, load, recovery, convergence,
+# and Supabase/PostgREST coverage. The client repository now contains a pinned
+# syncer.c submodule; the sibling syncer.c checkout is the server core. Every
+# matrix leg proves those two core revisions are identical before testing.
 
 on:
   push:
@@ -46,11 +28,8 @@ permissions:
   contents: read
 
 env:
-  # Ordinary CI is reproducible. Manual dispatch may opt into `main`, a PR
-  # branch, or another candidate SHA without making every E2E run follow mutable
-  # cross-repository state.
-  SYNCER_C_REF: f6a56d070779404acf188ffac766e39741a15466
-  CLIENTS_REF: 48168bb8b081d627e91a406512565b9574d6af2d
+  SYNCER_C_REF: 7795ce2d1342e17d934d2faafff5c8ed4322609e
+  CLIENTS_REF: 54874e9f7df6009fccd9034fce39306daef2c043
 
 jobs:
   repository-contract:
@@ -100,7 +79,7 @@ jobs:
           path: opto-sync-e2e
           persist-credentials: false
 
-      - name: Checkout syncer.c (pinned sibling used by every image)
+      - name: Checkout syncer.c (pinned server core)
         uses: actions/checkout@v4
         with:
           repository: opto-sync/syncer.c
@@ -108,13 +87,28 @@ jobs:
           path: syncer.c
           persist-credentials: false
 
-      - name: Checkout opto-sync-clients (pinned sibling for layout parity)
+      - name: Checkout opto-sync-clients and nested pinned core
         uses: actions/checkout@v4
         with:
           repository: opto-sync/opto-sync-clients
           ref: ${{ github.event.inputs.clients_ref || env.CLIENTS_REF }}
           path: opto-sync-clients
+          fetch-depth: 0
           persist-credentials: false
+          submodules: recursive
+
+      - name: Verify certified client and nested core pair
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_nested="$(git -C opto-sync-clients ls-tree HEAD syncer.c | awk '{print $3}')"
+          actual_nested="$(git -C opto-sync-clients/syncer.c rev-parse HEAD)"
+          server_core="$(git -C syncer.c rev-parse HEAD)"
+          test -n "$expected_nested"
+          test "$expected_nested" = "$actual_nested"
+          test "$actual_nested" = "$server_core"
+          test -f opto-sync-clients/syncer.c/core/include/syncer.h
+          git -C opto-sync-clients submodule status --recursive
 
       - name: Install .dockerignore at the build context root
         run: |
@@ -122,9 +116,6 @@ jobs:
           echo "context root: $(pwd)"
           ls -a
 
-      # Compose hard-fails on a missing env_file. Never print the file: a local
-      # or future CI override may contain credentials even though the checked-in
-      # example is non-secret.
       - name: Ensure .env exists without logging values
         working-directory: opto-sync-e2e
         run: |
@@ -252,7 +243,7 @@ jobs:
       - name: Which suite broke
         if: failure()
         run: |
-          echo "::error title=opto-sync-e2e ${{ matrix.id }} FAILED::The '${{ matrix.id }}' e2e suite broke. Full container logs are in the compose-logs-${{ matrix.id }} artifact."
+          echo "::error title=opto-sync-e2e ${{ matrix.id }} FAILED::The '${{ matrix.id }}' E2E suite broke; inspect the compose logs artifact."
 
       - name: Tear down (always)
         if: always()
