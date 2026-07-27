@@ -27,10 +27,11 @@ permissions:
   contents: read
 
 env:
-  # Immutable defaults make this E2E commit reproducible. Manual dispatch can
-  # deliberately substitute `main`, a PR branch, or a candidate SHA.
-  SYNCER_C_REF: f6a56d070779404acf188ffac766e39741a15466
-  CLIENTS_REF: 48168bb8b081d627e91a406512565b9574d6af2d
+  # Exact pair certified by this E2E revision. opto-sync-clients embeds the same
+  # syncer.c commit as a root gitlink; CI verifies that invariant before any
+  # package manager or test code runs.
+  SYNCER_C_REF: 7795ce2d1342e17d934d2faafff5c8ed4322609e
+  CLIENTS_REF: 54874e9f7df6009fccd9034fce39306daef2c043
 
 jobs:
   client-in-the-loop:
@@ -44,7 +45,7 @@ jobs:
           path: opto-sync-e2e
           persist-credentials: false
 
-      - name: Checkout syncer.c (pinned sibling)
+      - name: Checkout syncer.c (pinned sibling used by the server)
         uses: actions/checkout@v4
         with:
           repository: opto-sync/syncer.c
@@ -52,13 +53,27 @@ jobs:
           path: syncer.c
           persist-credentials: false
 
-      - name: Checkout opto-sync-clients (pinned libraries under test)
+      - name: Checkout opto-sync-clients and its pinned core
         uses: actions/checkout@v4
         with:
           repository: opto-sync/opto-sync-clients
           ref: ${{ github.event.inputs.clients_ref || env.CLIENTS_REF }}
           path: opto-sync-clients
+          fetch-depth: 0
           persist-credentials: false
+          submodules: recursive
+
+      - name: Verify sibling and nested core parity
+        shell: bash
+        run: |
+          set -euo pipefail
+          sibling_sha="$(git -C syncer.c rev-parse HEAD)"
+          gitlink_sha="$(git -C opto-sync-clients rev-parse HEAD:syncer.c)"
+          nested_sha="$(git -C opto-sync-clients/syncer.c rev-parse HEAD)"
+          test "$sibling_sha" = "$gitlink_sha"
+          test "$nested_sha" = "$gitlink_sha"
+          test -f opto-sync-clients/syncer.c/core/include/syncer.h
+          git -C opto-sync-clients submodule status --cached syncer.c
 
       - uses: actions/setup-node@v4
         with:
@@ -98,8 +113,8 @@ jobs:
           key: cargo-registry-${{ runner.os }}-e2e-clients-${{ hashFiles('opto-sync-e2e/test/clients/rust/Cargo.lock') }}
           restore-keys: cargo-registry-${{ runner.os }}-e2e-clients-
 
-      - name: Build syncer.c core shared library
-        working-directory: syncer.c/core
+      - name: Build nested syncer.c core shared library for clients
+        working-directory: opto-sync-clients/syncer.c/core
         run: |
           mkdir -p build
           cd build
@@ -107,8 +122,8 @@ jobs:
           make syncer
           ls -l libsyncer.so
 
-      - name: Install locked syncer.c TypeScript binding dependencies first
-        working-directory: syncer.c/bindings/typescript
+      - name: Install locked nested TypeScript binding dependencies first
+        working-directory: opto-sync-clients/syncer.c/bindings/typescript
         run: npm ci
 
       - name: Build @opto-sync/client (dist plus locked dev dependencies)
@@ -133,12 +148,12 @@ jobs:
 
       - name: Build BEAM NIF and pre-resolve Gleam live-client dependencies
         run: |
-          cd syncer.c/bindings/beam
+          cd opto-sync-clients/syncer.c/bindings/beam
           mix local.hex --force
           mix local.rebar --force
           mix deps.get
           mix compile
-          cd ../../../opto-sync-e2e/test/clients/gleam
+          cd ../../../../opto-sync-e2e/test/clients/gleam
           gleam deps download
           gleam format --check src test
 
@@ -180,7 +195,8 @@ jobs:
         env:
           OPTO_SYNC_REQUIRE_SERVER: '1'
           OPTO_SYNC_SERVER_URL: http://localhost:3003
-          SYNCER_LIB_PATH: ${{ github.workspace }}/syncer.c/core/build/libsyncer.so
+          SYNCER_LIB_PATH: ${{ github.workspace }}/opto-sync-clients/syncer.c/core/build/libsyncer.so
+          OPTO_SYNC_BEAM_EBIN: ${{ github.workspace }}/opto-sync-clients/syncer.c/bindings/beam/_build/dev/lib/opto_sync_nif/ebin
         run: ./test/clients/run_all.sh
 
       - name: Collect compose logs
