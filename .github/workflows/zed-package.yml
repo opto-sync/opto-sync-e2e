@@ -5,6 +5,7 @@ on:
     paths:
       - '.zpkg.toml'
       - '.zpkg.lock'
+      - 'LICENSE'
       - 'docker-compose*.yml'
       - 'test/**'
       - '.github/workflows/zed-package.yml'
@@ -13,6 +14,7 @@ on:
     paths:
       - '.zpkg.toml'
       - '.zpkg.lock'
+      - 'LICENSE'
       - 'docker-compose*.yml'
       - 'test/**'
       - '.github/workflows/zed-package.yml'
@@ -56,6 +58,7 @@ jobs:
         working-directory: package
         run: |
           set -euo pipefail
+          test -f LICENSE
           test -f .env || cp .env.example .env
           docker compose config --quiet
           test -f test/run_e2e.sh
@@ -63,11 +66,18 @@ jobs:
           test -f test/protocol/run.mjs
           test -f test/cross-server/run.mjs
 
-      - name: Pack and dry-run publish
+      - name: Pack, inspect, and dry-run publish
         working-directory: package
         run: |
           set -euo pipefail
           ../zed-cli/target/debug/zed pack
+
+          shopt -s nullglob
+          archives=(.zed/pack/*.tar.gz)
+          test "${#archives[@]}" -eq 1
+          tar -tzf "${archives[0]}" | grep -Fx 'pkg/LICENSE'
+          ! tar -tzf "${archives[0]}" | grep -Fx 'pkg/.env'
+
           ../zed-cli/target/debug/zed publish \
             --dry-run \
             --allow-dirty \
