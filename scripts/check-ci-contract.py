@@ -14,6 +14,8 @@ CLIENTS = ROOT / ".github/workflows/e2e-clients.yml"
 MANIFEST = ROOT / ".zpkg.toml"
 LOCKFILE = ROOT / ".zpkg.lock"
 SHA = r"[0-9a-f]{40}"
+CERTIFIED_SYNCER = "7795ce2d1342e17d934d2faafff5c8ed4322609e"
+CERTIFIED_CLIENTS = "54874e9f7df6009fccd9034fce39306daef2c043"
 
 
 def fail(message: str) -> None:
@@ -26,15 +28,25 @@ def read_toml(path: Path) -> dict:
         return tomllib.load(handle)
 
 
+def pinned_ref(text: str, name: str) -> str:
+    match = re.search(rf"(?m)^\s*{name}:\s*({SHA})\s*$", text)
+    if not match:
+        fail(f"{name} must be an immutable 40-hex commit")
+    return match.group(1)
+
+
 def main() -> int:
     docker = DOCKER.read_text(encoding="utf-8")
     clients = CLIENTS.read_text(encoding="utf-8")
 
     for path, text in ((DOCKER, docker), (CLIENTS, clients)):
-        if not re.search(rf"(?m)^\s*SYNCER_C_REF:\s*{SHA}\s*$", text):
-            fail(f"{path}: SYNCER_C_REF must be an immutable 40-hex commit")
-        if not re.search(rf"(?m)^\s*CLIENTS_REF:\s*{SHA}\s*$", text):
-            fail(f"{path}: CLIENTS_REF must be an immutable 40-hex commit")
+        syncer_ref = pinned_ref(text, "SYNCER_C_REF")
+        clients_ref = pinned_ref(text, "CLIENTS_REF")
+        if syncer_ref != CERTIFIED_SYNCER:
+            fail(f"{path}: SYNCER_C_REF is not the currently certified core")
+        if clients_ref != CERTIFIED_CLIENTS:
+            fail(f"{path}: CLIENTS_REF is not the currently certified client commit")
+
         checkout_count = len(re.findall(r"uses:\s*actions/checkout@", text))
         credential_opt_outs = len(re.findall(r"persist-credentials:\s*false", text))
         if credential_opt_outs < checkout_count:
@@ -46,6 +58,20 @@ def main() -> int:
             fail(f"{path}: never print .env contents into Actions logs")
         if "docker compose config --quiet" not in text:
             fail(f"{path}: validate Compose configuration before test startup")
+        if not re.search(
+            r"repository:\s*opto-sync/opto-sync-clients[\s\S]{0,350}submodules:\s*recursive",
+            text,
+        ):
+            fail(f"{path}: the pinned clients checkout must initialize syncer.c recursively")
+        if "Verify sibling and nested core parity" not in text:
+            fail(f"{path}: verify that the server core and client gitlink are identical")
+        for command in (
+            'git -C syncer.c rev-parse HEAD',
+            'git -C opto-sync-clients rev-parse HEAD:syncer.c',
+            'git -C opto-sync-clients/syncer.c rev-parse HEAD',
+        ):
+            if command not in text:
+                fail(f"{path}: missing core-parity command: {command}")
 
     if re.search(r"\bnpm install\b", clients):
         fail(f"{CLIENTS}: use committed npm locks through npm ci")
@@ -53,6 +79,14 @@ def main() -> int:
         fail(f"{CLIENTS}: the tracked Rust lockfile must not be regenerated in CI")
     if "cargo fetch --locked" not in clients:
         fail(f"{CLIENTS}: prefetch the tracked Rust dependency graph with --locked")
+
+    for required in (
+        "working-directory: opto-sync-clients/syncer.c/core",
+        "working-directory: opto-sync-clients/syncer.c/bindings/typescript",
+        "opto-sync-clients/syncer.c/core/build/libsyncer.so",
+    ):
+        if required not in clients:
+            fail(f"{CLIENTS}: live clients must consume the recursively pinned core: {required}")
 
     expected_overrides = (
         "github.event.inputs.syncer_ref || env.SYNCER_C_REF",
@@ -78,7 +112,10 @@ def main() -> int:
     if read_toml(LOCKFILE).get("version") != 1:
         fail(".zpkg.lock must declare format version 1")
 
-    print("cross-repository E2E CI and Zed package contract passed")
+    print(
+        "cross-repository E2E CI and Zed package contract passed: "
+        f"syncer={CERTIFIED_SYNCER}, clients={CERTIFIED_CLIENTS}"
+    )
     return 0
 
 
