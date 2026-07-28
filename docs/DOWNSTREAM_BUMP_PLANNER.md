@@ -58,7 +58,10 @@ advance or revert only one gitlink.
 python3 scripts/plan-downstream-bumps.py validate
 python3 scripts/plan-downstream-bumps.py plan \
   --out /tmp/opto-sync-downstream-plan.json
-python3 -m unittest test.operations.test_downstream_bump_plan -v
+python3 -m unittest discover \
+  -s test/operations \
+  -p 'test_downstream_bump_plan.py' \
+  -v
 ```
 
 `.github/workflows/downstream-bump-plan.yml` uploads the current plan for review.
