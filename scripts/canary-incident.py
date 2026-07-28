@@ -44,6 +44,7 @@ COMPATIBILITY_TERMS = (
     "lockfile mismatch",
     "core parity",
 )
+MISSED_SCHEDULE_MARKER = "scheduled workflow did not run by"
 
 
 def fail(message: str) -> None:
@@ -95,6 +96,12 @@ def require_text(event: dict[str, Any], key: str) -> str:
 
 
 def error_category(normalized_error: str) -> str:
+    # The deadline and minutes-late count necessarily change every time the
+    # monitor checks one missed schedule. Collapse that volatile detail into one
+    # stable material category so an outage updates one Linear incident rather
+    # than opening another issue every hour.
+    if MISSED_SCHEDULE_MARKER in normalized_error:
+        return "availability:missed-schedule"
     for term in SECURITY_TERMS:
         if term in normalized_error:
             return f"security:{term}"
