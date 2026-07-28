@@ -287,7 +287,9 @@ try {
       attempts: mutation.attempts,
     }));
     const inMemoryPushRequest = await client.protocolPushRequest();
-    assert.equal(inMemoryPushRequest.mutations[0]?.baseRevision, undefined);
+    if (inMemoryPushRequest.mutations[0]?.baseRevision !== undefined) {
+      throw new Error('fixture unexpectedly emitted a baseRevision on the JSON wire path');
+    }
     // Compare the actual JSON wire envelope. Optional JavaScript properties with
     // value `undefined` (for example baseRevision) are not transmitted and must
     // not make a logically identical wire fixture fail structural comparison.
