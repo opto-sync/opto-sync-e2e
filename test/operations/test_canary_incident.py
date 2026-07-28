@@ -117,6 +117,33 @@ class CanaryIncidentTests(unittest.TestCase):
         self.assertTrue(late["missed"])
         self.assertEqual(late["event"]["event"], "missed")
 
+    def test_repeated_missed_checks_update_one_incident(self) -> None:
+        base = {
+            "repository": "opto-sync/opto-sync-e2e",
+            "workflow": "E2E (docker)",
+            "lastScheduledRunAt": "2026-07-20T04:37:00Z",
+            "intervalMinutes": 10080,
+            "graceMinutes": 180,
+        }
+        first_missed = MODULE.detect_missed(
+            {**base, "now": "2026-07-27T08:00:00Z"}
+        )["event"]
+        later_missed = MODULE.detect_missed(
+            {**base, "now": "2026-07-27T12:00:00Z"}
+        )["event"]
+
+        first = MODULE.classify(first_missed)
+        later = MODULE.classify(later_missed)
+        self.assertEqual(first["signature"], later["signature"])
+        self.assertEqual(first["priority"], "high")
+
+        created = MODULE.reduce_state({"incident": None, "event": first_missed})
+        updated = MODULE.reduce_state(
+            {"incident": created["incident"], "event": later_missed}
+        )
+        self.assertEqual(updated["action"], "update")
+        self.assertEqual(updated["incident"]["occurrences"], 2)
+
     def test_non_scheduled_failure_does_not_create_incident(self) -> None:
         event = failure_event()
         event["event"] = "pull_request"
