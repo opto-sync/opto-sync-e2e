@@ -255,7 +255,7 @@ try {
   });
 
   const actual = await opened.page.evaluate(async ({ name, sourceMutationId }) => {
-    const { OptoSyncDatabase, OptoSyncClient, SYNC_STATUS } = window.OptoSync;
+    const { OptoSyncDatabase, OptoSyncClient } = window.OptoSync;
     const database = new OptoSyncDatabase(name);
     await database.open();
     const implementationStorageVersion = database.verno;
@@ -287,9 +287,13 @@ try {
       attempts: mutation.attempts,
     }));
     const pushRequest = await client.protocolPushRequest();
+    // Compare the actual JSON wire envelope. Optional JavaScript properties with
+    // value `undefined` (for example baseRevision) are not transmitted and must
+    // not make a logically identical wire fixture fail structural comparison.
+    const wirePushRequest = JSON.parse(JSON.stringify(pushRequest));
     const duplicateAcknowledgement = {
       protocolVersion: 1,
-      clientId: pushRequest.clientId,
+      clientId: wirePushRequest.clientId,
       lastMutationId: '1',
       checkpoint: '1',
       results: [
@@ -343,7 +347,7 @@ try {
         objectStores,
         mutationIdentityIndexPresent,
         pendingBeforeAcknowledgement,
-        pushRequest,
+        pushRequest: wirePushRequest,
         duplicateAcknowledgement,
         acknowledgedCount,
         pendingAfterAcknowledgement,
