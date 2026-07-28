@@ -286,7 +286,9 @@ try {
       operation: mutation.operation,
       attempts: mutation.attempts,
     }));
-    const pushRequest = await client.protocolPushRequest();
+    const inMemoryPushRequest = await client.protocolPushRequest();
+    assert.equal(inMemoryPushRequest.mutations[0]?.baseRevision, undefined);
+    const pushRequest = JSON.parse(JSON.stringify(inMemoryPushRequest));
     // Compare the actual JSON wire envelope. Optional JavaScript properties with
     // value `undefined` (for example baseRevision) are not transmitted and must
     // not make a logically identical wire fixture fail structural comparison.
