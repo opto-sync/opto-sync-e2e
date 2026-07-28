@@ -1,0 +1,78 @@
+name: Downstream bump plan
+
+on:
+  pull_request:
+    paths:
+      - 'operations/downstream-consumers.v1.json'
+      - 'release/opto-sync-release-set.candidate.json'
+      - 'release/opto-sync-release-set.schema.json'
+      - 'scripts/plan-downstream-bumps.py'
+      - 'test/operations/test_downstream_bump_plan.py'
+      - 'docs/DOWNSTREAM_BUMP_PLANNER.md'
+      - '.github/workflows/downstream-bump-plan.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'operations/downstream-consumers.v1.json'
+      - 'release/opto-sync-release-set.candidate.json'
+      - 'release/opto-sync-release-set.schema.json'
+      - 'scripts/plan-downstream-bumps.py'
+      - 'test/operations/test_downstream_bump_plan.py'
+      - 'docs/DOWNSTREAM_BUMP_PLANNER.md'
+      - '.github/workflows/downstream-bump-plan.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: downstream-bump-plan-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout release contracts
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Validate planner and consumer inventory
+        run: |
+          set -euo pipefail
+          python3 scripts/plan-downstream-bumps.py validate
+          python3 -m unittest discover \
+            -s test/operations \
+            -p 'test_downstream_bump_plan.py' \
+            -v
+          python3 -m py_compile scripts/plan-downstream-bumps.py
+
+      - name: Render the current candidate plan
+        run: |
+          set -euo pipefail
+          mkdir -p downstream-plan
+          python3 scripts/plan-downstream-bumps.py plan \
+            --out downstream-plan/opto-sync-downstream-plan.json
+          python3 - <<'PY'
+          import json
+          path = 'downstream-plan/opto-sync-downstream-plan.json'
+          value = json.load(open(path, encoding='utf-8'))
+          assert value['schemaVersion'] == 1
+          assert value['dispatchAllowed'] is False
+          assert len(value['consumers']) == 2
+          for consumer in value['consumers']:
+              assert len(consumer['updates']) == 2
+              assert all(update['kind'] == 'gitlink' for update in consumer['updates'])
+              assert consumer['pullRequest']['autoMerge'] is False
+          print('candidate plan is complete and correctly non-dispatchable')
+          PY
+
+      - name: Upload the credential-free reviewed plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: opto-sync-downstream-bump-plan
+          path: downstream-plan/opto-sync-downstream-plan.json
+          if-no-files-found: error
+          retention-days: 14

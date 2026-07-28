@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "branchPrefix": "agent/opto-sync-release-",
+  "releaseContract": "release/opto-sync-release-set.schema.json",
+  "consumers": [
+    {
+      "repository": "sonus-auris/sonus-auris-sync",
+      "defaultBranch": "main",
+      "coreGitlink": "third_party/syncer.c",
+      "clientsGitlink": "third_party/opto-sync-clients",
+      "expectedShaFiles": [
+        ".github/workflows/ci.yml"
+      ],
+      "requiredChecks": [
+        "opto-sync-upstream",
+        "rust",
+        "typescript",
+        "dart",
+        "postgres"
+      ],
+      "linearProject": "github.com/sonus-auris",
+      "autoMerge": false
+    },
+    {
+      "repository": "voxletra/voxletra-sync",
+      "defaultBranch": "main",
+      "coreGitlink": "vendor/syncer.c",
+      "clientsGitlink": "vendor/opto-sync-clients",
+      "expectedShaFiles": [
+        ".github/workflows/ci.yml"
+      ],
+      "requiredChecks": [
+        "typescript-protocol"
+      ],
+      "linearProject": "github.com/voxletra",
+      "autoMerge": false
+    }
+  ]
+}
