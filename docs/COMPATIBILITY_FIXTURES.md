@@ -30,16 +30,17 @@ No binary database is committed. CI generates the database in a temporary direct
 
 `test/compatibility/indexeddb-migration.mjs` consumes the checksum-pinned logical v1 export and expected v2 snapshot in a genuine persistent Chromium profile. The workflow:
 
-1. translates the synthetic fixture into the TypeScript client's real v1 `localMutations` IndexedDB store;
-2. starts a v1 → logical-v2 upgrade, creates migration metadata, and deterministically aborts the native `versionchange` transaction;
+1. translates the synthetic fixture into the TypeScript client's real v1 `localMutations` IndexedDB store at native version `10`, matching Dexie's representation of schema version `1`;
+2. starts a logical-v1 → logical-v2 upgrade at native version `20`, creates migration metadata, and deterministically aborts the native `versionchange` transaction;
 3. closes the entire persistent browser context;
-4. reopens the same on-disk profile and origin, proving the database is still version 1, the `meta` store did not leak, and the queued mutation is byte-for-byte intact;
-5. retries the logical-v2 transaction successfully;
-6. opens the database through the current bundled `OptoSyncDatabase`, which performs the implementation's later mutation-identity index upgrade;
-7. builds a real protocol push request, applies a duplicate acknowledgement, advances checkpoint `1`, and verifies the queue transitions to acknowledged without duplicate effects; and
-8. compares the deterministic logical export to `current/indexeddb-v2-expected.json`.
+4. reopens the same on-disk profile and origin, proving the database remains native version `10`/logical version `1`, the `meta` store did not leak, and the queued mutation is byte-for-byte intact;
+5. retries native version `20`/logical version `2` successfully;
+6. opens the database through the current bundled `OptoSyncDatabase`, which upgrades native version `20` to `30` for Dexie implementation version `3` and adds the mutation-identity index without recreating `meta`;
+7. proves the durable `hlc.nodeId` remains `fixture-device`, so the recovered queued row belongs to the same protocol client;
+8. builds a real protocol push request, applies a duplicate acknowledgement, advances checkpoint `1`, and verifies the queue transitions to acknowledged without duplicate effects; and
+9. compares the deterministic logical export to `current/indexeddb-v2-expected.json`.
 
-The compatibility contract's `indexedDbStorage: 2` is the logical storage contract exercised by the fixture. The current TypeScript/Dexie implementation reports internal version 3 because it subsequently adds `[tableName+recordId]` mutation identity indexing. The expected artifact records both numbers explicitly so a logical contract bump cannot be confused with an implementation-only index migration.
+Dexie multiplies declared schema versions by ten when opening the native IndexedDB database. Raw versions `1` and `2` are therefore not equivalent to Dexie versions `1` and `2`; using them would make the later Dexie open replay earlier schema declarations and recreate the `meta` store, changing the durable client identity. The fixture records logical storage version `2`, Dexie implementation version `3`, and native IndexedDB version `30` separately so those three contracts cannot be conflated.
 
 The Chromium profile contains deterministic synthetic data only and is deleted in `finally`. CI never uploads the browser profile. On failure it may retain only the logical diagnostic JSON, which contains no credentials, personal data, cookies, or production records.
 
