@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "fixtureSet": {
+    "id": "opto-sync-compatibility-fixtures-v1",
+    "status": "bootstrap",
+    "releaseSetId": "opto-sync-2026-07-27-certified-candidate",
+    "compatibilityContract": "../contract.v1.json"
+  },
+  "releases": {
+    "current": {
+      "release": "0.2.0",
+      "protocol": 1,
+      "schema": 1,
+      "mutationLog": 1,
+      "checkpoint": 1,
+      "indexedDbStorage": 2,
+      "sqliteStorage": 2,
+      "artifacts": {
+        "sqliteSeed": "current/sqlite-v1.sql",
+        "sqliteMigration": "current/sqlite-v1-to-v2.sql",
+        "indexedDbSeed": "current/indexeddb-v1.json",
+        "wire": "current/wire-v1.json",
+        "mutationLogFixture": "current/mutation-log-v1.json"
+      },
+      "sha256": {
+        "current/sqlite-v1.sql": "09a2ac4ba37529a8b38dc25e58b23a7400bd5c052a45e39f9db603101bffb5e4",
+        "current/sqlite-v1-to-v2.sql": "b826c9fb5a61ffc2b19f6b3bea58ab6bec57188702f56f05ccfcf48ee2c2bcf3",
+        "current/indexeddb-v1.json": "15717e1e308bfb4ed0ff6037e73a5b805eee96bd4e1a856deddb913b8c517410",
+        "current/wire-v1.json": "ac82d99b6d87db3143ff3ed57e7105d53afc03cfe498ab0dab52863fa664e8c9",
+        "current/mutation-log-v1.json": "edaa1812c8c2c987fa72102846e2481bc546e1be7a89b5d3ea12bd93acefceff"
+      }
+    }
+  },
+  "requiredHistoricalSlots": [
+    "n-1",
+    "n-2"
+  ],
+  "stableBlockedUntilHistoricalSlotsPresent": true,
+  "dataPolicy": {
+    "credentials": "forbidden",
+    "personalData": "forbidden",
+    "deterministicSyntheticDataOnly": true
+  }
+}

@@ -1,0 +1,42 @@
+name: Historical compatibility fixtures
+
+on:
+  pull_request:
+    paths:
+      - 'compatibility/**'
+      - 'scripts/check-historical-fixtures.py'
+      - '.github/workflows/compatibility-fixtures.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'compatibility/**'
+      - 'scripts/check-historical-fixtures.py'
+      - '.github/workflows/compatibility-fixtures.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: compatibility-fixtures-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fixture-integrity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate checksums, cross-fixture identities, and real SQLite recovery
+        run: python3 scripts/check-historical-fixtures.py
+      - name: Prove stable-release history gate remains closed
+        shell: bash
+        run: |
+          set -euo pipefail
+          if python3 scripts/check-historical-fixtures.py --require-history; then
+            echo '::error title=history gate unexpectedly open::N-1 and N-2 fixtures are still absent'
+            exit 1
+          fi
+          echo 'stable-release history gate correctly remains closed until N-1 and N-2 fixtures exist'

@@ -1,0 +1,56 @@
+{
+  "formatVersion": 1,
+  "storageVersion": 1,
+  "databaseName": "opto-sync-fixture-current",
+  "objectStores": [
+    {
+      "name": "records",
+      "keyPath": "documentId",
+      "indexes": [
+        {
+          "name": "updatedAt",
+          "keyPath": "updatedAt",
+          "unique": false
+        }
+      ],
+      "rows": [
+        {
+          "documentId": "fixture-doc-1",
+          "payload": {
+            "title": "queued before migration",
+            "updatedAt": "1000"
+          },
+          "updatedAt": "1000"
+        }
+      ]
+    },
+    {
+      "name": "mutations",
+      "keyPath": "mutationId",
+      "indexes": [
+        {
+          "name": "state",
+          "keyPath": "state",
+          "unique": false
+        },
+        {
+          "name": "documentId",
+          "keyPath": "documentId",
+          "unique": false
+        }
+      ],
+      "rows": [
+        {
+          "mutationId": "fixture-mutation-1",
+          "documentId": "fixture-doc-1",
+          "payload": {
+            "title": "queued before migration",
+            "updatedAt": "1000"
+          },
+          "state": "pending",
+          "checkpoint": null
+        }
+      ]
+    }
+  ]
+}
