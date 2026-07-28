@@ -288,11 +288,10 @@ try {
     }));
     const inMemoryPushRequest = await client.protocolPushRequest();
     assert.equal(inMemoryPushRequest.mutations[0]?.baseRevision, undefined);
-    const pushRequest = JSON.parse(JSON.stringify(inMemoryPushRequest));
     // Compare the actual JSON wire envelope. Optional JavaScript properties with
     // value `undefined` (for example baseRevision) are not transmitted and must
     // not make a logically identical wire fixture fail structural comparison.
-    const wirePushRequest = JSON.parse(JSON.stringify(pushRequest));
+    const wirePushRequest = JSON.parse(JSON.stringify(inMemoryPushRequest));
     const duplicateAcknowledgement = {
       protocolVersion: 1,
       clientId: wirePushRequest.clientId,
@@ -310,7 +309,7 @@ try {
     await client.setPullCheckpoint('1');
     const acknowledgedCount = await client.acknowledgePush(
       duplicateAcknowledgement,
-      pushRequest,
+      inMemoryPushRequest,
     );
     const pendingAfterAcknowledgement = (await client.pendingMutations()).length;
     const stored = await client.db.localMutations.get(1);
