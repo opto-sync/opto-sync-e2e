@@ -16,7 +16,7 @@
     "logicalStorageVersion": 2,
     "implementationStorageVersion": 3,
     "nativeIndexedDbVersion": 30,
-    "durableClientId": "fixture-device",
+    "durableClientId": "fixturedevice",
     "objectStores": [
       "localMutations",
       "meta"
@@ -32,7 +32,7 @@
           "updatedAt": "1000"
         },
         "syncStatus": 0,
-        "clientId": "fixture-device",
+        "clientId": "fixturedevice",
         "mutationId": "1",
         "fixtureMutationId": "fixture-mutation-1",
         "operation": "upsert",
@@ -41,7 +41,7 @@
     ],
     "pushRequest": {
       "protocolVersion": 1,
-      "clientId": "fixture-device",
+      "clientId": "fixturedevice",
       "mutations": [
         {
           "mutationId": "1",
@@ -57,7 +57,7 @@
     },
     "duplicateAcknowledgement": {
       "protocolVersion": 1,
-      "clientId": "fixture-device",
+      "clientId": "fixturedevice",
       "lastMutationId": "1",
       "checkpoint": "1",
       "results": [
@@ -74,7 +74,7 @@
     "storedSyncStatus": 1,
     "checkpoint": "1",
     "meta": {
-      "hlc.nodeId": "fixture-device",
+      "hlc.nodeId": "fixturedevice",
       "migration_state": "complete",
       "mutation.seq": "1",
       "pull.checkpoint": "1",
