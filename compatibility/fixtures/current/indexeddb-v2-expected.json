@@ -1,0 +1,81 @@
+{
+  "formatVersion": 1,
+  "databaseName": "opto-sync-fixture-current",
+  "sourceMutationId": "fixture-mutation-1",
+  "interruptedUpgrade": {
+    "rolledBack": true,
+    "storageVersion": 1,
+    "objectStores": [
+      "localMutations"
+    ],
+    "pendingRows": 1,
+    "metaStorePresent": false
+  },
+  "recovered": {
+    "logicalStorageVersion": 2,
+    "implementationStorageVersion": 3,
+    "objectStores": [
+      "localMutations",
+      "meta"
+    ],
+    "mutationIdentityIndexPresent": true,
+    "pendingBeforeAcknowledgement": [
+      {
+        "id": 1,
+        "tableName": "records",
+        "recordId": "fixture-doc-1",
+        "payload": {
+          "title": "queued before migration",
+          "updatedAt": "1000"
+        },
+        "syncStatus": 0,
+        "clientId": "fixture-device",
+        "mutationId": "1",
+        "fixtureMutationId": "fixture-mutation-1",
+        "operation": "upsert",
+        "attempts": 0
+      }
+    ],
+    "pushRequest": {
+      "protocolVersion": 1,
+      "clientId": "fixture-device",
+      "mutations": [
+        {
+          "mutationId": "1",
+          "operation": "upsert",
+          "table": "records",
+          "recordId": "fixture-doc-1",
+          "payload": {
+            "title": "queued before migration",
+            "updatedAt": "1000"
+          }
+        }
+      ]
+    },
+    "duplicateAcknowledgement": {
+      "protocolVersion": 1,
+      "clientId": "fixture-device",
+      "lastMutationId": "1",
+      "checkpoint": "1",
+      "results": [
+        {
+          "mutationId": "1",
+          "status": "duplicate",
+          "originalStatus": "applied",
+          "checkpoint": "1"
+        }
+      ]
+    },
+    "acknowledgedCount": 1,
+    "pendingAfterAcknowledgement": 0,
+    "storedSyncStatus": 1,
+    "checkpoint": "1",
+    "meta": {
+      "hlc.nodeId": "fixture-device",
+      "migration_state": "complete",
+      "mutation.seq": "1",
+      "pull.checkpoint": "1",
+      "storage_version": "2"
+    }
+  }
+}

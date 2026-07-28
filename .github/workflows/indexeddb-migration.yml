@@ -1,0 +1,98 @@
+name: IndexedDB migration recovery
+
+on:
+  pull_request:
+    paths:
+      - 'compatibility/contract.v1.json'
+      - 'compatibility/fixtures/**'
+      - 'scripts/check-historical-fixtures.py'
+      - 'test/compatibility/indexeddb-migration.mjs'
+      - 'docs/COMPATIBILITY_FIXTURES.md'
+      - '.github/workflows/indexeddb-migration.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'compatibility/contract.v1.json'
+      - 'compatibility/fixtures/**'
+      - 'scripts/check-historical-fixtures.py'
+      - 'test/compatibility/indexeddb-migration.mjs'
+      - 'docs/COMPATIBILITY_FIXTURES.md'
+      - '.github/workflows/indexeddb-migration.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: indexeddb-migration-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  OPTO_SYNC_CLIENTS_SHA: 54874e9f7df6009fccd9034fce39306daef2c043
+  SYNCER_C_SHA: 7795ce2d1342e17d934d2faafff5c8ed4322609e
+
+jobs:
+  chromium-indexeddb:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout compatibility fixtures
+        uses: actions/checkout@v4
+        with:
+          path: opto-sync-e2e
+          persist-credentials: false
+
+      - name: Checkout the certified browser client and nested core
+        uses: actions/checkout@v4
+        with:
+          repository: opto-sync/opto-sync-clients
+          ref: ${{ env.OPTO_SYNC_CLIENTS_SHA }}
+          path: opto-sync-clients
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Verify the certified client/core pair
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C opto-sync-clients rev-parse HEAD)" = "$OPTO_SYNC_CLIENTS_SHA"
+          test "$(git -C opto-sync-clients rev-parse HEAD:syncer.c)" = "$SYNCER_C_SHA"
+          test "$(git -C opto-sync-clients/syncer.c rev-parse HEAD)" = "$SYNCER_C_SHA"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: opto-sync-clients/clients/ts/package-lock.json
+
+      - name: Build the exact TypeScript browser client
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd opto-sync-clients/syncer.c/bindings/typescript
+          npm ci
+          cd ../../../clients/ts
+          npm ci
+          npm run build
+          npx playwright install --with-deps chromium
+
+      - name: Verify fixture checksums and SQLite recovery first
+        working-directory: opto-sync-e2e
+        run: python3 scripts/check-historical-fixtures.py
+
+      - name: Run persistent-profile Chromium migration interruption and recovery
+        env:
+          OPTO_SYNC_E2E_ROOT: ${{ github.workspace }}/opto-sync-e2e
+          OPTO_SYNC_CLIENTS_ROOT: ${{ github.workspace }}/opto-sync-clients
+          INDEXEDDB_MIGRATION_DIAGNOSTICS: ${{ runner.temp }}/indexeddb-migration-diagnostics.json
+        run: node opto-sync-e2e/test/compatibility/indexeddb-migration.mjs
+
+      - name: Upload synthetic logical diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: indexeddb-migration-diagnostics
+          path: ${{ runner.temp }}/indexeddb-migration-diagnostics.json
+          if-no-files-found: warn
+          retention-days: 7
