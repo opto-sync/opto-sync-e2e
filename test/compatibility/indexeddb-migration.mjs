@@ -36,6 +36,14 @@ const HTML = `<!doctype html>
 <html><head><meta charset="utf-8"><title>opto-sync IndexedDB migration</title></head>
 <body><script src="/opto-sync.browser.js"></script></body></html>`;
 
+// Dexie stores schema version N as native IndexedDB version N * 10. Creating
+// native versions 1 and 2 would make Dexie interpret them as pre-v1 databases
+// and replay v1/v2 schema declarations, including recreating the meta store.
+// Keep logical contract versions distinct while matching Dexie's native scale.
+const NATIVE_INDEXEDDB_V1 = 10;
+const NATIVE_INDEXEDDB_V2 = 20;
+const NATIVE_INDEXEDDB_V3 = 30;
+
 const profileDir = mkdtempSync(join(tmpdir(), 'opto-sync-indexeddb-profile-'));
 const diagnostics = {
   schemaVersion: 1,
@@ -58,7 +66,7 @@ function fixtureRow(source) {
     jsonPayload: JSON.stringify(record.payload),
     createdAt: Number(record.updatedAt),
     syncStatus: 0,
-    clientId: 'fixture-device',
+    clientId: 'fixturedevice',
     mutationId: '1',
     fixtureMutationId: mutation.mutationId,
     operation: 'upsert',
@@ -95,13 +103,13 @@ try {
   const row = fixtureRow(fixture);
 
   let opened = await openPage();
-  const seed = await opened.page.evaluate(async ({ name, row }) => {
+  const seed = await opened.page.evaluate(async ({ name, row, nativeVersion }) => {
     await new Promise((resolve) => {
       const request = indexedDB.deleteDatabase(name);
       request.onsuccess = request.onerror = request.onblocked = () => resolve();
     });
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open(name, 1);
+      const request = indexedDB.open(name, nativeVersion);
       request.onupgradeneeded = () => {
         const store = request.result.createObjectStore('localMutations', {
           keyPath: 'id',
@@ -118,20 +126,32 @@ try {
         transaction.objectStore('localMutations').put(row);
         transaction.onerror = () => reject(transaction.error);
         transaction.oncomplete = () => {
-          const version = db.version;
+          const nativeIndexedDbVersion = db.version;
           const stores = Array.from(db.objectStoreNames).sort();
           db.close();
-          resolve({ version, stores });
+          resolve({
+            logicalStorageVersion: 1,
+            nativeIndexedDbVersion,
+            stores,
+          });
         };
       };
     });
-  }, { name: fixture.databaseName, row });
+  }, {
+    name: fixture.databaseName,
+    row,
+    nativeVersion: NATIVE_INDEXEDDB_V1,
+  });
   diagnostics.stages.seed = seed;
-  assert.deepEqual(seed, { version: 1, stores: ['localMutations'] });
+  assert.deepEqual(seed, {
+    logicalStorageVersion: 1,
+    nativeIndexedDbVersion: NATIVE_INDEXEDDB_V1,
+    stores: ['localMutations'],
+  });
 
-  const interrupted = await opened.page.evaluate(async (name) => {
+  const interrupted = await opened.page.evaluate(async ({ name, nativeVersion }) => {
     return new Promise((resolve) => {
-      const request = indexedDB.open(name, 2);
+      const request = indexedDB.open(name, nativeVersion);
       request.onupgradeneeded = () => {
         const transaction = request.transaction;
         const meta = request.result.createObjectStore('meta', { keyPath: 'key' });
@@ -140,17 +160,31 @@ try {
         transaction.abort();
       };
       request.onerror = () => {
-        resolve({ aborted: true, errorName: request.error?.name ?? 'unknown' });
+        resolve({
+          aborted: true,
+          errorName: request.error?.name ?? 'unknown',
+          targetNativeIndexedDbVersion: nativeVersion,
+        });
       };
       request.onsuccess = () => {
         request.result.close();
-        resolve({ aborted: false, errorName: null });
+        resolve({
+          aborted: false,
+          errorName: null,
+          targetNativeIndexedDbVersion: nativeVersion,
+        });
       };
     });
-  }, fixture.databaseName);
+  }, {
+    name: fixture.databaseName,
+    nativeVersion: NATIVE_INDEXEDDB_V2,
+  });
   diagnostics.stages.interrupted = interrupted;
-  assert.equal(interrupted.aborted, true);
-  assert.equal(interrupted.errorName, 'AbortError');
+  assert.deepEqual(interrupted, {
+    aborted: true,
+    errorName: 'AbortError',
+    targetNativeIndexedDbVersion: NATIVE_INDEXEDDB_V2,
+  });
   assert.deepEqual(opened.errors, []);
 
   await context.close();
@@ -168,7 +202,7 @@ try {
         all.onerror = () => reject(all.error);
         all.onsuccess = () => {
           const result = {
-            version: db.version,
+            nativeIndexedDbVersion: db.version,
             stores: Array.from(db.objectStoreNames).sort(),
             rows: all.result,
           };
@@ -179,19 +213,19 @@ try {
     });
   }, fixture.databaseName);
   diagnostics.stages.reopenedAfterAbort = reopened;
-  assert.equal(reopened.version, 1);
+  assert.equal(reopened.nativeIndexedDbVersion, NATIVE_INDEXEDDB_V1);
   assert.deepEqual(reopened.stores, ['localMutations']);
   assert.deepEqual(reopened.rows, [row]);
 
-  const retried = await opened.page.evaluate(async (name) => {
+  const retried = await opened.page.evaluate(async ({ name, nativeVersion }) => {
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open(name, 2);
+      const request = indexedDB.open(name, nativeVersion);
       request.onupgradeneeded = () => {
         const meta = request.result.createObjectStore('meta', { keyPath: 'key' });
         for (const entry of [
           ['storage_version', '2'],
           ['migration_state', 'complete'],
-          ['hlc.nodeId', 'fixture-device'],
+          ['hlc.nodeId', 'fixturedevice'],
           ['mutation.seq', '1'],
           ['pull.checkpoint', '0'],
         ]) {
@@ -201,25 +235,31 @@ try {
       request.onerror = () => reject(request.error);
       request.onsuccess = () => {
         const result = {
-          version: request.result.version,
+          logicalStorageVersion: 2,
+          nativeIndexedDbVersion: request.result.version,
           stores: Array.from(request.result.objectStoreNames).sort(),
         };
         request.result.close();
         resolve(result);
       };
     });
-  }, fixture.databaseName);
+  }, {
+    name: fixture.databaseName,
+    nativeVersion: NATIVE_INDEXEDDB_V2,
+  });
   diagnostics.stages.retryToLogicalV2 = retried;
   assert.deepEqual(retried, {
-    version: 2,
+    logicalStorageVersion: 2,
+    nativeIndexedDbVersion: NATIVE_INDEXEDDB_V2,
     stores: ['localMutations', 'meta'],
   });
 
   const actual = await opened.page.evaluate(async ({ name, sourceMutationId }) => {
-    const { OptoSyncDatabase, OptoSyncClient, SYNC_STATUS } = window.OptoSync;
+    const { OptoSyncDatabase, OptoSyncClient } = window.OptoSync;
     const database = new OptoSyncDatabase(name);
     await database.open();
     const implementationStorageVersion = database.verno;
+    const nativeIndexedDbVersion = database.backendDB().version;
     const objectStores = database.tables.map((table) => table.name).sort();
     const mutationIdentityIndexPresent = database.localMutations.schema.indexes.some(
       (index) => index.name === '[tableName+recordId]' || index.src === '[tableName+recordId]',
@@ -227,6 +267,12 @@ try {
     database.close();
 
     const client = new OptoSyncClient({ databaseName: name, stampUpdatedAt: false });
+    const durableClientId = await client.clientId();
+    if (durableClientId !== 'fixturedevice') {
+      throw new Error(
+        `durable client identity changed during migration: ${durableClientId}`,
+      );
+    }
     const pendingRows = await client.pendingMutations();
     const pendingBeforeAcknowledgement = pendingRows.map((mutation) => ({
       id: mutation.id,
@@ -240,10 +286,17 @@ try {
       operation: mutation.operation,
       attempts: mutation.attempts,
     }));
-    const pushRequest = await client.protocolPushRequest();
+    const inMemoryPushRequest = await client.protocolPushRequest();
+    if (inMemoryPushRequest.mutations[0]?.baseRevision !== undefined) {
+      throw new Error('fixture unexpectedly emitted a baseRevision on the JSON wire path');
+    }
+    // Compare the actual JSON wire envelope. Optional JavaScript properties with
+    // value `undefined` (for example baseRevision) are not transmitted and must
+    // not make a logically identical wire fixture fail structural comparison.
+    const wirePushRequest = JSON.parse(JSON.stringify(inMemoryPushRequest));
     const duplicateAcknowledgement = {
       protocolVersion: 1,
-      clientId: pushRequest.clientId,
+      clientId: wirePushRequest.clientId,
       lastMutationId: '1',
       checkpoint: '1',
       results: [
@@ -258,7 +311,7 @@ try {
     await client.setPullCheckpoint('1');
     const acknowledgedCount = await client.acknowledgePush(
       duplicateAcknowledgement,
-      pushRequest,
+      inMemoryPushRequest,
     );
     const pendingAfterAcknowledgement = (await client.pendingMutations()).length;
     const stored = await client.db.localMutations.get(1);
@@ -283,7 +336,8 @@ try {
       sourceMutationId,
       interruptedUpgrade: {
         rolledBack: true,
-        storageVersion: 1,
+        logicalStorageVersion: 1,
+        nativeIndexedDbVersion: 10,
         objectStores: ['localMutations'],
         pendingRows: 1,
         metaStorePresent: false,
@@ -291,10 +345,12 @@ try {
       recovered: {
         logicalStorageVersion: Number(meta.storage_version),
         implementationStorageVersion,
+        nativeIndexedDbVersion,
+        durableClientId,
         objectStores,
         mutationIdentityIndexPresent,
         pendingBeforeAcknowledgement,
-        pushRequest,
+        pushRequest: wirePushRequest,
         duplicateAcknowledgement,
         acknowledgedCount,
         pendingAfterAcknowledgement,
@@ -308,6 +364,7 @@ try {
     sourceMutationId: fixture.objectStores.find((store) => store.name === 'mutations').rows[0].mutationId,
   });
   diagnostics.stages.actual = actual;
+  assert.equal(actual.recovered.nativeIndexedDbVersion, NATIVE_INDEXEDDB_V3);
   assert.deepEqual(actual, expected);
   assert.deepEqual(opened.errors, []);
 
@@ -316,7 +373,7 @@ try {
     JSON.stringify({ ...diagnostics, passed: true }, null, 2),
   );
   console.log(
-    'IndexedDB migration certification passed: aborted v1→v2 rolled back, persistent-profile reopen preserved the queue, retry reached logical v2/current Dexie, and duplicate acknowledgement advanced checkpoint 1',
+    'IndexedDB migration certification passed: native 10→20 interruption rolled back, persistent-profile reopen preserved the logical-v1 queue, retry reached logical v2, Dexie upgraded 20→30 without replacing the durable client identity, and duplicate acknowledgement advanced checkpoint 1',
   );
 } catch (error) {
   writeFileSync(
