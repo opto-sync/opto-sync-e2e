@@ -26,9 +26,22 @@ The initial current fixture uses one mutation identity across SQLite, IndexedDB 
 
 No binary database is committed. CI generates the database in a temporary directory from checksum-pinned SQL, which makes the fixture reviewable and reproducible.
 
-## IndexedDB bootstrap
+## Real Chromium IndexedDB migration test
 
-The current IndexedDB artifact is a deterministic logical export of object-store definitions, indexes, records, and a pending mutation. It is validated for cross-fixture identity now. A later DEN-365 slice must load this export into a real browser database, interrupt an upgrade transaction, reopen the database, and prove recovery before N-1/N-2 support is accepted.
+`test/compatibility/indexeddb-migration.mjs` consumes the checksum-pinned logical v1 export and expected v2 snapshot in a genuine persistent Chromium profile. The workflow:
+
+1. translates the synthetic fixture into the TypeScript client's real v1 `localMutations` IndexedDB store;
+2. starts a v1 → logical-v2 upgrade, creates migration metadata, and deterministically aborts the native `versionchange` transaction;
+3. closes the entire persistent browser context;
+4. reopens the same on-disk profile and origin, proving the database is still version 1, the `meta` store did not leak, and the queued mutation is byte-for-byte intact;
+5. retries the logical-v2 transaction successfully;
+6. opens the database through the current bundled `OptoSyncDatabase`, which performs the implementation's later mutation-identity index upgrade;
+7. builds a real protocol push request, applies a duplicate acknowledgement, advances checkpoint `1`, and verifies the queue transitions to acknowledged without duplicate effects; and
+8. compares the deterministic logical export to `current/indexeddb-v2-expected.json`.
+
+The compatibility contract's `indexedDbStorage: 2` is the logical storage contract exercised by the fixture. The current TypeScript/Dexie implementation reports internal version 3 because it subsequently adds `[tableName+recordId]` mutation identity indexing. The expected artifact records both numbers explicitly so a logical contract bump cannot be confused with an implementation-only index migration.
+
+The Chromium profile contains deterministic synthetic data only and is deleted in `finally`. CI never uploads the browser profile. On failure it may retain only the logical diagnostic JSON, which contains no credentials, personal data, cookies, or production records.
 
 ## Stable-release gate
 
