@@ -36,7 +36,7 @@ No binary database is committed. CI generates the database in a temporary direct
 4. reopens the same on-disk profile and origin, proving the database remains native version `10`/logical version `1`, the `meta` store did not leak, and the queued mutation is byte-for-byte intact;
 5. retries native version `20`/logical version `2` successfully;
 6. opens the database through the current bundled `OptoSyncDatabase`, which upgrades native version `20` to `30` for Dexie implementation version `3` and adds the mutation-identity index without recreating `meta`;
-7. proves the durable `hlc.nodeId` remains `fixture-device`, so the recovered queued row belongs to the same protocol client;
+7. proves the durable `hlc.nodeId` remains `fixturedevice`, an HLC/wire-valid identifier without the reserved `-` delimiter, so the recovered queued row belongs to the same protocol client;
 8. builds a real protocol push request, applies a duplicate acknowledgement, advances checkpoint `1`, and verifies the queue transitions to acknowledged without duplicate effects; and
 9. compares the deterministic logical export to `current/indexeddb-v2-expected.json`.
 
