@@ -4,7 +4,8 @@
   "sourceMutationId": "fixture-mutation-1",
   "interruptedUpgrade": {
     "rolledBack": true,
-    "storageVersion": 1,
+    "logicalStorageVersion": 1,
+    "nativeIndexedDbVersion": 10,
     "objectStores": [
       "localMutations"
     ],
@@ -14,6 +15,8 @@
   "recovered": {
     "logicalStorageVersion": 2,
     "implementationStorageVersion": 3,
+    "nativeIndexedDbVersion": 30,
+    "durableClientId": "fixture-device",
     "objectStores": [
       "localMutations",
       "meta"
