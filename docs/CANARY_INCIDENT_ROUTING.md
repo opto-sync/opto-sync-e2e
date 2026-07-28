@@ -18,7 +18,7 @@ Normalizes a GitHub Actions outcome into:
 - redacted first actionable error text; and
 - a Linear-ready title, Markdown body, labels, and project name.
 
-Volatile SHAs, UUIDs, timestamps, process/run numbers, and memory addresses do not fragment one material failure into duplicate incidents.
+Volatile SHAs, UUIDs, timestamps, process/run numbers, and memory addresses do not fragment one material failure into duplicate incidents. Changing missed-run deadlines and lateness values collapse to one stable `availability:missed-schedule` category.
 
 ### `reduce`
 
@@ -39,16 +39,19 @@ Compares the current time to the last scheduled run, expected interval, and grac
 
 ## Delivery boundary
 
-This PR does not embed a Linear API token or write to Linear from untrusted workflow code. A delivery adapter must:
+The credential-free engine does not embed a Linear API token or write to Linear from untrusted workflow code. The protected adapter in `scripts/linear-canary-delivery.py`:
 
-1. run only from trusted scheduled/workflow-run contexts;
-2. hold credentials in protected GitHub Environment or organization secrets;
-3. search by the exact incident signature before creating anything;
-4. apply the reducer action idempotently;
-5. retain run and artifact links but redact environment values; and
-6. persist incident state in Linear fields/comments or another reviewed durable store.
+1. runs live only from the protected `linear-canary-incidents` GitHub Environment;
+2. stores the credential outside Git and fork pull requests;
+3. searches by the exact incident signature before creating anything;
+4. applies reducer actions idempotently;
+5. retains structured run and artifact links without copying arbitrary logs;
+6. persists a versioned state marker in the Linear description; and
+7. fails closed on duplicate signatures or damaged state markers.
 
-Fork pull requests and arbitrary branch code must never receive the delivery credential.
+`operations/canary-workflows.v1.json` inventories the four covered schedules. See [`CANARY_LINEAR_DELIVERY.md`](CANARY_LINEAR_DELIVERY.md) for enablement, dry-run, controlled recovery drill, manual fallback, and credential rotation.
+
+Fork pull requests and arbitrary branch code never receive the delivery credential. The hourly job is additionally disabled until the explicit repository variable `LINEAR_CANARY_DELIVERY_ENABLED=true` is set.
 
 ## Covered regressions
 
@@ -60,4 +63,4 @@ The normalization categories explicitly prioritize:
 - migration and core-parity failures; and
 - frozen-install or lockfile mismatches.
 
-The unit suite proves deduplication, material-signature separation, scheduled-only recovery, missed-run detection, and non-scheduled evidence behavior. The next DEN-366 slice is the protected Linear delivery adapter and an end-to-end controlled failure/recovery drill.
+The state-engine suite proves deduplication, material-signature separation, scheduled-only recovery, stable missed-run detection, and non-scheduled evidence behavior. The adapter suite adds exact Linear signature queries, duplicate/damaged-state fail-closed behavior, GitHub job/step extraction, all four workflow schedules, and a controlled create/update/manual-evidence/recovery drill.
