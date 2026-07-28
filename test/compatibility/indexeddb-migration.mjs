@@ -66,7 +66,7 @@ function fixtureRow(source) {
     jsonPayload: JSON.stringify(record.payload),
     createdAt: Number(record.updatedAt),
     syncStatus: 0,
-    clientId: 'fixture-device',
+    clientId: 'fixturedevice',
     mutationId: '1',
     fixtureMutationId: mutation.mutationId,
     operation: 'upsert',
@@ -225,7 +225,7 @@ try {
         for (const entry of [
           ['storage_version', '2'],
           ['migration_state', 'complete'],
-          ['hlc.nodeId', 'fixture-device'],
+          ['hlc.nodeId', 'fixturedevice'],
           ['mutation.seq', '1'],
           ['pull.checkpoint', '0'],
         ]) {
@@ -268,7 +268,7 @@ try {
 
     const client = new OptoSyncClient({ databaseName: name, stampUpdatedAt: false });
     const durableClientId = await client.clientId();
-    if (durableClientId !== 'fixture-device') {
+    if (durableClientId !== 'fixturedevice') {
       throw new Error(
         `durable client identity changed during migration: ${durableClientId}`,
       );
