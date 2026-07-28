@@ -1,0 +1,67 @@
+{
+  "contractVersion": 1,
+  "protocol": {
+    "current": 1,
+    "minimumSupported": 1,
+    "negotiation": "client and server exchange protocol, schema, mutation-log, checkpoint, and storage versions before reads or writes",
+    "incompatibleAction": "fail_closed_before_mutation"
+  },
+  "versions": {
+    "schema": 1,
+    "mutationLog": 1,
+    "checkpoint": 1,
+    "indexedDbStorage": 2,
+    "sqliteStorage": 2
+  },
+  "supportWindow": {
+    "policy": "current_n_minus_1_n_minus_2",
+    "currentRelease": "0.2.0",
+    "minimumClientRelease": "0.2.0",
+    "minimumServerRelease": "0.2.0",
+    "historicalFixturesRequiredBeforeStable": true
+  },
+  "rules": {
+    "unknownFields": "preserve_when_round_tripping_and_ignore_when_not_understood",
+    "removedFields": "require_migration_or_major_version",
+    "enumExpansion": "unknown_values_fail_without_persisting_partial_state",
+    "staleCheckpoint": "request_full_or_bounded_resync_without_duplicate_effects",
+    "duplicateMutation": "idempotent_by_mutation_id",
+    "clockSkew": "reject_values_outside_declared_drift_policy",
+    "incompatibleStorage": "refuse_open_and_preserve_existing_database",
+    "interruptedMigration": "resume_or_rollback_from_transactional_marker",
+    "partialAcknowledgement": "retain_unacknowledged_mutations_for_retry"
+  },
+  "requiredClientBehavior": [
+    "typescript",
+    "dart",
+    "rust",
+    "gleam"
+  ],
+  "matrix": [
+    {
+      "client": "current",
+      "server": "current",
+      "expected": "supported"
+    },
+    {
+      "client": "n-1",
+      "server": "current",
+      "expected": "supported_when_fixture_exists"
+    },
+    {
+      "client": "n-2",
+      "server": "current",
+      "expected": "supported_when_fixture_exists"
+    },
+    {
+      "client": "current",
+      "server": "n-1",
+      "expected": "supported_only_when_server_declares_forward_compatibility"
+    },
+    {
+      "client": "current",
+      "server": "n-2",
+      "expected": "fail_closed_unless_explicitly_declared"
+    }
+  ]
+}
