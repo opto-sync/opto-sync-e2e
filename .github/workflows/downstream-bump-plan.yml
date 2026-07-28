@@ -43,7 +43,10 @@ jobs:
         run: |
           set -euo pipefail
           python3 scripts/plan-downstream-bumps.py validate
-          python3 -m unittest test.operations.test_downstream_bump_plan -v
+          python3 -m unittest discover \
+            -s test/operations \
+            -p 'test_downstream_bump_plan.py' \
+            -v
           python3 -m py_compile scripts/plan-downstream-bumps.py
 
       - name: Render the current candidate plan
