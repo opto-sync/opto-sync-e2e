@@ -1223,7 +1223,7 @@ export function installSyncProtocol(
   testMode: boolean,
   operations: ProtocolOperations,
   options: SyncProtocolOptions = {},
-): void {
+): SyncProtocolRuntime {
   const auth = testMode ? null : createProtocolAuthenticator();
   const adminAuth = loadAdminAuth();
   const { config, limiter, metrics } = operations;
