@@ -13,9 +13,9 @@ import 'package:opto_sync_client/opto_sync_client.dart';
 
 const String lang = 'dart';
 
-final String baseUrl = (Platform.environment['OPTO_SYNC_SERVER_URL'] ??
-        'http://localhost:3003')
-    .replaceAll(RegExp(r'/$'), '');
+final String baseUrl =
+    (Platform.environment['OPTO_SYNC_SERVER_URL'] ?? 'http://localhost:3003')
+        .replaceAll(RegExp(r'/$'), '');
 
 /* ------------------------------------------------------------------ */
 /* Native core + fixtures                                             */
@@ -31,7 +31,8 @@ String locateCoreLibrary() {
   for (final start in _searchRoots()) {
     var dir = Directory(start);
     for (var i = 0; i < 12; i++) {
-      final buildDir = '${dir.path}${Platform.pathSeparator}syncer.c'
+      final buildDir =
+          '${dir.path}${Platform.pathSeparator}syncer.c'
           '${Platform.pathSeparator}core${Platform.pathSeparator}build';
       if (Directory(buildDir).existsSync()) {
         final path = resolveSyncerLibraryPath(directory: buildDir);
@@ -43,8 +44,9 @@ String locateCoreLibrary() {
     }
   }
   throw StateError(
-      'Could not locate syncer.c/core/build/<libsyncer>. Build the core or set '
-      'SYNCER_LIB_PATH.');
+    'Could not locate syncer.c/core/build/<libsyncer>. Build the core or set '
+    'SYNCER_LIB_PATH.',
+  );
 }
 
 List<String> _searchRoots() {
@@ -63,14 +65,16 @@ Directory _fixturesDir() {
   for (final start in _searchRoots()) {
     var dir = Directory(start);
     for (var i = 0; i < 12; i++) {
-      final candidate = Directory('${dir.path}${Platform.pathSeparator}test'
-          '${Platform.pathSeparator}clients${Platform.pathSeparator}fixtures');
+      final candidate = Directory(
+        '${dir.path}${Platform.pathSeparator}test'
+        '${Platform.pathSeparator}clients${Platform.pathSeparator}fixtures',
+      );
       if (candidate.existsSync()) return candidate;
-      final sibling =
-          Directory('${dir.path}${Platform.pathSeparator}fixtures');
+      final sibling = Directory('${dir.path}${Platform.pathSeparator}fixtures');
       if (sibling.existsSync() &&
-          File('${sibling.path}${Platform.pathSeparator}scenarios.json')
-              .existsSync()) {
+          File(
+            '${sibling.path}${Platform.pathSeparator}scenarios.json',
+          ).existsSync()) {
         return sibling;
       }
       final parent = dir.parent;
@@ -87,8 +91,9 @@ Map<String, dynamic> loadFixture(String name) {
 }
 
 final Map<String, dynamic> scenariosFixture = loadFixture('scenarios.json');
-final Map<String, dynamic> crossClientFixture =
-    loadFixture('cross_client.json');
+final Map<String, dynamic> crossClientFixture = loadFixture(
+  'cross_client.json',
+);
 
 Map<String, dynamic> scenario(String name) =>
     (scenariosFixture['scenarios'] as Map<String, dynamic>)[name]
@@ -118,17 +123,18 @@ List<dynamic> arr(Map<String, dynamic> parent, String key) =>
 FfiSyncer newSyncer() => FfiSyncer(libraryPath: locateCoreLibrary());
 
 /// A client over a private in-memory queue.
-OptoSyncClient newClient(FfiSyncer syncer) =>
-    OptoSyncClient(db: OptoSyncDatabase(NativeDatabase.memory()), syncer: syncer);
+OptoSyncClient newClient(FfiSyncer syncer) => OptoSyncClient(
+  db: OptoSyncDatabase(NativeDatabase.memory()),
+  syncer: syncer,
+);
 
 /* ------------------------------------------------------------------ */
 /* Queue access (the client ships no transport, so the flush lives here) */
 /* ------------------------------------------------------------------ */
 
-Future<List<Mutation>> allMutations(OptoSyncClient client) =>
-    (client.db.select(client.db.localMutations)
-          ..orderBy([(t) => OrderingTerm.asc(t.id)]))
-        .get();
+Future<List<Mutation>> allMutations(OptoSyncClient client) => (client.db.select(
+  client.db.localMutations,
+)..orderBy([(t) => OrderingTerm.asc(t.id)])).get();
 
 Future<List<Mutation>> pendingMutations(OptoSyncClient client) =>
     (client.db.select(client.db.localMutations)
@@ -136,11 +142,11 @@ Future<List<Mutation>> pendingMutations(OptoSyncClient client) =>
           ..orderBy([(t) => OrderingTerm.asc(t.id)]))
         .get();
 
-Future<void> markMutation(
-    OptoSyncClient client, int id, int syncStatus) async {
-  final updated = await (client.db.update(client.db.localMutations)
-        ..where((t) => t.id.equals(id)))
-      .write(LocalMutationsCompanion(syncStatus: Value(syncStatus)));
+Future<void> markMutation(OptoSyncClient client, int id, int syncStatus) async {
+  final updated =
+      await (client.db.update(client.db.localMutations)
+            ..where((t) => t.id.equals(id)))
+          .write(LocalMutationsCompanion(syncStatus: Value(syncStatus)));
   if (updated != 1) {
     throw StateError('markMutation($id) touched $updated rows, expected 1');
   }
@@ -188,8 +194,12 @@ class HttpResult {
   bool get ok => status >= 200 && status < 300;
 }
 
-Future<HttpResult> _request(String method, String path,
-    {Object? body, Duration timeout = const Duration(seconds: 10)}) async {
+Future<HttpResult> _request(
+  String method,
+  String path, {
+  Object? body,
+  Duration timeout = const Duration(seconds: 10),
+}) async {
   final http = HttpClient()..connectionTimeout = timeout;
   try {
     final req = await http.openUrl(method, Uri.parse('$baseUrl$path'));
@@ -217,8 +227,11 @@ Future<HttpResult> _request(String method, String path,
 /// the suite SKIPs with a clear message instead of hanging on a dead socket.
 Future<String?> probeServer() async {
   try {
-    final res = await _request('GET', '/health',
-        timeout: const Duration(seconds: 3));
+    final res = await _request(
+      'GET',
+      '/health',
+      timeout: const Duration(seconds: 3),
+    );
     if (!res.ok) return '$baseUrl/health returned HTTP ${res.status}';
     final health = res.json as Map<String, dynamic>;
     if (health['status'] != 'ok') {
@@ -236,8 +249,11 @@ Future<String?> probeServer() async {
 }
 
 Future<void> putDoc(String id, Object payload) async {
-  final res = await _request('PUT', '/doc/${Uri.encodeComponent(id)}',
-      body: payload);
+  final res = await _request(
+    'PUT',
+    '/doc/${Uri.encodeComponent(id)}',
+    body: payload,
+  );
   if (!res.ok) {
     throw StateError('PUT /doc/$id failed: HTTP ${res.status} ${res.body}');
   }
@@ -265,20 +281,41 @@ Future<String> getDocRaw(String id) async {
 
 /// POST /doc/:id/sync — returns the result even on 4xx so failure-marking
 /// scenarios can inspect the status the way a client would.
-Future<HttpResult> syncDoc(String id, Object payload,
-        {bool noRetry = false}) =>
-    _request('POST',
-        '/doc/${Uri.encodeComponent(id)}/sync${noRetry ? '?noRetry=1' : ''}',
-        body: payload);
+Future<HttpResult> syncDoc(String id, Object payload, {bool noRetry = false}) =>
+    _request(
+      'POST',
+      '/doc/${Uri.encodeComponent(id)}/sync${noRetry ? '?noRetry=1' : ''}',
+      body: payload,
+    );
 
 /// POST /sync/batch — the shape an offline queue flushes in.
-Future<Map<String, dynamic>> syncBatch(List<Map<String, Object?>> mutations) async {
-  final res = await _request('POST', '/sync/batch', body: {'mutations': mutations});
+Future<Map<String, dynamic>> syncBatch(
+  List<Map<String, Object?>> mutations,
+) async {
+  final res = await _request(
+    'POST',
+    '/sync/batch',
+    body: {'mutations': mutations},
+  );
   if (!res.ok) {
     throw StateError('POST /sync/batch failed: HTTP ${res.status} ${res.body}');
   }
   return res.json as Map<String, dynamic>;
 }
+
+/// POST one SDK-produced protocol v1 envelope without rewriting its fields.
+Future<HttpResult> protocolPush(Map<String, dynamic> envelope) =>
+    _request('POST', '/v1/sync/push', body: envelope);
+
+Future<HttpResult> protocolPull(
+  String checkpoint, {
+  int limit = 100,
+}) => _request(
+  'GET',
+  '/v1/sync/pull?checkpoint=${Uri.encodeQueryComponent(checkpoint)}&limit=$limit',
+);
+
+Future<HttpResult> protocolSnapshot() => _request('GET', '/v1/sync/snapshot');
 
 /* ------------------------------------------------------------------ */
 /* Semantic comparison                                                */
@@ -317,11 +354,13 @@ bool deepEquals(dynamic a, dynamic b) {
 dynamic normalizeKeyedArrays(dynamic value) {
   if (value is List) {
     final mapped = value.map(normalizeKeyedArrays).toList();
-    final allKeyed = mapped.isNotEmpty &&
+    final allKeyed =
+        mapped.isNotEmpty &&
         mapped.every((v) => v is Map && v.containsKey('id'));
     if (allKeyed) {
-      mapped.sort((x, y) => '${(x as Map)['id']}'
-          .compareTo('${(y as Map)['id']}'));
+      mapped.sort(
+        (x, y) => '${(x as Map)['id']}'.compareTo('${(y as Map)['id']}'),
+      );
     }
     return mapped;
   }
@@ -346,9 +385,11 @@ class ComparisonFailure implements Exception {
 
 void expectDeepEqual(dynamic actual, dynamic expected, String what) {
   if (deepEquals(actual, expected)) return;
-  throw ComparisonFailure('$what: parsed values differ.\n'
-      '--- expected ---\n${render(expected)}\n'
-      '--- actual ---\n${render(actual)}');
+  throw ComparisonFailure(
+    '$what: parsed values differ.\n'
+    '--- expected ---\n${render(expected)}\n'
+    '--- actual ---\n${render(actual)}',
+  );
 }
 
 /// Deep equality that treats keyed arrays as identity sets.
@@ -357,9 +398,10 @@ void expectDeepEqualKeyed(dynamic actual, dynamic expected, String what) {
   final ne = normalizeKeyedArrays(expected);
   if (deepEquals(na, ne)) return;
   throw ComparisonFailure(
-      '$what: parsed values differ (keyed arrays normalized by id).\n'
-      '--- expected ---\n${render(ne)}\n'
-      '--- actual ---\n${render(na)}');
+    '$what: parsed values differ (keyed arrays normalized by id).\n'
+    '--- expected ---\n${render(ne)}\n'
+    '--- actual ---\n${render(na)}',
+  );
 }
 
 void expectTrue(bool condition, String what) {

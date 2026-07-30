@@ -1,9 +1,11 @@
 # Rust build artifacts
 **/target/
+**/build/
 
 # Node.js
 **/node_modules/
 **/.npm/
+servers/node/dist/
 
 # Dart
 **/.dart_tool/

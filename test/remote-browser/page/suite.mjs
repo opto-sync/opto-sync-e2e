@@ -103,7 +103,7 @@ async function main() {
     assert(DEFAULT_RECONCILE_OPTIONS.arrayMatchKeys === 'id', 'arrayMatchKeys');
     assert(DEFAULT_RECONCILE_OPTIONS.resolveByTimestamp === true, 'resolveByTimestamp');
     assert(DEFAULT_RECONCILE_OPTIONS.lwwKeys === 'updatedAt,syncedAt', 'lwwKeys');
-    assert(DEFAULT_RECONCILE_OPTIONS.fwwKeys === 'createdAt', 'fwwKeys');
+    assert(DEFAULT_RECONCILE_OPTIONS.fwwKeys === undefined, 'fwwKeys must be opt-in');
     return { ...DEFAULT_RECONCILE_OPTIONS };
   });
 
@@ -127,10 +127,11 @@ async function main() {
     return merged;
   });
 
-  check('createdAt FWW rejects a later re-creation', () => {
+  check('explicit createdAt FWW rejects a later re-creation', () => {
     const merged = reconcileIncoming(
       { id: 1, createdAt: 100, author: 'original' },
       { id: 1, createdAt: 300, author: 'impostor' },
+      { fwwKeys: 'createdAt' },
     );
     assert(merged.author === 'original', `got ${merged.author}`);
     return merged;

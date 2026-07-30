@@ -2,11 +2,11 @@
 #
 # CLIENT-IN-THE-LOOP e2e orchestrator.
 #
-# Runs the TypeScript, Dart and Rust client suites against an ALREADY-RUNNING
-# opto-sync server and exits non-zero if any of them fails.
+# Runs the TypeScript, Dart, Rust, and Gleam client suites against an
+# ALREADY-RUNNING opto-sync server and exits non-zero if any of them fails.
 #
 #   ./run_all.sh                 # everything
-#   ./run_all.sh ts              # one language (ts | dart | rust)
+#   ./run_all.sh ts              # one language (ts | dart | rust | gleam)
 #   ./run_all.sh --no-converge   # skip the cross-client convergence phase
 #
 # Environment:
@@ -32,7 +32,7 @@ ONLY=""
 RUN_CONVERGE=1
 for arg in "$@"; do
   case "$arg" in
-    ts|dart|rust) ONLY="$arg" ;;
+    ts|dart|rust|gleam) ONLY="$arg" ;;
     --no-converge) RUN_CONVERGE=0 ;;
     -h|--help) sed -n '2,25p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown argument: $arg (try --help)" >&2; exit 2 ;;
@@ -50,6 +50,14 @@ fail()   { printf '%s  FAIL%s  %s\n' "$RED" "$OFF" "$1"; }
 
 FAILURES=()
 STEPS=0
+RESTART_DIR="$(mktemp -d "${TMPDIR:-/tmp}/opto-sync-restart.XXXXXX")"
+cleanup_restart_dir() {
+  case "$RESTART_DIR" in
+    "${TMPDIR:-/tmp}"/opto-sync-restart.*) rm -rf "$RESTART_DIR" ;;
+    *) echo "refusing to remove unexpected restart directory: $RESTART_DIR" >&2 ;;
+  esac
+}
+trap cleanup_restart_dir EXIT
 
 # Run a step; record a failure but keep going, so one broken language does not
 # hide the state of the other two.
@@ -144,16 +152,77 @@ if want dart; then
   fi
 fi
 
-# ── scenarios 1-6, per language ──────────────────────────────────────────
-banner "Scenarios 1-6 (per language, independent documents)"
+if want gleam; then
+  for tool in gleam elixir mix; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+      echo "ABORT: $tool is required for the Gleam live-client suite" >&2
+      exit 2
+    fi
+  done
+  GLEAM_BEAM_EBIN="$CLIENTS_ROOT/../../syncer.c/bindings/beam/_build/dev/lib/opto_sync_nif/ebin"
+  if [ ! -d "$GLEAM_BEAM_EBIN" ]; then
+    info "compiling syncer.c BEAM NIF for the Gleam client"
+    (cd "$CLIENTS_ROOT/../../syncer.c/bindings/beam" && \
+      mix local.hex --force >/dev/null && \
+      mix local.rebar --force >/dev/null && \
+      mix deps.get >/dev/null && \
+      mix compile >/dev/null) || {
+        fail "compile BEAM NIF for Gleam"
+        FAILURES+=("gleam NIF build")
+      }
+  fi
+  export OPTO_SYNC_BEAM_EBIN="$GLEAM_BEAM_EBIN"
+  export OPTO_SYNC_ELIXIR_EBIN
+  OPTO_SYNC_ELIXIR_EBIN="$(
+    elixir -e 'IO.puts(Path.join(:code.lib_dir(:elixir), "ebin"))'
+  )"
+  if [ ! -f "$HERE/gleam/manifest.toml" ]; then
+    (cd "$HERE/gleam" && gleam deps download >/dev/null)
+  fi
+fi
+
+# ── per-language scenarios (0-6 and protocol scenario 8) ─────────────────
+banner "Per-language scenarios (0-6 and protocol v1)"
 
 run_ts_scenarios()   { (cd "$HERE/ts"   && node --test); }
 run_dart_scenarios() { (cd "$HERE/dart" && dart test --reporter expanded); }
 run_rust_scenarios() { (cd "$HERE/rust" && cargo test --offline --test scenarios -- --test-threads=1 --nocapture); }
+run_gleam_protocol() { (cd "$HERE/gleam" && gleam test); }
 
 want ts   && step "ts   scenarios 1-6"  run_ts_scenarios
 want dart && step "dart scenarios 1-6"  run_dart_scenarios
 want rust && step "rust scenarios 1-6"  run_rust_scenarios
+want gleam && step "gleam protocol push/retry/pull/delete" run_gleam_protocol
+
+# ── real process restart after server commit, before local ack ───────────
+banner "Server commit / local acknowledgement restart recovery"
+RESTART_NONCE="$(date +%s)-$$"
+run_ts_restart() {
+  (cd "$HERE/ts" && node protocol-restart.mjs \
+    "$RESTART_DIR/ts-browser-profile" "cl-ts-restart-$RESTART_NONCE")
+}
+run_dart_restart() {
+  (cd "$HERE/dart" && \
+    dart run bin/protocol_restart.dart prepare \
+      "$RESTART_DIR/dart.sqlite" "$RESTART_DIR/dart-envelope.json" \
+      "cl-dart-restart-$RESTART_NONCE" && \
+    dart run bin/protocol_restart.dart recover \
+      "$RESTART_DIR/dart.sqlite" "$RESTART_DIR/dart-envelope.json" \
+      "cl-dart-restart-$RESTART_NONCE")
+}
+run_rust_restart() {
+  (cd "$HERE/rust" && \
+    cargo run --offline --quiet --bin protocol-restart -- prepare \
+      "$RESTART_DIR/rust-state.sqlite" "$RESTART_DIR/rust-envelope.json" \
+      "cl-rust-restart-$RESTART_NONCE" && \
+    cargo run --offline --quiet --bin protocol-restart -- recover \
+      "$RESTART_DIR/rust-state.sqlite" "$RESTART_DIR/rust-envelope.json" \
+      "cl-rust-restart-$RESTART_NONCE")
+}
+
+want ts   && step "ts   Chromium/IndexedDB restart recovery" run_ts_restart
+want dart && step "dart SQLite process restart recovery"     run_dart_restart
+want rust && step "rust SQLite process restart recovery"     run_rust_restart
 
 # ── scenario 7: cross-client convergence ─────────────────────────────────
 # The strongest test in the suite, and the only one that has to be orchestrated
@@ -170,19 +239,25 @@ if [ "$RUN_CONVERGE" = 1 ] && [ -z "$ONLY" ]; then
 
   # Fresh document via PUT, deliberately NOT POST /reset: /reset truncates the
   # tables other suites are using.
-  step_strict "converge/setup   (PUT the fresh fixture document)" ts_converge setup &&
-  step_strict "converge/flush   ts"                              ts_converge flush &&
-  step_strict "converge/flush   dart"                            dart_converge flush &&
-  step_strict "converge/flush   rust"                            rust_converge flush
+  if step_strict "converge/setup   (PUT the fresh fixture document)" ts_converge setup &&
+     step_strict "converge/flush   ts"                              ts_converge flush &&
+     step_strict "converge/flush   dart"                            dart_converge flush &&
+     step_strict "converge/flush   rust"                            rust_converge flush; then
+    CONVERGE_READY=1
+  fi
 
   # Final verification: each client independently asserts the server's final
   # document against the SHARED fixture expectation, and reconciles it into its
   # own local copy. Run all three even if one fails -- a disagreement between
   # languages is exactly what this phase exists to expose.
-  banner "Scenario 7: final verification (all three clients agree)"
-  step "converge/verify  ts"   ts_converge verify
-  step "converge/verify  dart" dart_converge verify
-  step "converge/verify  rust" rust_converge verify
+  if [ "${CONVERGE_READY:-0}" = "1" ]; then
+    banner "Scenario 7: final verification (all three clients agree)"
+    step "converge/verify  ts"   ts_converge verify
+    step "converge/verify  dart" dart_converge verify
+    step "converge/verify  rust" rust_converge verify
+  else
+    info "convergence verification skipped because setup/flush did not complete"
+  fi
 elif [ "$RUN_CONVERGE" = 1 ]; then
   printf '\n%sSKIP%s scenario 7 (cross-client convergence needs all three languages)\n' "$YELLOW" "$OFF"
 fi

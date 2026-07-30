@@ -59,6 +59,18 @@ jobs:
             id: fulltest
           - name: conformance (scenarios vs Postgres-backed node)
             id: conformance
+          - name: protocol v1 (idempotency + ordered checkpoints)
+            id: protocol
+          - name: protocol auth (subject/client + tenant isolation)
+            id: auth
+          - name: protocol JWT auth (Supabase JWKS + signed claims)
+            id: jwt-auth
+          - name: protocol operations (quotas + rate + metrics)
+            id: operations
+          - name: protocol load (concurrency + latency)
+            id: load
+          - name: protocol recovery (migrations + backup/restore)
+            id: recovery
           - name: crossserver (4 runtimes converge)
             id: crossserver
           - name: supabase (PostgREST stand-in for the REST path)
@@ -105,6 +117,19 @@ jobs:
           docker --version
           docker compose version
 
+      # These profiles start additional containers from the same image as the
+      # `node` service. Compose may try to pull those aliases before `node` has
+      # finished building, even with `up --build`, so materialize the shared
+      # image first on each isolated runner that exercises an alias.
+      - name: Build shared Node image for profile aliases
+        if: >-
+          matrix.id == 'auth' ||
+          matrix.id == 'jwt-auth' ||
+          matrix.id == 'operations' ||
+          matrix.id == 'recovery'
+        working-directory: opto-sync-e2e
+        run: docker compose build node
+
       # --- suites ------------------------------------------------------------
       # `--exit-code-from <svc>` implies --abort-on-container-exit, so the job's
       # exit status is the test runner's.
@@ -121,6 +146,48 @@ jobs:
         run: |
           docker compose --profile conformance \
             up --build --exit-code-from conformance
+
+      - name: protocol — test/protocol/run.mjs vs node+Postgres
+        if: matrix.id == 'protocol'
+        working-directory: opto-sync-e2e
+        run: |
+          docker compose --profile protocol \
+            up --build --exit-code-from protocol
+
+      - name: protocol auth — production-mode adversarial isolation
+        if: matrix.id == 'auth'
+        working-directory: opto-sync-e2e
+        run: |
+          docker compose --profile auth \
+            up --build --exit-code-from auth-protocol
+
+      - name: protocol JWT auth — Supabase-compatible verification and isolation
+        if: matrix.id == 'jwt-auth'
+        working-directory: opto-sync-e2e
+        run: |
+          docker compose --profile jwt-auth \
+            up --build --exit-code-from jwt-auth-protocol
+
+      - name: protocol operations — quotas, rate limits, metrics, audit
+        if: matrix.id == 'operations'
+        working-directory: opto-sync-e2e
+        run: |
+          docker compose --profile operations \
+            up --build --exit-code-from operations-protocol
+
+      - name: protocol load — concurrent writes, retries, and latency bounds
+        if: matrix.id == 'load'
+        working-directory: opto-sync-e2e
+        run: |
+          docker compose --profile load \
+            up --build --exit-code-from protocol-load
+
+      - name: protocol recovery — concurrent migrations and dump/restore drill
+        if: matrix.id == 'recovery'
+        working-directory: opto-sync-e2e
+        run: |
+          docker compose --profile recovery \
+            up --build --exit-code-from protocol-backup-restore
 
       - name: crossserver — test/cross-server/run.mjs across 4 runtimes
         if: matrix.id == 'crossserver'
@@ -174,7 +241,7 @@ jobs:
       - name: Which suite broke
         if: failure()
         run: |
-          echo "::error title=opto-sync-e2e ${{ matrix.id }} FAILED::The '${{ matrix.id }}' e2e suite broke, not the other three. Full container logs are in the compose-logs-${{ matrix.id }} artifact."
+          echo "::error title=opto-sync-e2e ${{ matrix.id }} FAILED::The '${{ matrix.id }}' e2e suite broke. Full container logs are in the compose-logs-${{ matrix.id }} artifact."
 
       # Safe here in a way it is NOT locally: this runner is ephemeral and owns
       # the whole stack, so `down -v` cannot yank the shared Postgres out from

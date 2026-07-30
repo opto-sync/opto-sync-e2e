@@ -15,6 +15,15 @@ import cors from "cors";
 import pg from "pg";
 import dotenv from "dotenv";
 import { z } from "zod";
+import { createRequire } from "node:module";
+import {
+  ensureProtocolSchema,
+  installSyncProtocol,
+  resetProtocolState,
+  type ProtocolMutationHandler,
+} from "./protocol.js";
+import { createPostgresJsonbMutationHandler } from "./protocol-handlers.js";
+import { createProtocolOperations } from "./operations.js";
 
 const DocumentPayloadSchema = z
   .object({
@@ -41,6 +50,9 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const PORT = parseInt(process.env.SERVER_PORT || "3003", 10);
 const TEST_MODE = process.env.E2E_ALLOW_OPTION_OVERRIDE === "1";
 const REQUIRE_NATIVE = process.env.SYNCER_REQUIRE_NATIVE !== "0";
+const protocolOperations = createProtocolOperations(TEST_MODE);
+let protocolSchemaVersion = 0;
+const require = createRequire(import.meta.url);
 /**
  * Compare-and-swap retry budget. Measured behavior: no conflicts up to ~5
  * concurrent writers on one document, then rising 409s (25-60% at 20 writers)
@@ -234,13 +246,36 @@ function parseTsToMs(value: unknown): number | null {
 // ── App ──────────────────────────────────────────────────────────────────
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: "32mb" }));
+app.use(
+  express.json({
+    limit: "32mb",
+    verify: (request, _response, body) => {
+      // The protocol quota must account for the bytes actually received,
+      // including insignificant JSON whitespace. Re-serializing request.body
+      // would let a chunked or padded request bypass that limit.
+      (
+        request as express.Request & { rawBodyBytes?: number }
+      ).rawBodyBytes = body.length;
+    },
+  }),
+);
+
+function sendInternalError(
+  response: express.Response,
+  error: unknown,
+  context: string,
+) {
+  console.error(`[node-server] ${context}:`, error);
+  if (!response.headersSent) {
+    response.status(500).json({ error: "Internal server error" });
+  }
+}
 
 // Express's default handler answers a body-parse failure with an HTML stack
 // trace that leaks server paths. Answer in JSON instead, and keep the 400.
 app.use((err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
   if (err instanceof SyntaxError && "body" in err) {
-    return res.status(400).json({ error: "Malformed JSON body", detail: err.message });
+    return res.status(400).json({ error: "Malformed JSON body" });
   }
   if (err?.type === "entity.too.large") {
     return res.status(413).json({ error: "Payload too large" });
@@ -254,10 +289,13 @@ app.get("/health", (_req, res) => {
     server: "node-postgres",
     syncer: mergeJson ? "native" : "js-fallback",
     coreVersion: syncerVersion,
+    protocolSchemaVersion,
     testMode: TEST_MODE,
     defaultOptions: DEFAULT_MERGE_OPTIONS,
   });
 });
+
+protocolOperations.installMetricsEndpoint(app);
 
 app.get("/docs", async (_req, res) => {
   try {
@@ -266,7 +304,7 @@ app.get("/docs", async (_req, res) => {
     );
     res.json(result.rows);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    sendInternalError(res, err, "list documents failed");
   }
 });
 
@@ -279,7 +317,7 @@ app.get("/doc/:id", async (req, res) => {
     if (result.rows.length === 0) return res.status(404).json({ error: "Document not found" });
     res.json(result.rows[0]);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    sendInternalError(res, err, "read document failed");
   }
 });
 
@@ -293,7 +331,7 @@ app.get("/doc/:id/raw", async (req, res) => {
     if (result.rows.length === 0) return res.status(404).json({ error: "Document not found" });
     res.type("application/json").send(result.rows[0].raw);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    sendInternalError(res, err, "read raw document failed");
   }
 });
 
@@ -311,7 +349,7 @@ app.put("/doc/:id", async (req, res) => {
     );
     res.json({ created: true, document: result.rows[0] });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    sendInternalError(res, err, "replace document failed");
   }
 });
 
@@ -326,7 +364,7 @@ app.delete("/doc/:id", async (req, res) => {
     if (result.rows.length === 0) return res.status(404).json({ error: "Document not found" });
     res.json({ deleted: true, document: result.rows[0] });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    sendInternalError(res, err, "delete document failed");
   }
 });
 
@@ -398,7 +436,10 @@ app.post("/doc/:id/sync", async (req, res) => {
 
     res.status(409).json({ error: "Concurrent update, retry the sync", conflict: true });
   } catch (err: any) {
-    res.status(err.status ?? 500).json({ error: err.message });
+    if (err?.status === 400) {
+      return res.status(400).json({ error: err.message });
+    }
+    sendInternalError(res, err, "reconcile document failed");
   }
 });
 
@@ -448,12 +489,69 @@ app.post("/sync/batch", async (req, res) => {
     await client.query("COMMIT");
     res.json({ applied: results.filter((r) => r.applied).length, results });
   } catch (err: any) {
-    await client.query("ROLLBACK");
-    res.status(500).json({ error: err.message });
+    try {
+      await client.query("ROLLBACK");
+    } catch {
+      // Preserve and log the original transaction failure.
+    }
+    sendInternalError(res, err, "batch reconciliation failed");
   } finally {
     client.release();
   }
 });
+
+const protocolMutationHandlers: Record<string, ProtocolMutationHandler> = {
+  tasks: createPostgresJsonbMutationHandler({
+    logicalTable: "tasks",
+    relation: "public.syncer_protocol_tasks",
+    tenantColumn: "tenant_id",
+    idColumn: "id",
+    recordColumn: "data",
+    deletedColumn: "deleted_at",
+  }),
+};
+
+if (TEST_MODE) {
+  // Adversarial conformance handlers. These are never installed in production.
+  // The first proves a durable rejection cannot retain writes made while the
+  // handler was deciding. The second proves a handler cannot acknowledge a
+  // write unless a registered capture trigger advanced the checkpoint.
+  protocolMutationHandlers.rollback_probe = async ({
+    connection,
+    identity,
+    mutation,
+  }) => {
+    await connection.query(
+      `INSERT INTO syncer_protocol_tasks(tenant_id, id, data)
+       VALUES ($1, $2, $3::JSONB)`,
+      [
+        identity.tenantId,
+        mutation.recordId,
+        JSON.stringify({ mustRollBack: true }),
+      ],
+    );
+    return {
+      status: "rejected",
+      code: "TEST_REJECTION",
+      message: "intentional rejection after a captured write",
+    };
+  };
+  protocolMutationHandlers.uncaptured_probe = async () => ({
+    status: "applied",
+  });
+}
+
+installSyncProtocol(
+  app,
+  pool,
+  (baseJson, incomingJson) =>
+    performMerge(baseJson, incomingJson, DEFAULT_MERGE_OPTIONS),
+  TEST_MODE,
+  protocolOperations,
+  {
+    mutationHandlers: protocolMutationHandlers,
+  },
+);
 
 /**
  * Reconcile by UNIQUE INDEX rather than primary key: the row's identity is
@@ -509,7 +607,7 @@ app.post("/profile/sync", async (req, res) => {
     }
     res.status(409).json({ error: "Concurrent update, retry the sync", conflict: true });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    sendInternalError(res, err, "reconcile profile failed");
   }
 });
 
@@ -522,7 +620,7 @@ app.get("/profile/:email", async (req, res) => {
     if (result.rows.length === 0) return res.status(404).json({ error: "Profile not found" });
     res.json(result.rows[0]);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    sendInternalError(res, err, "read profile failed");
   }
 });
 
@@ -532,18 +630,22 @@ app.post("/reset", async (_req, res) => {
   try {
     await pool.query("TRUNCATE syncer_test_docs");
     await pool.query("TRUNCATE syncer_test_docs_profiles");
+    await pool.query("TRUNCATE syncer_protocol_tasks");
+    await resetProtocolState(pool);
     await seed();
     res.json({ reset: true, seeded: SEED_DOCS.length });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    sendInternalError(res, err, "reset failed");
   }
+});
+
+app.use((_req, res) => {
+  res.status(404).json({ error: "Not found" });
 });
 
 // Terminal handler: any unhandled route error answers JSON, never HTML.
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  console.error("[node-server] unhandled error:", err?.message);
-  if (res.headersSent) return;
-  res.status(err?.status ?? 500).json({ error: err?.message ?? "internal error" });
+  sendInternalError(res, err, "unhandled request failure");
 });
 
 // ── Initialization ───────────────────────────────────────────────────────
@@ -560,26 +662,71 @@ async function seed() {
 async function init() {
   console.log(`[node-server] Initializing on port ${PORT}...`);
 
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS syncer_test_docs (
-      id TEXT PRIMARY KEY,
-      data JSONB NOT NULL DEFAULT '{}',
-      version INT NOT NULL DEFAULT 1,
-      updated_at TIMESTAMPTZ DEFAULT NOW(),
-      deleted_at TIMESTAMPTZ
-    )
-  `);
-  // Pre-existing deployments predate the tombstone column.
-  await pool.query("ALTER TABLE syncer_test_docs ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ");
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS syncer_test_docs_profiles (
-      id BIGSERIAL PRIMARY KEY,
-      email TEXT NOT NULL UNIQUE,
-      data JSONB NOT NULL DEFAULT '{}',
-      version INT NOT NULL DEFAULT 1,
-      updated_at TIMESTAMPTZ DEFAULT NOW()
-    )
-  `);
+  protocolSchemaVersion = await ensureProtocolSchema(pool);
+
+  // PostgreSQL's IF NOT EXISTS does not make concurrent first-time DDL
+  // atomic: two replicas can both pass the existence check and collide while
+  // creating the relation's composite type. Serialize this reference app
+  // schema separately from the protocol migration lock.
+  const schemaClient = await pool.connect();
+  try {
+    await schemaClient.query("BEGIN");
+    await schemaClient.query(
+      "SELECT pg_advisory_xact_lock(hashtext('opto_sync_reference_app_schema'))"
+    );
+    await schemaClient.query(`
+      CREATE TABLE IF NOT EXISTS syncer_test_docs (
+        id TEXT PRIMARY KEY,
+        data JSONB NOT NULL DEFAULT '{}',
+        version INT NOT NULL DEFAULT 1,
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        deleted_at TIMESTAMPTZ
+      )
+    `);
+    // Pre-existing deployments predate the tombstone column.
+    await schemaClient.query(
+      "ALTER TABLE syncer_test_docs ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ"
+    );
+    await schemaClient.query(`
+      CREATE TABLE IF NOT EXISTS syncer_test_docs_profiles (
+        id BIGSERIAL PRIMARY KEY,
+        email TEXT NOT NULL UNIQUE,
+        data JSONB NOT NULL DEFAULT '{}',
+        version INT NOT NULL DEFAULT 1,
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await schemaClient.query(`
+      CREATE TABLE IF NOT EXISTS syncer_protocol_tasks (
+        tenant_id TEXT NOT NULL,
+        id TEXT NOT NULL,
+        data JSONB NOT NULL DEFAULT '{}',
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        deleted_at TIMESTAMPTZ,
+        PRIMARY KEY (tenant_id, id)
+      )
+    `);
+    await schemaClient.query(
+      `SELECT syncer_protocol_register_capture(
+         'public.syncer_protocol_tasks'::REGCLASS,
+         'tasks',
+         'tenant_id',
+         'id',
+         'data',
+         'deleted_at'
+       )`
+    );
+    await schemaClient.query("COMMIT");
+  } catch (error) {
+    try {
+      await schemaClient.query("ROLLBACK");
+    } catch {
+      // Preserve the original DDL failure if the connection also failed.
+    }
+    throw error;
+  } finally {
+    schemaClient.release();
+  }
   console.log("[node-server] Tables ensured");
 
   await seed();

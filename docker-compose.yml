@@ -80,6 +80,134 @@ services:
       postgres:
         condition: service_healthy
     restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3003/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 2s
+      timeout: 5s
+      retries: 20
+
+  # Production-mode instance with two server-owned auth identities. This
+  # exists only under the `auth` profile and proves bearer/client/tenant
+  # binding without weakening the normal test-mode server.
+  node-auth:
+    image: opto-sync-e2e-node:latest
+    ports:
+      - "3013:3013"
+    env_file:
+      - .env
+    environment:
+      - SERVER_PORT=3013
+      - SYNCER_REQUIRE_NATIVE=1
+      - >-
+        SYNCER_PROTOCOL_AUTH_JSON=[{"token":"tenant-a-test-token-000000000001","subject":"user-a","tenantId":"tenant-a","clientIds":["auth-client-a"]},{"token":"tenant-a-test-token-rotated-000001","subject":"user-a","tenantId":"tenant-a","clientIds":["auth-client-a"]},{"token":"tenant-b-test-token-000000000002","subject":"user-b","tenantId":"tenant-b","clientIds":["auth-client-b"]}]
+      - SYNCER_PROTOCOL_ADMIN_TOKEN=protocol-admin-test-token-0000000001
+    networks:
+      - syncer-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      node:
+        condition: service_healthy
+    restart: unless-stopped
+    profiles:
+      - auth
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3013/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 2s
+      timeout: 5s
+      retries: 20
+
+  # Production-mode JWT instance. It verifies a Supabase-shaped asymmetric JWT
+  # against an inline PUBLIC test JWKS, then derives tenant and exact client
+  # bindings from signed app_metadata. Production uses jwksUrl instead.
+  node-jwt-auth:
+    image: opto-sync-e2e-node:latest
+    ports:
+      - "3033:3033"
+    env_file:
+      - .env
+    environment:
+      - SERVER_PORT=3033
+      - SYNCER_REQUIRE_NATIVE=1
+      - >-
+        SYNCER_PROTOCOL_JWT_JSON={"jwks":{"keys":[{"kty":"RSA","n":"oTv_60xVk6clsCV18hmq3uivYWkTiSvjcJsDvrU2jfk1hfsORa8vLbUav3Pdz2dEpjlP43F40jNnngY2pqO4hdP3h1_7mZynd2wFSZoFUrzPmQLlmjJGoZjQBwneDAmGPhPgUd5vAZWNiQ0PWgg2KvN0Sor2zd34_8ndwnPttxcGqLFgq-yN46NMrB9LCRkfuMPBOz0FMNBmFPKiYbFPKljlhszQEO18jHC4M5lME16ZrZcQp1kYGI_nuQd0anGaGj2KuG8XBP_Rt1FX8k-9OSMbtyzS2cXXRJ4-XumljqVPfiNqRV9Ka6bV2e5kFij1cFjdxGVQxSMboWzBou-vQQ","e":"AQAB","kid":"opto-sync-jwt-e2e","alg":"RS256","use":"sig"}]},"issuer":"https://opto-sync-test.supabase.co/auth/v1","audience":"authenticated","algorithms":["RS256"],"roles":["authenticated"],"tenantClaim":"app_metadata.opto_sync_tenant_id","clientIdsClaim":"app_metadata.opto_sync_client_ids"}
+    networks:
+      - syncer-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      node:
+        condition: service_healthy
+    restart: unless-stopped
+    profiles:
+      - jwt-auth
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3033/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 2s
+      timeout: 5s
+      retries: 20
+
+  # Production-mode instance with deliberately tiny operational limits. The
+  # `operations` profile proves quotas, rate limiting, protected metrics, and
+  # structured audit paths without making the normal protocol suite flaky.
+  node-ops:
+    image: opto-sync-e2e-node:latest
+    ports:
+      - "3023:3023"
+    env_file:
+      - .env
+    environment:
+      - SERVER_PORT=3023
+      - SYNCER_REQUIRE_NATIVE=1
+      - >-
+        SYNCER_PROTOCOL_AUTH_JSON=[{"token":"ops-quota-test-token-000000000001","subject":"ops-quota","tenantId":"ops-quota","clientIds":["ops-quota-client"]},{"token":"ops-rate-test-token-0000000000002","subject":"ops-rate","tenantId":"ops-rate","clientIds":["ops-rate-client"]},{"token":"ops-snapshot-test-token-000000003","subject":"ops-snapshot","tenantId":"ops-snapshot","clientIds":["ops-snapshot-client"]}]
+      - SYNCER_METRICS_TOKEN=ops-metrics-test-token-0000000000001
+      - SYNCER_PROTOCOL_MAX_PUSH_BYTES=1024
+      - SYNCER_PROTOCOL_MAX_MUTATION_BYTES=400
+      - SYNCER_PROTOCOL_MAX_PUSH_MUTATIONS=2
+      - SYNCER_PROTOCOL_MAX_SNAPSHOT_RECORDS=2
+      - SYNCER_PROTOCOL_MAX_SNAPSHOT_BYTES=1024
+      - SYNCER_PROTOCOL_RATE_LIMIT_REQUESTS=3
+      - SYNCER_PROTOCOL_RATE_LIMIT_WINDOW_MS=60000
+    networks:
+      - syncer-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      node:
+        condition: service_healthy
+    restart: unless-stopped
+    profiles:
+      - operations
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3023/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 2s
+      timeout: 5s
+      retries: 20
 
   # --- Dart Shelf Server (in-memory, C FFI merging) ---
   dart:
@@ -166,6 +294,253 @@ services:
       - syncer-net
     profiles:
       - conformance
+
+  # --- Sync protocol v1 conformance ---
+  # Mutation idempotency, atomic client watermarks, durable rejection,
+  # commit-ordered pull checkpoints, explicit tombstones, pagination, and
+  # compacted-history reset. Run:
+  #   docker compose --profile protocol up --exit-code-from protocol
+  protocol:
+    image: node:22-alpine
+    working_dir: /test
+    depends_on:
+      postgres:
+        condition: service_healthy
+      node:
+        condition: service_started
+    environment:
+      - BASE_URL=http://node:3003
+    volumes:
+      - ./test:/test:ro
+    entrypoint: ["node", "/test/protocol/run.mjs"]
+    networks:
+      - syncer-net
+    profiles:
+      - protocol
+
+  # Adversarial authentication and cross-tenant isolation checks. Run:
+  #   docker compose --profile auth up --exit-code-from auth-protocol
+  auth-protocol:
+    image: node:22-alpine
+    working_dir: /test
+    depends_on:
+      node-auth:
+        condition: service_healthy
+    environment:
+      - BASE_URL=http://node-auth:3013
+      - RESET_URL=http://node:3003/reset
+      - TENANT_A_TOKEN=tenant-a-test-token-000000000001
+      - TENANT_A_ROTATED_TOKEN=tenant-a-test-token-rotated-000001
+      - TENANT_B_TOKEN=tenant-b-test-token-000000000002
+      - ADMIN_TOKEN=protocol-admin-test-token-0000000001
+    volumes:
+      - ./test:/test:ro
+    entrypoint: ["node", "/test/protocol/auth.mjs"]
+    networks:
+      - syncer-net
+    profiles:
+      - auth
+
+  # Supabase-compatible asymmetric JWT verification and signed-claim isolation.
+  jwt-auth-protocol:
+    image: node:22-alpine
+    working_dir: /test
+    depends_on:
+      node-jwt-auth:
+        condition: service_healthy
+      supabase-auth-hook-test:
+        condition: service_healthy
+    environment:
+      - BASE_URL=http://node-jwt-auth:3033
+      - RESET_URL=http://node:3003/reset
+    volumes:
+      - ./test:/test:ro
+    entrypoint: ["node", "/test/protocol/jwt-auth.mjs"]
+    networks:
+      - syncer-net
+    profiles:
+      - jwt-auth
+
+  # Applies and behavior-tests the deployable Supabase Custom Access Token
+  # Hook against PostgreSQL before the live JWT protocol runner starts. It
+  # stays alive after success because --exit-code-from implies abort-on-exit;
+  # a successful one-shot prerequisite would abort the runner before it starts.
+  supabase-auth-hook-test:
+    image: postgres:16-alpine
+    environment:
+      - PGPASSWORD=syncer_test
+    volumes:
+      - ./deploy/supabase/custom_access_token_hook.sql:/migration.sql:ro
+      - ./test/supabase/auth-hook-setup.sql:/setup.sql:ro
+      - ./test/supabase/auth-hook-test.sql:/test.sql:ro
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >-
+        psql -v ON_ERROR_STOP=1 -h postgres -U syncer -d syncer_test
+        -f /setup.sql -f /migration.sql -f /test.sql &&
+        touch /tmp/opto-sync-auth-hook-ready &&
+        exec tail -f /dev/null
+    networks:
+      - syncer-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/opto-sync-auth-hook-ready"]
+      interval: 1s
+      timeout: 2s
+      retries: 20
+    restart: "no"
+    profiles:
+      - jwt-auth
+
+  # Operational control checks against the low-limit production-mode server.
+  #   docker compose --profile operations up --build \
+  #     --exit-code-from operations-protocol
+  operations-protocol:
+    image: node:22-alpine
+    working_dir: /test
+    depends_on:
+      node-ops:
+        condition: service_healthy
+    environment:
+      - BASE_URL=http://node-ops:3023
+      - RESET_URL=http://node:3003/reset
+      - QUOTA_TOKEN=ops-quota-test-token-000000000001
+      - RATE_TOKEN=ops-rate-test-token-0000000000002
+      - SNAPSHOT_TOKEN=ops-snapshot-test-token-000000003
+      - METRICS_TOKEN=ops-metrics-test-token-0000000000001
+    volumes:
+      - ./test:/test:ro
+    entrypoint: ["node", "/test/protocol/operations.mjs"]
+    networks:
+      - syncer-net
+    profiles:
+      - operations
+
+  # Bounded latency/concurrency probe for the singleton-ordered protocol path.
+  # It is correctness-first: every concurrent write and duplicate retry is
+  # verified before latency percentiles are reported.
+  protocol-load:
+    image: node:22-alpine
+    working_dir: /test
+    depends_on:
+      node:
+        condition: service_healthy
+    environment:
+      - BASE_URL=http://node:3003
+      - LOAD_CLIENTS=96
+      - LOAD_P95_MS=10000
+      - LOAD_MAX_MS=15000
+    volumes:
+      - ./test:/test:ro
+    entrypoint: ["node", "/test/protocol/load.mjs"]
+    networks:
+      - syncer-net
+    profiles:
+      - load
+
+  # The compiled, production migration entry point races application startup.
+  # It stays alive after success so Compose can expose a durable health signal
+  # to the recovery seed.
+  protocol-migrate:
+    image: opto-sync-e2e-node:latest
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    entrypoint:
+      [
+        "/bin/sh",
+        "-c",
+        "npm run migrate && touch /tmp/opto-sync-migration-ready && exec tail -f /dev/null",
+      ]
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/opto-sync-migration-ready"]
+      interval: 1s
+      timeout: 2s
+      retries: 30
+    networks:
+      - syncer-net
+    profiles:
+      - recovery
+
+  # A second server races the normal node and the deployment migration job
+  # during startup. All three must converge on one advisory-locked, checksummed
+  # migration history.
+  node-migration-peer:
+    image: opto-sync-e2e-node:latest
+    ports:
+      - "3043:3043"
+    env_file:
+      - .env
+    environment:
+      - SERVER_PORT=3043
+      - SYNCER_REQUIRE_NATIVE=1
+      - E2E_ALLOW_OPTION_OVERRIDE=1
+    networks:
+      - syncer-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    profiles:
+      - recovery
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3043/health').then(async r=>{const j=await r.json();if(!r.ok||j.protocolSchemaVersion!==3)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 2s
+      timeout: 5s
+      retries: 20
+
+  recovery-seed:
+    image: node:22-alpine
+    working_dir: /test
+    depends_on:
+      node:
+        condition: service_healthy
+      node-migration-peer:
+        condition: service_healthy
+      protocol-migrate:
+        condition: service_healthy
+    environment:
+      - BASE_URL=http://node:3003
+    volumes:
+      - ./test:/test:ro
+    entrypoint: ["node", "/test/protocol/recovery-seed.mjs"]
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/opto-sync-recovery-seed-ready"]
+      interval: 1s
+      timeout: 2s
+      retries: 20
+    networks:
+      - syncer-net
+    profiles:
+      - recovery
+
+  protocol-backup-restore:
+    image: postgres:16-alpine
+    environment:
+      - PGPASSWORD=syncer_test
+      - SOURCE_DATABASE=syncer_test
+      - RESTORE_DATABASE=syncer_restore_test
+    depends_on:
+      recovery-seed:
+        condition: service_healthy
+    volumes:
+      - ./test:/test:ro
+    entrypoint: ["/bin/sh", "/test/protocol/backup-restore.sh"]
+    networks:
+      - syncer-net
+    profiles:
+      - recovery
 
   # --- Cross-Server Convergence ---
   # Proves four independent runtimes (Node/napi+jsonb, Rust/static-link,

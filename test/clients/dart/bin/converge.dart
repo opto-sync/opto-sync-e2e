@@ -47,8 +47,11 @@ String get _docId => crossClientFixture['docId'] as String;
 
 Future<void> _setup() async {
   await putDoc(_docId, crossClientFixture['base']!);
-  _checkEqual(await getDocData(_docId), crossClientFixture['base'],
-      'fresh document $_docId written');
+  _checkEqual(
+    await getDocData(_docId),
+    crossClientFixture['base'],
+    'fresh document $_docId written',
+  );
 }
 
 Future<void> _flush() async {
@@ -60,16 +63,25 @@ Future<void> _flush() async {
 
     final queued = pending.single;
     final res = await syncDoc(
-        _docId, jsonDecode(queued.jsonPayload) as Map<String, dynamic>);
+      _docId,
+      jsonDecode(queued.jsonPayload) as Map<String, dynamic>,
+    );
     await markMutation(
-        client, queued.id, res.ok ? SyncStatus.synced : SyncStatus.failed);
+      client,
+      queued.id,
+      res.ok ? SyncStatus.synced : SyncStatus.failed,
+    );
     _check(res.status == 200, 'flushed to $_docId (HTTP ${res.status})');
-    _check((res.json as Map)['mergedWith'] == 'native-c-ffi',
-        'server merged with the native C core');
+    _check(
+      (res.json as Map)['mergedWith'] == 'native-c-ffi',
+      'server merged with the native C core',
+    );
 
     final counts = await statusCounts(client);
-    _check(counts.synced == 1 && counts.pending == 0 && counts.failed == 0,
-        'queue drained ($counts)');
+    _check(
+      counts.synced == 1 && counts.pending == 0 && counts.failed == 0,
+      'queue drained ($counts)',
+    );
   } finally {
     await client.db.close();
   }
@@ -80,45 +92,72 @@ Future<void> _verify() async {
   final expected = crossClientFixture['expectedFinal'] as Map<String, dynamic>;
 
   // (a) strict, order-sensitive: the server document is fully determined.
-  _checkEqual(serverFinal, expected,
-      'final server document matches the predicted merge exactly');
+  _checkEqual(
+    serverFinal,
+    expected,
+    'final server document matches the predicted merge exactly',
+  );
 
   // Spot-check the load-bearing policy claims, so a failure names the rule.
   final revision = serverFinal['revision'] as Map<String, dynamic>;
   final items = (serverFinal['items'] as List).cast<Map<String, dynamic>>();
 
-  _check(serverFinal['title'] == 'rust title',
-      'unguarded root scalar follows arrival order (last flusher wins)');
-  _check(revision['owner'] == 'dart' && revision['updatedAt'] == 4000,
-      'guarded object follows updatedAt, NOT flush order: rust flushed last but is stale');
-  _check(revision['priority'] == 2, "rust's stale revision was rejected WHOLESALE");
+  _check(
+    serverFinal['updatedAt'] == 4000 && serverFinal['title'] == 'rust title',
+    'root LWW follows the deterministic payload timestamps',
+  );
+  _check(
+    revision['owner'] == 'dart' && revision['updatedAt'] == 4000,
+    'guarded object follows updatedAt, NOT flush order: rust flushed last but is stale',
+  );
+  _check(
+    revision['priority'] == 2,
+    "rust's stale revision was rejected WHOLESALE",
+  );
   // Base-only root scalar: no client payload sends a root `createdAt`, so
   // nothing can overwrite it. (`createdAt` is no longer a guarded key on any
   // tier — FWW is a node-level veto and is opt-in.)
-  _check(serverFinal['createdAt'] == 1000,
-      'base-only root createdAt untouched by every client');
+  _check(
+    serverFinal['createdAt'] == 1000,
+    'base-only root createdAt untouched by every client',
+  );
   _check(items.length == 5, 'exactly three new identities appended');
 
   final shared = items.firstWhere((i) => i['id'] == 'shared');
   _check(
-      shared['label'] == 'dart-shared' &&
-          shared['qty'] == 20 &&
-          shared['createdAt'] == 1000,
-      "the shared element carries dart's write deep-merged onto the base element");
-  _check(items.firstWhere((i) => i['id'] == 'keep')['label'] == 'untouched',
-      'the element nobody touched is preserved verbatim');
-  _check(items.map((i) => i['id']).join(',') == 'keep,shared,ts-new,dart-new,rust-new',
-      'appended identities appear in flush order at the end of the array');
+    shared['label'] == 'dart-shared' &&
+        shared['qty'] == 20 &&
+        shared['createdAt'] == 1000,
+    "the shared element carries dart's write deep-merged onto the base element",
+  );
+  _check(
+    items.firstWhere((i) => i['id'] == 'keep')['label'] == 'untouched',
+    'the element nobody touched is preserved verbatim',
+  );
+  _check(
+    items.map((i) => i['id']).join(',') ==
+        'keep,shared,ts-new,dart-new,rust-new',
+    'appended identities appear in flush order at the end of the array',
+  );
 
   // (b) this client's own local reconcile of the final state.
   final client = newClient(newSyncer());
   try {
-    final reconciled =
-        await client.reconcileIncoming('docs', _docId, serverFinal, _payload);
-    expectDeepEqualKeyed(reconciled, expected,
-        '$_lang local reconcile of the final server state');
-    _ok('$_lang local reconcile of the final server state agrees with every '
-        'other client');
+    final reconciled = await client.reconcileIncoming(
+      'docs',
+      _docId,
+      serverFinal,
+      _payload,
+    );
+    expectDeepEqualKeyed(
+      reconciled,
+      expected,
+      '$_lang local reconcile of the final server state',
+    );
+    _ok(
+      '$_lang local reconcile of the final server state agrees with every '
+      'other client',
+    );
   } finally {
     await client.db.close();
   }
@@ -135,13 +174,16 @@ Future<void> main(List<String> args) async {
   final run = phases[_phase];
   if (run == null) {
     stderr.writeln(
-        'usage: dart run bin/converge.dart <${phases.keys.join('|')}>');
+      'usage: dart run bin/converge.dart <${phases.keys.join('|')}>',
+    );
     exit(2);
   }
 
   final reason = await probeServer();
   if (reason != null) {
-    stderr.writeln('[$_lang] SKIP converge/$_phase — server unavailable: $reason');
+    stderr.writeln(
+      '[$_lang] SKIP converge/$_phase — server unavailable: $reason',
+    );
     exit(0);
   }
 
@@ -152,5 +194,6 @@ Future<void> main(List<String> args) async {
     exit(1);
   }
   stdout.writeln(
-      '# [$_lang] converge/$_phase: $_checks checks passed against $baseUrl');
+    '# [$_lang] converge/$_phase: $_checks checks passed against $baseUrl',
+  );
 }

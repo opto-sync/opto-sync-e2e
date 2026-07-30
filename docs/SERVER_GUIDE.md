@@ -550,20 +550,76 @@ conflict or spin forever against a tombstone.
 default is usually 100 kB, which silently breaks large offline flushes — and
 map the overflow to `413`, not `500`.
 
-### Residual gaps in the reference server
+### Error-response hardening
 
-Reported honestly rather than presented as a pattern to copy:
-
-- **Unknown routes fall through to Express's default 404**, whose body is HTML,
-  not JSON. Scenario `12-robustness` only asserts the *status* is 404. If you
-  want JSON everywhere, add a catch-all 404 handler.
-- **`500` bodies echo `err.message` verbatim**, which for a database error can
-  include SQL text or column names. Acceptable in a test fixture; log the
-  detail and return an opaque message in production.
+Every route, including unknown paths and unsupported methods, now returns JSON.
+Malformed bodies do not echo parser excerpts. Database and stack details are
+written to trusted server logs while 5xx clients receive only an opaque
+`Internal server error`; known 4xx protocol codes and safe validation details
+remain available to callers. Scenario `12-robustness` verifies the JSON 404 and
+malformed-body contracts.
 
 ---
 
-## 10. Checklist for a new server implementation
+## 10. Capturing writes from application tables
+
+Protocol migration 2 adds `syncer_protocol_capture_change()`, an `AFTER` row
+trigger function that turns writes to an ordinary PostgreSQL table into the
+same commit-ordered pull stream used by `/v1/sync/push`. Attach it explicitly
+to every authoritative table whose records clients should receive:
+
+```sql
+CREATE TRIGGER todos_opto_sync_capture
+  AFTER INSERT OR UPDATE OR DELETE ON public.todos
+  FOR EACH ROW EXECUTE FUNCTION syncer_protocol_capture_change(
+    'todos', 'workspace_id', 'id', 'data', 'deleted_at'
+  );
+```
+
+The arguments are the stable logical table name, tenant column, record-id
+column, JSON/JSONB object column, and optional deletion-marker column. Omit the
+fifth argument if only physical `DELETE` represents deletion.
+
+For a table whose complete row is the replicated object, pass `'*'`:
+
+```sql
+CREATE TRIGGER tasks_opto_sync_capture
+  AFTER INSERT OR UPDATE OR DELETE ON public.tasks
+  FOR EACH ROW EXECUTE FUNCTION syncer_protocol_capture_change(
+    'tasks', 'tenant_id', 'id', '*', 'deleted_at'
+  );
+```
+
+The contract is intentionally strict:
+
+- use an `AFTER ... FOR EACH ROW` trigger, so source and protocol effects share
+  one transaction;
+- tenant and record identities are converted to text and must be non-empty;
+- an explicit record column must contain a JSON object; arrays, scalars, and
+  JSON `null` abort the source write without advancing the checkpoint;
+- `'*'` includes every source column, including fields you may not intend to
+  replicate—prefer a dedicated JSONB projection column when rows contain
+  secrets;
+- a deletion marker is considered live when null, `false`, numeric zero, or an
+  empty string, and deleted for other non-null values;
+- every captured update creates a revision/change, even when replicated fields
+  are unchanged; use separate triggers with a carefully reviewed `WHEN` clause
+  if unrelated updates would create unacceptable churn; and
+- never write the canonical `syncer_protocol_records` mirror or ordered change
+  log directly.
+
+Source-table RLS is not inherited by the mirror or change log. The reference
+HTTP protocol filters by verified tenant identity, but applications must also
+apply least-privilege database grants/RLS and per-record authorization suited
+to their access model.
+
+The recovery drill exercises custom column names, whole-row nested JSONB,
+nullable tombstones, resurrection, physical deletion, and atomic rejection of
+a non-object record after dump/restore.
+
+---
+
+## 11. Checklist for a new server implementation
 
 Each row names the suite that would catch the mistake. Suite invocations are
 in [`TEST_TOPOLOGY.md`](./TEST_TOPOLOGY.md).

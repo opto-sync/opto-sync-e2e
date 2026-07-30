@@ -25,7 +25,7 @@ layer adds the things only remote infrastructure can show:
 | Cross-cloud agreement | no | AWS and Hetzner compared |
 
 The suite asserts the WebAssembly engine initializes, that reconciliation
-(stale-write rejection, keyed-array reconciliation, `createdAt` FWW, digit-string
+(stale-write rejection, keyed-array reconciliation, explicit `createdAt` FWW, digit-string
 nanosecond precision, idempotency) produces the same answers as Node, and that
 **real IndexedDB** persists a queued mutation across close/reopen and across a
 status transition — with `indexedDB.databases()` used to confirm the store

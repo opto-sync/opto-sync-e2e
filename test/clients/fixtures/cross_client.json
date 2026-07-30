@@ -12,8 +12,11 @@
     "",
     "Derivation, key by key:",
     "",
-    "  title       unguarded root scalar (no updatedAt on either root) -> plain",
-    "              last-writer-wins by ARRIVAL order -> rust flushed last -> 'rust title'.",
+    "  root        each payload carries a deterministic root updatedAt",
+    "              (ts 2000 -> dart 3000 -> rust 4000), so queueMutation preserves",
+    "              it instead of generating a process-dependent HLC. Root writes",
+    "              therefore apply in the declared order and finish at 4000.",
+    "  title       part of those accepted root writes -> rust's title wins.",
     "  <lang>Marker  each client contributes its own key; none collide -> all three survive.",
     "  createdAt   base 1000. No client payload sends createdAt at the root, so",
     "              nothing overwrites it. (createdAt is NOT a guarded key: fwwKeys",
@@ -50,6 +53,7 @@
 
   "payloads": {
     "ts": {
+      "updatedAt": 2000,
       "title": "ts title",
       "tsMarker": "ts-was-here",
       "revision": { "updatedAt": 2000, "owner": "ts", "priority": 1 },
@@ -59,6 +63,7 @@
       ]
     },
     "dart": {
+      "updatedAt": 3000,
       "title": "dart title",
       "dartMarker": "dart-was-here",
       "revision": { "updatedAt": 4000, "owner": "dart", "priority": 2 },
@@ -68,6 +73,7 @@
       ]
     },
     "rust": {
+      "updatedAt": 4000,
       "title": "rust title",
       "rustMarker": "rust-was-here",
       "revision": { "updatedAt": 3000, "owner": "rust", "priority": 3 },
@@ -79,6 +85,7 @@
   },
 
   "expectedFinal": {
+    "updatedAt": 4000,
     "title": "rust title",
     "createdAt": 1000,
     "tsMarker": "ts-was-here",

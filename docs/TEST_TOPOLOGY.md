@@ -80,6 +80,10 @@ Supporting services:
 | Service | Port | Image | Profile |
 |---|---|---|---|
 | `postgres` | 5433 → 5432 | `postgres:16-alpine` (`syncer`/`syncer_test`/`syncer_test`) | none |
+| `node-auth` | 3013 | production-mode node with exact static identity mappings | `auth` |
+| `node-ops` | 3023 | production-mode node with deliberately low operational limits | `operations` |
+| `node-jwt-auth` | 3033 | production-mode node with Supabase-shaped asymmetric JWT verification | `jwt-auth` |
+| `supabase-auth-hook-test` | — | migration/assertion runner for the deployable Custom Access Token Hook | `jwt-auth` |
 | `postgrest` | 3010 → 3000 | `postgrest/postgrest:v12.2.3` | override file only |
 | `supabase-init` | — | one-shot `psql` running `test/supabase/init.sql` | override file only |
 
@@ -126,8 +130,14 @@ per sync request instead.
 | `test/run_e2e.sh` | `curlimages/curl:8.7.1`, service `test-runner`, profile `test` | `node` only | Smoke: the node server is up, seeded, and deep-merges. Fast enough to run on every change; grep-based, so it cannot distinguish *which* merge policy ran. |
 | `test/run_e2e_full.sh` | same image, service `test-runner-full`, profile `fulltest` | `node`, `rust-fullstack`, `dart`, `sagitta` | Element-level keyed-array behaviour on **all four** runtimes: stale element rejected (`check_absent 'STALE'`), untouched element kept, new element appended, and a later `createdAt` **not** vetoing a newer write (plus, on the node server only, an explicit `X-Syncer-Options: {"fwwKeys":"createdAt"}` request proving the veto is still reachable). Asserting only `"merged":true` would pass under `REPLACE`; these assertions do not. |
 | `test/conformance/` | `node:22-alpine`, service `conformance`, profile `conformance` | `node` + Postgres | 12 scenario groups (below). The only suite that inspects **stored jsonb text** via `/doc/:id/raw`, and the only one that exercises tombstones, CAS conflicts, unique-index identity, the strategy matrix and the robustness/prototype-pollution cases. |
+| `test/protocol/run.mjs` | `node:22-alpine`, service `protocol`, profile `protocol` | `node` + Postgres | Protocol ledger/effect/watermark atomicity, pre-commit rollback, committed-but-response-lost retry recovery, total commit order shared with trigger-captured direct SQL writes, tenant-filtered pull pagination, tombstones, compaction, and repeatable-read snapshots. |
+| `test/protocol/auth.mjs` | `node:22-alpine`, service `auth-protocol`, profile `auth` | production-mode `node-auth` + Postgres | Missing/wrong bearer rejection, exact client binding, durable subject ownership, safe token rotation, same-ID cross-tenant isolation, and a separate administrator credential for compaction. |
+| `test/protocol/jwt-auth.mjs` | `node:22-alpine`, service `jwt-auth-protocol`, profile `jwt-auth` | production-mode `node-jwt-auth` + Postgres | Asymmetric signature, expiry/nbf, issuer, audience, role and algorithm verification; server-owned tenant/client claims; spoofing, refreshed-token dedupe, durable ownership, and cross-tenant pull/snapshot isolation. |
+| `test/protocol/operations.mjs` | `node:22-alpine`, service `operations-protocol`, profile `operations` | low-limit production-mode `node-ops` + Postgres | Exact wire/mutation/batch quotas, snapshot refusal rather than partial reset, separate metrics authentication, valid-principal and invalid-bearer rate limiting, bounded metrics labels, and JSON audit paths. |
+| `test/protocol/load.mjs` | `node:22-alpine`, service `protocol-load`, profile `load` | `node` + Postgres | 96 concurrent writers merge into one record, 96 retries deduplicate, all 96 changes remain ordered, the snapshot converges, then p50/p95/p99/max latency bounds are enforced. |
+| `test/protocol/backup-restore.sh` | `postgres:16-alpine`, service `protocol-backup-restore`, profile `recovery` | compiled migration job + two concurrently migrating node replicas + Postgres | Advisory-locked migration convergence followed by a full custom-format dump/restore; validates migration checksums, checkpoint/change equality, ledger watermarks, tenant data, tombstones, nested JSONB, restored triggers, versioning, physical-delete protection, and generic arbitrary-table capture including whole-row objects and atomic rejection. |
 | `test/cross-server/` | `node:22-alpine`, service `cross-server`, profile `crossserver` | `node`, `rust-fullstack`, `dart`, `sagitta` | Four runtimes must produce **semantically identical** documents from one mutation sequence, after different HTTP stacks, different JSON serializers, and (for node) a real jsonb round trip. Also pins per-runtime int64 fidelity. |
-| `test/clients/` | host shell, `test/clients/run_all.sh` | `node` (via published port) | The three **real client libraries** from `../opto-sync-clients` against a live server: offline queue lifecycle, flush/replay, pull-back reconcile, cross-client convergence. The only suite that can catch a client whose *default merge policy* disagrees with the server's — and it did. |
+| `test/clients/` | host shell, `test/clients/run_all.sh` | `node` (via published port) | The four **real client libraries** from `../opto-sync-clients` against a live server. TypeScript/Dart/Rust run the full scenario and convergence set; Gleam runs its typed push/retry/pull/delete lifecycle through the real NIF. |
 | `test/supabase/` | `node:22-alpine`, service `supabase-test`, profile `supabasetest` (override file) | `rust-mash` + `postgrest` | The REST persistence path end to end, with **JWT auth enforced**. Every claim about merged state is re-verified by reading the row back through PostgREST directly, bypassing `rust-mash`. |
 
 ### Conformance scenario groups
@@ -176,16 +186,25 @@ any server could be blamed.
 
 [`test/clients/`](../test/clients/) runs on the host with host toolchains
 (node ≥ 18, dart ≥ 3.12, cargo) — no new Docker images. Seven scenarios,
-implemented in **all three languages** so uniform behaviour is provable rather
+implemented in **TypeScript, Dart, and Rust** so uniform behaviour is provable rather
 than assumed: default-policy pin (0), offline queue → flush → merge (1a
 individual, 1b batched), optimistic write → pull-back reconcile (2), stale-write
 rejection both directions (3), keyed-array reconciliation (4), replay
-idempotency (5), failure marking (6), cross-client convergence (7).
+idempotency (5), failure marking (6), cross-client convergence (7), and exact
+protocol-v1 envelope retry/deduplication (8).
 
 Scenario 7 is orchestrated as separate processes because the flushes must happen
 one language at a time against one document:
 `setup(ts) → flush(ts) → flush(dart) → flush(rust) → verify(ts, dart, rust)`.
 Payloads are designed so flush order and timestamp order **disagree**.
+
+Three additional restart steps cover the commit/ack ambiguity and interrupted
+snapshot installation in actual new processes. TypeScript closes and launches
+Chromium three times with one persistent native IndexedDB profile; Dart reopens
+file-backed SQLite; Rust reloads its serialized `ProtocolQueue`. Each path
+injects a partial authoritative replacement, proves the checkpoint and pending
+mutation were not advanced, repairs the full snapshot, receives `duplicate` for
+the byte-identical push retry, and persists the final acknowledgement.
 
 `run_all.sh` aborts if `/health` does not report `syncer: "native"`. If the
 server is unreachable, every suite skips with a message and exits 0 —
@@ -206,6 +225,10 @@ server is unreachable, every suite skips with a message and exits 0 —
 | `test` | `test-runner` (runs `run_e2e.sh`) |
 | `fulltest` | `test-runner-full` (runs `run_e2e_full.sh`) |
 | `conformance` | `conformance` (runs `test/conformance/run.mjs`) |
+| `protocol` | `protocol` (runs `test/protocol/run.mjs`) |
+| `auth` | `node-auth`, `auth-protocol` |
+| `operations` | `node-ops`, `operations-protocol` |
+| `load` | `protocol-load` |
 | `crossserver` | `cross-server` (runs `test/cross-server/run.mjs`) |
 | `supabasetest` | `supabase-test` — and, via the override file, `rust-mash` |
 
@@ -227,6 +250,10 @@ docker compose --profile fulltest --profile fullstack --profile dart --profile s
 
 # Conformance (12 scenario groups vs the Postgres-backed node server)
 docker compose --profile conformance up --exit-code-from conformance
+
+# Protocol operational controls and bounded concurrency probe
+docker compose --profile operations up --exit-code-from operations-protocol
+docker compose --profile load up --exit-code-from protocol-load
 
 # Cross-server convergence (four runtimes)
 docker compose --profile crossserver --profile fullstack --profile dart --profile sagitta \
@@ -267,7 +294,7 @@ BASE_URL=http://localhost:3003 node test/conformance/run.mjs 3 6 7
 
 | Workflow | Legs |
 |---|---|
-| `.github/workflows/e2e-docker.yml` | one matrix leg each for `fulltest`, `conformance`, `crossserver`, and the Supabase/PostgREST path; each uploads full container logs on failure and tears down with `down -v` |
+| `.github/workflows/e2e-docker.yml` | one matrix leg each for `fulltest`, `conformance`, `protocol`, static `auth`, Supabase-compatible `jwt-auth`, `operations`, `load`, `recovery`, `crossserver`, and the Supabase/PostgREST path; each uploads full container logs on failure and tears down with `down -v` |
 | `.github/workflows/e2e-clients.yml` | host-run `test/clients/run_all.sh` (ts + dart + rust) against a live `postgres` + `node` stack, with `OPTO_SYNC_REQUIRE_SERVER=1` |
 
 Note that CI's teardown step passes **both** compose files so it removes
