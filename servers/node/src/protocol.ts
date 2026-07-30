@@ -1463,17 +1463,20 @@ export function installSyncProtocol(
       auditEvent("protocol.push_rejected", {
         requestId,
         code: "PUSH_MUTATION_LIMIT",
-        mutationCount: request.body.mutations.length,
+        mutationCount: body.mutations.length,
         limit: config.maxPushMutations,
       });
-      return response.status(413).json({
-        protocolVersion: PROTOCOL_VERSION,
-        error: "PUSH_MUTATION_LIMIT",
-        limit: config.maxPushMutations,
-      });
+      return {
+        status: 413,
+        body: {
+          protocolVersion: PROTOCOL_VERSION,
+          error: "PUSH_MUTATION_LIMIT",
+          limit: config.maxPushMutations,
+        },
+      };
     }
-    if (Array.isArray(request.body?.mutations)) {
-      const oversizedIndex = request.body.mutations.findIndex(
+    if (Array.isArray(body?.mutations)) {
+      const oversizedIndex = body.mutations.findIndex(
         (mutation: unknown) =>
           Buffer.byteLength(stableJson(mutation)) > config.maxMutationBytes,
       );
