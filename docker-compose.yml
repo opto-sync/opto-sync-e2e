@@ -356,6 +356,29 @@ services:
     profiles:
       - protocol
 
+  # WebSocket + TCP transport parity against the shared protocol handlers:
+  # push/pull/snapshot frame bodies must match the HTTP endpoints exactly,
+  # committed pushes must broadcast `changed` hints to every other
+  # connection, and malformed frames must never take a connection down. Run:
+  #   docker compose --profile wstest up --build --exit-code-from ws-protocol
+  ws-protocol:
+    image: node:22-alpine
+    working_dir: /test
+    depends_on:
+      node-ws:
+        condition: service_healthy
+    environment:
+      - BASE_URL=http://node-ws:3053
+      - SYNCER_TCP_PORT=3054
+      - TCP_HOST=node-ws
+    volumes:
+      - ./test:/test:ro
+    entrypoint: ["node", "/test/protocol/ws-transport.mjs"]
+    networks:
+      - syncer-net
+    profiles:
+      - wstest
+
   # Adversarial authentication and cross-tenant isolation checks. Run:
   #   docker compose --profile auth up --exit-code-from auth-protocol
   auth-protocol:
