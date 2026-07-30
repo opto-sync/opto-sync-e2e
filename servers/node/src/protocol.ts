@@ -1527,14 +1527,17 @@ export function installSyncProtocol(
         ),
         clientHash: privacyHash(parsed.data.clientId),
       });
-      return response.status(403).json({
-        protocolVersion: PROTOCOL_VERSION,
-        error: "CLIENT_ID_FORBIDDEN",
-        message: "the authenticated identity is not bound to this clientId",
-      });
+      return {
+        status: 403,
+        body: {
+          protocolVersion: PROTOCOL_VERSION,
+          error: "CLIENT_ID_FORBIDDEN",
+          message: "the authenticated identity is not bound to this clientId",
+        },
+      };
     }
 
-    const failpoint = testMode ? request.get("x-syncer-failpoint") : undefined;
+    const failpoint = testMode ? context.failpoint : undefined;
     if (
       failpoint !== undefined &&
       ![
@@ -1544,10 +1547,13 @@ export function installSyncProtocol(
         "after-commit-response-loss",
       ].includes(failpoint)
     ) {
-      return response.status(400).json({
-        protocolVersion: PROTOCOL_VERSION,
-        error: "INVALID_FAILPOINT",
-      });
+      return {
+        status: 400,
+        body: {
+          protocolVersion: PROTOCOL_VERSION,
+          error: "INVALID_FAILPOINT",
+        },
+      };
     }
     const injectFailure = (stage: string) => {
       if (failpoint === stage) {
