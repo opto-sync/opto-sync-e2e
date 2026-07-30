@@ -2001,14 +2001,25 @@ export function installSyncProtocol(
         ),
         code: "SNAPSHOT_FAILED",
       });
-      return response.status(500).json({
-        protocolVersion: PROTOCOL_VERSION,
-        error: "SNAPSHOT_FAILED",
-        message: publicProtocolFailure(error, "SNAPSHOT_FAILED").message,
-      });
+      return {
+        status: 500,
+        body: {
+          protocolVersion: PROTOCOL_VERSION,
+          error: "SNAPSHOT_FAILED",
+          message: publicProtocolFailure(error, "SNAPSHOT_FAILED").message,
+        },
+      };
     } finally {
       connection.release();
     }
+  };
+
+  app.get("/v1/sync/snapshot", async (_request, response) => {
+    const result = await snapshotCore({
+      requestId: response.locals.syncRequestId as string,
+      identity: response.locals.syncIdentity as ProtocolIdentity,
+    });
+    return response.status(result.status).json(result.body);
   });
 
   /**
