@@ -1978,16 +1978,19 @@ export function installSyncProtocol(
         {},
         records.rows.length,
       );
-      return response.json({
-        protocolVersion: PROTOCOL_VERSION,
-        checkpoint: String(state.rows[0].last_seq),
-        records: records.rows.map((row) => ({
-          table: row.table_name,
-          recordId: row.record_id,
-          record: row.record,
-          revision: String(row.revision),
-        })),
-      });
+      return {
+        status: 200,
+        body: {
+          protocolVersion: PROTOCOL_VERSION,
+          checkpoint: String(state.rows[0].last_seq),
+          records: records.rows.map((row) => ({
+            table: row.table_name,
+            recordId: row.record_id,
+            record: row.record,
+            revision: String(row.revision),
+          })),
+        },
+      };
     } catch (error) {
       await rollbackQuietly(connection);
       metrics.increment("opto_sync_protocol_snapshot_failures_total");
