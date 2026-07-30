@@ -1444,15 +1444,18 @@ export function installSyncProtocol(
         bodyBytes: rawBodyBytes,
         limitBytes: config.maxPushBytes,
       });
-      return response.status(413).json({
-        protocolVersion: PROTOCOL_VERSION,
-        error: "PUSH_TOO_LARGE",
-        limitBytes: config.maxPushBytes,
-      });
+      return {
+        status: 413,
+        body: {
+          protocolVersion: PROTOCOL_VERSION,
+          error: "PUSH_TOO_LARGE",
+          limitBytes: config.maxPushBytes,
+        },
+      };
     }
     if (
-      Array.isArray(request.body?.mutations) &&
-      request.body.mutations.length > config.maxPushMutations
+      Array.isArray(body?.mutations) &&
+      body.mutations.length > config.maxPushMutations
     ) {
       metrics.increment("opto_sync_protocol_quota_rejections_total", {
         quota: "push_mutations",
