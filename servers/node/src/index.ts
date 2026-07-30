@@ -546,7 +546,12 @@ if (TEST_MODE) {
   });
 }
 
-installSyncProtocol(
+// Fan-out hub for the realtime transports: after any push commits changes —
+// over HTTP, WebSocket, or TCP — every OTHER connected socket receives the
+// `changed` pull hint.
+const syncHub = new SyncChangeHub();
+
+const syncRuntime = installSyncProtocol(
   app,
   pool,
   (baseJson, incomingJson) =>
@@ -555,6 +560,8 @@ installSyncProtocol(
   protocolOperations,
   {
     mutationHandlers: protocolMutationHandlers,
+    onPushCommitted: (checkpoint, origin) =>
+      syncHub.broadcast(Number(checkpoint), origin),
   },
 );
 
