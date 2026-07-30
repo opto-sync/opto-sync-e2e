@@ -1490,26 +1490,32 @@ export function installSyncProtocol(
           mutationIndex: oversizedIndex,
           limitBytes: config.maxMutationBytes,
         });
-        return response.status(413).json({
-          protocolVersion: PROTOCOL_VERSION,
-          error: "MUTATION_TOO_LARGE",
-          mutationIndex: oversizedIndex,
-          limitBytes: config.maxMutationBytes,
-        });
+        return {
+          status: 413,
+          body: {
+            protocolVersion: PROTOCOL_VERSION,
+            error: "MUTATION_TOO_LARGE",
+            mutationIndex: oversizedIndex,
+            limitBytes: config.maxMutationBytes,
+          },
+        };
       }
     }
-    const parsed = PushSchema.safeParse(request.body);
+    const parsed = PushSchema.safeParse(body);
     if (!parsed.success) {
       metrics.increment("opto_sync_protocol_push_rejections_total", {
         code: "INVALID_PUSH",
       });
-      return response.status(400).json({
-        protocolVersion: PROTOCOL_VERSION,
-        error: "INVALID_PUSH",
-        details: parsed.error.format(),
-      });
+      return {
+        status: 400,
+        body: {
+          protocolVersion: PROTOCOL_VERSION,
+          error: "INVALID_PUSH",
+          details: parsed.error.format(),
+        },
+      };
     }
-    const identity = response.locals.syncIdentity as ProtocolIdentity;
+    const identity = context.identity;
     if (
       identity.clientIds !== null &&
       !identity.clientIds.has(parsed.data.clientId)
