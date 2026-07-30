@@ -656,3 +656,47 @@ in [`TEST_TOPOLOGY.md`](./TEST_TOPOLOGY.md).
 3. If your client libraries are in the loop, run `test/clients/run_all.sh` —
    that is the suite that catches a client whose *default policy* disagrees
    with yours, which no server-only test can.
+
+---
+
+## 12. Realtime transports: WebSocket and TCP NDJSON
+
+The reference node server exposes the protocol-v1 `push`/`pull`/`snapshot`
+handlers over two additional transports, implemented in
+[`servers/node/src/sync-transports.ts`](../servers/node/src/sync-transports.ts).
+Both dispatch into the exact same handler functions as the HTTP routes — a
+transport is only framing, authentication plumbing, and change fan-out.
+
+**Pick the right transport for the client:**
+
+- **Browsers cannot open raw TCP sockets. WebSocket is the browser realtime
+  path.** The endpoint is `/sync/ws` on the same HTTP port (an HTTP upgrade),
+  so it traverses the same proxies, TLS termination, and load balancers as
+  the REST endpoints.
+- **TCP NDJSON is for native and server-side clients only** (desktop/mobile
+  runtimes, daemons, other services) that want a persistent connection
+  without HTTP/WebSocket framing overhead. It listens on a dedicated port
+  and is off by default — set `SYNCER_TCP_PORT` to enable it.
+
+**Frames.** One JSON object per WebSocket text frame; over TCP the same
+objects are newline-delimited UTF-8 (no raw newline inside a frame).
+Requests are `{"v":1,"type":"push"|"pull"|"snapshot","requestId":"<unique>",
+...same fields as the HTTP body}` and are answered by
+`{"v":1,"type":"<type>-result","requestId",...same fields as the HTTP
+response}` (the `RESET_REQUIRED` pull body included) or
+`{"v":1,"type":"error","requestId","code","message","retryable"}`. After a
+push commits changes — over any transport — every *other* connection
+receives the unsolicited pull hint
+`{"v":1,"type":"changed","watermark":<number>}`; it is a wake-up, never
+data, and is skipped for backpressured sockets. A malformed frame is
+answered with `requestId: null` (or dropped) and must never take the
+connection or the server down.
+
+**Auth parity.** The WebSocket endpoint accepts the same bearer token the
+HTTP endpoints accept, passed as a `token` query parameter at dial time; TCP
+clients may carry it as a `token` field on each request frame. Test-mode
+servers are unauthenticated on every transport alike.
+
+The parity suite is [`test/protocol/ws-transport.mjs`](../test/protocol/ws-transport.mjs):
+
+    docker compose --profile wstest up --build --exit-code-from ws-protocol

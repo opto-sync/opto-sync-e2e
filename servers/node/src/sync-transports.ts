@@ -452,7 +452,9 @@ export function startTcpTransport(
     console.error("[sync-transport] TCP listener error:", error);
   });
   server.listen(port, host, () => {
-    console.log(`[sync-transport] TCP NDJSON sync listener on ${host}:${port}`);
+    const address = server.address();
+    const bound = typeof address === "object" && address !== null ? address.port : port;
+    console.log(`[sync-transport] TCP NDJSON sync listener on ${host}:${bound}`);
   });
   return server;
 }
