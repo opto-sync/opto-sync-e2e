@@ -1426,11 +1426,14 @@ export function installSyncProtocol(
     );
   });
 
-  app.post("/v1/sync/push", async (request, response) => {
-    const requestId = response.locals.syncRequestId as string;
+  const pushCore = async (
+    context: ProtocolCallContext,
+    rawBody: unknown,
+  ): Promise<ProtocolCallResult> => {
+    const body = rawBody as any;
+    const requestId = context.requestId;
     const rawBodyBytes =
-      (request as express.Request & { rawBodyBytes?: number }).rawBodyBytes ??
-      Buffer.byteLength(JSON.stringify(request.body ?? null));
+      context.rawBodyBytes ?? Buffer.byteLength(JSON.stringify(body ?? null));
     if (rawBodyBytes > config.maxPushBytes) {
       metrics.increment("opto_sync_protocol_quota_rejections_total", {
         quota: "push_bytes",
