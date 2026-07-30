@@ -1770,23 +1770,48 @@ export function installSyncProtocol(
         mutationCount: parsed.data.mutations.length,
         code: failure.code,
       });
-      return response.status(failure.status).json({
-        protocolVersion: PROTOCOL_VERSION,
-        error: failure.code,
-        message: failure.message,
-        ...(failure.detail === undefined ? {} : { detail: failure.detail }),
-      });
+      return {
+        status: failure.status,
+        body: {
+          protocolVersion: PROTOCOL_VERSION,
+          error: failure.code,
+          message: failure.message,
+          ...(failure.detail === undefined ? {} : { detail: failure.detail }),
+        },
+      };
     } finally {
       connection.release();
     }
+  };
+
+  app.post("/v1/sync/push", async (request, response) => {
+    const result = await pushCore(
+      {
+        requestId: response.locals.syncRequestId as string,
+        identity: response.locals.syncIdentity as ProtocolIdentity,
+        rawBodyBytes: (request as express.Request & { rawBodyBytes?: number })
+          .rawBodyBytes,
+        failpoint: request.get("x-syncer-failpoint"),
+      },
+      request.body,
+    );
+    if (result.responseLoss) {
+      response.socket?.destroy();
+      return;
+    }
+    return response.status(result.status).json(result.body);
   });
 
-  app.get("/v1/sync/pull", async (request, response) => {
+  const pullCore = async (
+    context: ProtocolCallContext,
+    checkpointInput: unknown,
+    limitInput: unknown,
+  ): Promise<ProtocolCallResult> => {
     let connection: pg.PoolClient | undefined;
     try {
-      const identity = response.locals.syncIdentity as ProtocolIdentity;
-      const checkpoint = parseCheckpoint(request.query.checkpoint, "checkpoint");
-      const limitRaw = Number(request.query.limit ?? 100);
+      const identity = context.identity;
+      const checkpoint = parseCheckpoint(checkpointInput, "checkpoint");
+      const limitRaw = Number(limitInput ?? 100);
       if (!Number.isInteger(limitRaw) || limitRaw < 1 || limitRaw > 1000) {
         throw protocolError(400, "INVALID_LIMIT", "limit must be an integer from 1 to 1000");
       }
