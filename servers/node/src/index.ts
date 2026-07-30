@@ -24,6 +24,11 @@ import {
 } from "./protocol.js";
 import { createPostgresJsonbMutationHandler } from "./protocol-handlers.js";
 import { createProtocolOperations } from "./operations.js";
+import {
+  SyncChangeHub,
+  attachWebSocketTransport,
+  startTcpTransport,
+} from "./sync-transports.js";
 
 const DocumentPayloadSchema = z
   .object({
