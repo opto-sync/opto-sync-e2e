@@ -1952,14 +1952,17 @@ export function installSyncProtocol(
           maxRecords: config.maxSnapshotRecords,
           maxBytes: config.maxSnapshotBytes,
         });
-        return response.status(413).json({
-          protocolVersion: PROTOCOL_VERSION,
-          error: "SNAPSHOT_QUOTA_EXCEEDED",
-          recordCount: recordCount.toString(),
-          dataBytes: dataBytes.toString(),
-          maxRecords: config.maxSnapshotRecords,
-          maxBytes: config.maxSnapshotBytes,
-        });
+        return {
+          status: 413,
+          body: {
+            protocolVersion: PROTOCOL_VERSION,
+            error: "SNAPSHOT_QUOTA_EXCEEDED",
+            recordCount: recordCount.toString(),
+            dataBytes: dataBytes.toString(),
+            maxRecords: config.maxSnapshotRecords,
+            maxBytes: config.maxSnapshotBytes,
+          },
+        };
       }
       const records = await connection.query(
         `SELECT table_name, record_id, record, revision
