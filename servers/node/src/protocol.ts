@@ -2202,7 +2202,7 @@ export function installSyncProtocol(
     },
     consumeRateLimit(identity, route) {
       const principalHash = privacyHash(
-        `${identity.tenantId} ${identity.subject}`,
+        `${identity.tenantId}\u0000${identity.subject}`,
       );
       return limiter.consume(
         `${testMode ? "test" : "tenant"}:${principalHash}:${route}`,
