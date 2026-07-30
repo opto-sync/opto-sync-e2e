@@ -1745,13 +1745,16 @@ export function installSyncProtocol(
         outcomes,
         checkpoint: checkpoint.toString(),
       });
-      return response.json({
-        protocolVersion: PROTOCOL_VERSION,
-        clientId: parsed.data.clientId,
-        lastMutationId: lastMutationId.toString(),
-        checkpoint: checkpoint.toString(),
-        results,
-      });
+      return {
+        status: 200,
+        body: {
+          protocolVersion: PROTOCOL_VERSION,
+          clientId: parsed.data.clientId,
+          lastMutationId: lastMutationId.toString(),
+          checkpoint: checkpoint.toString(),
+          results,
+        },
+      };
     } catch (error) {
       await rollbackQuietly(connection);
       const failure = publicProtocolFailure(error, "PUSH_FAILED");
