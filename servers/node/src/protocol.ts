@@ -1705,13 +1705,22 @@ export function installSyncProtocol(
       injectFailure("before-commit");
       await connection.query("COMMIT");
 
+      // The transaction is durable; let realtime transports hint other
+      // clients to pull. Best-effort by design — a hint is never data.
+      if (checkpoint > initialCheckpoint) {
+        try {
+          options.onPushCommitted?.(checkpoint, context.origin);
+        } catch (error) {
+          console.error("[opto-sync] onPushCommitted listener failed:", error);
+        }
+      }
+
       // Model the hardest retry window: the durable transaction committed but
       // the process or network disappeared before the client received an
       // acknowledgement. The next identical request must be answered entirely
       // from the immutable mutation ledger.
       if (failpoint === "after-commit-response-loss") {
-        response.socket?.destroy();
-        return;
+        return { status: 200, body: {}, responseLoss: true };
       }
 
       const outcomes = results.reduce<Record<string, number>>((counts, result) => {
