@@ -1827,13 +1827,16 @@ export function installSyncProtocol(
       }
       if (checkpoint + 1n < minimum) {
         await connection.query("COMMIT");
-        return response.status(409).json({
-          protocolVersion: PROTOCOL_VERSION,
-          error: "RESET_REQUIRED",
-          resetRequired: true,
-          minimumCheckpoint: (minimum - 1n).toString(),
-          snapshotUrl: "/v1/sync/snapshot",
-        });
+        return {
+          status: 409,
+          body: {
+            protocolVersion: PROTOCOL_VERSION,
+            error: "RESET_REQUIRED",
+            resetRequired: true,
+            minimumCheckpoint: (minimum - 1n).toString(),
+            snapshotUrl: "/v1/sync/snapshot",
+          },
+        };
       }
 
       const changes = await connection.query(
