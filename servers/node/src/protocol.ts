@@ -1873,33 +1873,51 @@ export function installSyncProtocol(
           operation: row.operation,
           record: row.record,
           revision: String(row.revision),
-          ...(row.client_id == null
-            ? {}
-            : {
-                source: {
-                  clientId: row.client_id,
-                  mutationId: String(row.mutation_id),
-                },
-              }),
-          committedAt: row.committed_at,
-        })),
-      });
+            ...(row.client_id == null
+              ? {}
+              : {
+                  source: {
+                    clientId: row.client_id,
+                    mutationId: String(row.mutation_id),
+                  },
+                }),
+            committedAt: row.committed_at,
+          })),
+        },
+      };
     } catch (error) {
       if (connection) await rollbackQuietly(connection);
       const failure = publicProtocolFailure(error, "PULL_FAILED");
-      return response.status(failure.status).json({
-        protocolVersion: PROTOCOL_VERSION,
-        error: failure.code,
-        message: failure.message,
-      });
+      return {
+        status: failure.status,
+        body: {
+          protocolVersion: PROTOCOL_VERSION,
+          error: failure.code,
+          message: failure.message,
+        },
+      };
     } finally {
       connection?.release();
     }
+  };
+
+  app.get("/v1/sync/pull", async (request, response) => {
+    const result = await pullCore(
+      {
+        requestId: response.locals.syncRequestId as string,
+        identity: response.locals.syncIdentity as ProtocolIdentity,
+      },
+      request.query.checkpoint,
+      request.query.limit,
+    );
+    return response.status(result.status).json(result.body);
   });
 
-  app.get("/v1/sync/snapshot", async (_request, response) => {
-    const identity = response.locals.syncIdentity as ProtocolIdentity;
-    const requestId = response.locals.syncRequestId as string;
+  const snapshotCore = async (
+    context: ProtocolCallContext,
+  ): Promise<ProtocolCallResult> => {
+    const identity = context.identity;
+    const requestId = context.requestId;
     const connection = await pool.connect();
     try {
       await connection.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
