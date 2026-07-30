@@ -120,6 +120,75 @@ export type SyncProtocolOptions = {
    * reference handler and cannot be replaced.
    */
   mutationHandlers?: Readonly<Record<string, ProtocolMutationHandler>>;
+  /**
+   * Invoked after a push transaction COMMITs having advanced the protocol
+   * checkpoint. Realtime transports broadcast a pull hint from here. `origin`
+   * is the opaque connection token from the triggering call's context so the
+   * pusher's own connection can be excluded. Best-effort: a throwing listener
+   * cannot fail the push.
+   */
+  onPushCommitted?: (checkpoint: bigint, origin: unknown) => void;
+};
+
+/** Transport-independent request envelope for the protocol core handlers. */
+export type ProtocolCallContext = {
+  requestId: string;
+  identity: ProtocolIdentity;
+  /**
+   * Bytes actually received for the push body. HTTP passes the raw body
+   * length; frame transports pass the frame length. Falls back to the
+   * re-serialized body size when absent.
+   */
+  rawBodyBytes?: number;
+  /** Test-mode failpoint (HTTP header parity); ignored outside test mode. */
+  failpoint?: string;
+  /** Opaque connection token excluded from its own change broadcast. */
+  origin?: unknown;
+};
+
+/** Transport-independent response: an HTTP status plus the JSON body. */
+export type ProtocolCallResult = {
+  status: number;
+  body: Record<string, unknown>;
+  /**
+   * The after-commit-response-loss failpoint committed but demands that the
+   * transport send nothing (HTTP destroys the socket, frames stay silent).
+   */
+  responseLoss?: boolean;
+};
+
+/** Connection credentials presented by a non-HTTP transport. */
+export type TransportAuthInput = {
+  /** Bearer token carried as `?token=` (WebSocket) or a `token` field (TCP). */
+  token?: string | null;
+  /** Test-mode identity overrides, mirroring the x-syncer-test-* headers. */
+  testTenantId?: string | null;
+  testSubject?: string | null;
+  testClientId?: string | null;
+};
+
+/**
+ * The shared protocol engine behind every transport. HTTP routes, the
+ * WebSocket endpoint, and the TCP listener all dispatch into these same
+ * functions — no transport re-implements push/pull/snapshot semantics.
+ */
+export type SyncProtocolRuntime = {
+  readonly testMode: boolean;
+  newRequestId(): string;
+  /** Mirrors the HTTP authentication middleware for frame transports. */
+  authenticate(input: TransportAuthInput): Promise<AuthenticationResult>;
+  /** Same limiter and key shape as the HTTP middleware. */
+  consumeRateLimit(
+    identity: ProtocolIdentity,
+    route: "push" | "pull" | "snapshot",
+  ): { allowed: boolean; retryAfterSeconds: number };
+  push(context: ProtocolCallContext, body: unknown): Promise<ProtocolCallResult>;
+  pull(
+    context: ProtocolCallContext,
+    checkpoint: unknown,
+    limit: unknown,
+  ): Promise<ProtocolCallResult>;
+  snapshot(context: ProtocolCallContext): Promise<ProtocolCallResult>;
 };
 type AdminAuth = { tokenHash?: Buffer; error?: string };
 
