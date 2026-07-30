@@ -1571,6 +1571,7 @@ export function installSyncProtocol(
            FROM syncer_protocol_state WHERE singleton = TRUE FOR UPDATE`,
       );
       let checkpoint = BigInt(protocolState.rows[0].last_seq);
+      const initialCheckpoint = checkpoint;
       await connection.query(
         `INSERT INTO syncer_protocol_clients(tenant_id, client_id, subject)
          VALUES ($1, $2, $3) ON CONFLICT (tenant_id, client_id) DO NOTHING`,
