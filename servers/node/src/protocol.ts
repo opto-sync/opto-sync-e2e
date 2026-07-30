@@ -1860,11 +1860,13 @@ export function installSyncProtocol(
           ? BigInt(page[page.length - 1].seq)
           : last;
       await connection.query("COMMIT");
-      return response.json({
-        protocolVersion: PROTOCOL_VERSION,
-        checkpoint: next.toString(),
-        hasMore,
-        changes: page.map((row) => ({
+      return {
+        status: 200,
+        body: {
+          protocolVersion: PROTOCOL_VERSION,
+          checkpoint: next.toString(),
+          hasMore,
+          changes: page.map((row) => ({
           checkpoint: String(row.seq),
           table: row.table_name,
           recordId: row.record_id,
