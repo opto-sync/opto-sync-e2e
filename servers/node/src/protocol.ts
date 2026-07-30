@@ -2166,4 +2166,50 @@ export function installSyncProtocol(
       connection.release();
     }
   });
+
+  // The same engine, exposed to non-HTTP transports (WebSocket, TCP). The
+  // Express routes above and every frame transport dispatch into the same
+  // pushCore/pullCore/snapshotCore closures — no duplicated business logic.
+  return {
+    testMode,
+    newRequestId: operations.newRequestId,
+    async authenticate(input) {
+      if (testMode) {
+        const tenantId = input.testTenantId ?? "e2e";
+        const subject = input.testSubject ?? "e2e";
+        const clientId = input.testClientId ?? undefined;
+        if (
+          !ScopeId.safeParse(tenantId).success ||
+          !ScopeId.safeParse(subject).success ||
+          (clientId !== undefined && !ClientId.safeParse(clientId).success)
+        ) {
+          return { status: "denied" };
+        }
+        return {
+          status: "authenticated",
+          identity: {
+            subject,
+            tenantId,
+            clientIds: clientId === undefined ? null : new Set([clientId]),
+          },
+        };
+      }
+      const token = input.token ?? null;
+      if (token === null) return { status: "denied" };
+      // Reuse the exact HTTP verifier; the transport only re-frames how the
+      // bearer credential arrived (query parameter or frame field).
+      return auth!.authenticateAuthorization(`Bearer ${token}`);
+    },
+    consumeRateLimit(identity, route) {
+      const principalHash = privacyHash(
+        `${identity.tenantId} ${identity.subject}`,
+      );
+      return limiter.consume(
+        `${testMode ? "test" : "tenant"}:${principalHash}:${route}`,
+      );
+    },
+    push: pushCore,
+    pull: pullCore,
+    snapshot: snapshotCore,
+  };
 }
