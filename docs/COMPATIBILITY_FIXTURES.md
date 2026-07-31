@@ -28,7 +28,7 @@ No binary database is committed. CI generates the database in a temporary direct
 
 ## Real Chromium IndexedDB migration test
 
-`test/compatibility/indexeddb-migration.mjs` consumes the checksum-pinned logical v1 export and expected v2 snapshot in a genuine persistent Chromium profile. The workflow:
+`suite/compatibility/indexeddb-migration.mjs` consumes the checksum-pinned logical v1 export and expected v2 snapshot in a genuine persistent Chromium profile. The workflow:
 
 1. translates the synthetic fixture into the TypeScript client's real v1 `localMutations` IndexedDB store at native version `10`, matching Dexie's representation of schema version `1`;
 2. starts a logical-v1 → logical-v2 upgrade at native version `20`, creates migration metadata, and deterministically aborts the native `versionchange` transaction;

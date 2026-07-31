@@ -49,10 +49,10 @@ def main() -> int:
         "docker-compose.yml",
         "docker-compose.supabase.yml",
         ".env.example",
-        "test/run_e2e.sh",
-        "test/clients/run_all.sh",
-        "test/protocol/run.mjs",
-        "test/cross-server/run.mjs",
+        "suite/run_e2e.sh",
+        "suite/clients/run_all.sh",
+        "suite/protocol/run.mjs",
+        "suite/cross-server/run.mjs",
     ):
         require(relative)
 

@@ -14,8 +14,8 @@ CLIENTS = ROOT / ".github/workflows/e2e-clients.yml"
 MANIFEST = ROOT / ".zpkg.toml"
 LOCKFILE = ROOT / ".zpkg.lock"
 SHA = r"[0-9a-f]{40}"
-CERTIFIED_SYNCER = "7795ce2d1342e17d934d2faafff5c8ed4322609e"
-CERTIFIED_CLIENTS = "54874e9f7df6009fccd9034fce39306daef2c043"
+CERTIFIED_SYNCER = "8d2b275a89062403666f4bdf196d246a07c84484"
+CERTIFIED_CLIENTS = "38f0fcc6a471455a0a20aec5f7fa63d3f70d5f89"
 
 
 def fail(message: str) -> None:

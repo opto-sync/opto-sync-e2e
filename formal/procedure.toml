@@ -14,7 +14,7 @@ risk = "critical"
 status = "planned"
 backend = "quint-itf-system-replay"
 owner = "opto-sync-protocol"
-source_paths = ["test/protocol/run.mjs", "test/protocol/load.mjs", "test/conformance"]
+source_paths = ["suite/protocol/run.mjs", "suite/protocol/load.mjs", "suite/conformance"]
 safety = [
   "immutable client mutation identity maps to one durable outcome",
   "committed response loss and retry do not double-apply an effect",
@@ -33,7 +33,7 @@ risk = "critical"
 status = "planned"
 backend = "trace-replay+adversarial-e2e"
 owner = "opto-sync-security"
-source_paths = ["test/protocol/auth.mjs", "test/protocol/operations.mjs"]
+source_paths = ["suite/protocol/auth.mjs", "suite/protocol/operations.mjs"]
 safety = [
   "a principal accesses only its bound tenant and allowed client IDs",
   "pull pages and snapshots do not cross tenants",
@@ -51,7 +51,7 @@ risk = "high"
 status = "planned"
 backend = "differential-system-replay"
 owner = "opto-sync-conformance"
-source_paths = ["test/cross-server", "test/clients", "test/conformance"]
+source_paths = ["suite/cross-server", "suite/clients", "suite/conformance"]
 safety = [
   "all applicable runtimes apply the same documented merge policy",
   "noncontending mutations converge independent of permitted apply order",
@@ -69,7 +69,7 @@ risk = "critical"
 status = "planned"
 backend = "quint-itf-system-replay"
 owner = "opto-sync-recovery"
-source_paths = ["test/protocol/run.mjs", "test/clients"]
+source_paths = ["suite/protocol/run.mjs", "suite/clients"]
 safety = [
   "reset installation is atomic from the client observable boundary",
   "pending local mutations survive reset and crash schedules",

@@ -84,8 +84,8 @@ jobs:
           grep -Fx 'pkg/LICENSE' "${listing}"
           grep -Fx 'pkg/docker-compose.yml' "${listing}"
           grep -Fx 'pkg/docker-compose.supabase.yml' "${listing}"
-          grep -Fx 'pkg/test/run_e2e.sh' "${listing}"
-          grep -Fx 'pkg/test/clients/run_all.sh' "${listing}"
+          grep -Fx 'pkg/suite/run_e2e.sh' "${listing}"
+          grep -Fx 'pkg/suite/clients/run_all.sh' "${listing}"
           ! grep -Fx 'pkg/.env' "${listing}"
           ! grep -E '(^|/)(node_modules|target|\.dart_tool|_build|\.zed)(/|$)' "${listing}"
           ! grep -E '\.log$' "${listing}"
@@ -96,7 +96,7 @@ jobs:
           cp "${smoke_root}/pkg/.env.example" "${smoke_root}/pkg/.env"
           (cd "${smoke_root}/pkg" && docker compose config --quiet)
           ZED_PKG_TEST_TARGET="${smoke_root}/pkg" sh -c \
-            'test -f "$ZED_PKG_TEST_TARGET/LICENSE" && test -f "$ZED_PKG_TEST_TARGET/docker-compose.yml" && test -f "$ZED_PKG_TEST_TARGET/test/run_e2e.sh" && test -f "$ZED_PKG_TEST_TARGET/test/clients/run_all.sh"'
+            'test -f "$ZED_PKG_TEST_TARGET/LICENSE" && test -f "$ZED_PKG_TEST_TARGET/docker-compose.yml" && test -f "$ZED_PKG_TEST_TARGET/suite/run_e2e.sh" && test -f "$ZED_PKG_TEST_TARGET/suite/clients/run_all.sh"'
 
           ../zed-cli/target/debug/zed publish \
             --dry-run \

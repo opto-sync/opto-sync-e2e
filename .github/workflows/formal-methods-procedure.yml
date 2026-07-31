@@ -2,10 +2,10 @@ name: Formal methods procedure
 
 on:
   pull_request:
-    paths: ['formal/**', 'test/protocol/**', 'test/conformance/**', 'test/cross-server/**', 'test/clients/**', '.github/workflows/formal-methods-procedure.yml']
+    paths: ['formal/**', 'suite/protocol/**', 'suite/conformance/**', 'suite/cross-server/**', 'suite/clients/**', '.github/workflows/formal-methods-procedure.yml']
   push:
     branches: [main]
-    paths: ['formal/**', 'test/protocol/**', 'test/conformance/**', 'test/cross-server/**', 'test/clients/**', '.github/workflows/formal-methods-procedure.yml']
+    paths: ['formal/**', 'suite/protocol/**', 'suite/conformance/**', 'suite/cross-server/**', 'suite/clients/**', '.github/workflows/formal-methods-procedure.yml']
   schedule:
     - cron: '37 5 * * 3'
   workflow_dispatch:

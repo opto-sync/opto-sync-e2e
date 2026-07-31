@@ -5,7 +5,7 @@ How to write a sync server that the conformance suite in this repo would pass.
 Every rule below is derived from the reference implementation
 [`servers/node/src/index.ts`](../servers/node/src/index.ts) — the only server
 here that round-trips every merge through real Postgres `jsonb` — and from the
-scenarios in [`test/conformance/`](../test/conformance/) that hold it to those
+scenarios in [`suite/conformance/`](../suite/conformance/) that hold it to those
 rules. Where the reference server does something *because* a scenario would
 otherwise catch it, the scenario is named.
 
@@ -21,7 +21,7 @@ document is about everything *around* the merge call.
 
 All shapes below are read off `servers/node/src/index.ts`. The conformance
 client that speaks this contract is
-[`test/conformance/lib/client.mjs`](../test/conformance/lib/client.mjs).
+[`suite/conformance/lib/client.mjs`](../suite/conformance/lib/client.mjs).
 
 | Method | Path | Request | 2xx body | Non-2xx |
 |---|---|---|---|---|
@@ -41,7 +41,7 @@ Notes that matter for compatibility:
 
 - **`/health` is a capability probe, not a liveness probe.** The suite refuses
   to run unless it reports `syncer: "native"` and `testMode: true`
-  (`test/conformance/run.mjs`, lines 94–109), and scenario `01-health` asserts
+  (`suite/conformance/run.mjs`, lines 94–109), and scenario `01-health` asserts
   `defaultOptions` deep-equals the documented policy. Publish your real merge
   policy there; a server that hides it cannot be conformance-tested.
 - **`GET /doc/:id/raw` exists so tests can see what the database did to your
@@ -58,7 +58,7 @@ Notes that matter for compatibility:
 - The in-memory servers implement only `GET /`, `/health`, `/docs`,
   `/doc/:id` and `POST /doc/:id/sync` (plus `PUT /doc/:id` on `rust-mash`).
   A new server needs the full table above only if you want it to run the
-  conformance suite; `run_e2e_full.sh` and `test/cross-server/` need just
+  conformance suite; `run_e2e_full.sh` and `suite/cross-server/` need just
   `/health`, `/doc/:id` and `/doc/:id/sync`.
 
 ---
@@ -87,7 +87,7 @@ property survives letting the client choose:
   writes. If client A reconciles arrays with `MERGE_BY_KEY` and client B with
   `REPLACE`, the final document depends on which client wrote last — the exact
   order-dependence the merge engine exists to remove.
-  `test/clients/README.md` documents this happening for real: the TypeScript
+  `suite/clients/README.md` documents this happening for real: the TypeScript
   client's `DEFAULT_RECONCILE_OPTIONS` omits `arrayStrategy`, so it falls back
   to `REPLACE` and *drops server elements it has not seen while applying
   elements the timestamp guard should have rejected*. A server that accepted
@@ -241,8 +241,8 @@ The pattern has three parts, and all three are needed:
    `syncer: "native" | "js-fallback"` and each sync response carries
    `mergedWith: "native-c-ffi"`.
 3. **Make the test suite refuse to run** against a fallback.
-   `test/conformance/run.mjs` exits `2` if `/health` says otherwise, and
-   `test/clients/run_all.sh` aborts on the same check. Scenario `01-health`
+   `suite/conformance/run.mjs` exits `2` if `/health` says otherwise, and
+   `suite/clients/run_all.sh` aborts on the same check. Scenario `01-health`
    asserts it a third time, and scenario `12-robustness` re-asserts it *after*
    the abuse cases.
 
@@ -435,8 +435,8 @@ it.
 
 So: **never compare stored JSON as text.** Parse, then deep-compare. The
 conformance harness provides `canon()` for order-insensitive structural
-comparison (`test/conformance/lib/harness.mjs`), and
-`test/clients/README.md` states the rule outright: "no assertion anywhere
+comparison (`suite/conformance/lib/harness.mjs`), and
+`suite/clients/README.md` states the rule outright: "no assertion anywhere
 compares raw JSON strings".
 
 This has a real semantic consequence, not just a testing one. `UNION` dedup
@@ -452,7 +452,7 @@ A JavaScript-hosted server rounds them: `1689940800123456789` becomes
 C core (int64-exact via yyjson) is at fault — `express.json` → `JSON.parse` →
 double → `JSON.stringify` is. Scenario `04-jsonb-fidelity` records this as a
 `limitation()` (a warning, not a pass) so a future fix surfaces instead of
-being locked in by a green test, and `test/cross-server/run.mjs` asserts it
+being locked in by a green test, and `suite/cross-server/run.mjs` asserts it
 per runtime via an `int64Exact` flag.
 
 Guidance for API design: **carry sub-millisecond timestamps as digit strings.**
@@ -628,12 +628,12 @@ in [`TEST_TOPOLOGY.md`](./TEST_TOPOLOGY.md).
 |---|---|---|
 | 1 | Refuse to start without the real merge engine; report which engine is live on `/health` and per response | `01-health`; `run.mjs` pre-flight; `run_all.sh` abort |
 | 2 | Publish the server-owned merge policy on `/health`, matching the documented default | `01-health` |
-| 3 | Ignore client-supplied policy overrides outside test mode | `11-strategies` (contrast); `test/clients` scenario 0 |
+| 3 | Ignore client-supplied policy overrides outside test mode | `11-strategies` (contrast); `suite/clients` scenario 0 |
 | 4 | Object+object recurses; siblings survive at every level; type mismatch replaces; `null` is a value, not a delete | `02-deep-merge` |
-| 5 | Keyed arrays reconcile by identity; a rejection is all-or-nothing for the element; new identities append at the tail | `03-keyed-arrays`, `run_e2e_full.sh`, `test/cross-server` |
-| 6 | Read stored jsonb as `TEXT`; never compare output as text; document the int64 limit of your host | `04-jsonb-fidelity`, `test/cross-server` phase 1b |
+| 5 | Keyed arrays reconcile by identity; a rejection is all-or-nothing for the element; new identities append at the tail | `03-keyed-arrays`, `run_e2e_full.sh`, `suite/cross-server` |
+| 6 | Read stored jsonb as `TEXT`; never compare output as text; document the int64 limit of your host | `04-jsonb-fidelity`, `suite/cross-server` phase 1b |
 | 7 | Replaying a payload is idempotent in value (version may advance) | `05-idempotency`, `08-batch` |
-| 8 | Non-contending mutations converge in every apply order | `06-convergence`, `test/cross-server` phase 2 |
+| 8 | Non-contending mutations converge in every apply order | `06-convergence`, `suite/cross-server` phase 2 |
 | 9 | CAS on a version column with bounded retry and full-jitter backoff; the three CAS invariants hold; `409` writes nothing | `07-concurrency` |
 | 10 | Batch replay is one transaction with row locks; unknown `docId` reported, not fatal; per-item results | `08-batch` |
 | 11 | Soft delete; newer update resurrects and merges onto retained data; older/absent/unparseable → `410` | `09-tombstones` |
@@ -642,18 +642,18 @@ in [`TEST_TOPOLOGY.md`](./TEST_TOPOLOGY.md).
 | 14 | JSON errors only; correct `400`/`404`/`409`/`410`/`413`; a rejected body never modifies the document; no `500` on abuse | `12-robustness` |
 | 15 | No prototype pollution on any write path, including paths that bypass the request schema | `12-robustness` |
 | 16 | Unicode keys/values, 40-level nesting and 2000-element arrays survive intact | `04-jsonb-fidelity` |
-| 17 | Same merge policy as every other runtime, so cross-runtime expectations are uniform | `test/cross-server`, `test-differential/` |
+| 17 | Same merge policy as every other runtime, so cross-runtime expectations are uniform | `suite/cross-server`, `test-differential/` |
 
 ### Fastest path to validating a new server
 
 1. Implement `/health`, `GET /doc/:id`, `POST /doc/:id/sync`. Run
-   `run_e2e_full.sh` and `test/cross-server/run.mjs` — that already covers
+   `run_e2e_full.sh` and `suite/cross-server/run.mjs` — that already covers
    deep merge, keyed arrays, LWW/FWW, convergence and int64 fidelity.
 2. Add `PUT`, `DELETE`, `/doc/:id/raw`, `/sync/batch`, `/profile/sync`,
    `/reset`, `/docs`, and point the conformance suite at it with `BASE_URL`.
    Be aware the scenarios assume the reference server's seed fixtures
    (`doc-1`, `doc-2`, `doc-3`, `doc-rows`) and its `syncer_test_docs*` tables.
-3. If your client libraries are in the loop, run `test/clients/run_all.sh` —
+3. If your client libraries are in the loop, run `suite/clients/run_all.sh` —
    that is the suite that catches a client whose *default policy* disagrees
    with yours, which no server-only test can.
 
@@ -697,6 +697,6 @@ HTTP endpoints accept, passed as a `token` query parameter at dial time; TCP
 clients may carry it as a `token` field on each request frame. Test-mode
 servers are unauthenticated on every transport alike.
 
-The parity suite is [`test/protocol/ws-transport.mjs`](../test/protocol/ws-transport.mjs):
+The parity suite is [`suite/protocol/ws-transport.mjs`](../suite/protocol/ws-transport.mjs):
 
     docker compose --profile wstest up --build --exit-code-from ws-protocol

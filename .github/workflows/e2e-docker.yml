@@ -51,8 +51,8 @@ env:
   # Exact pair certified by this E2E revision. Manual dispatch may opt into
   # candidate refs, but the sibling server core and the client repository's
   # nested gitlink must still resolve to the same commit.
-  SYNCER_C_REF: 7795ce2d1342e17d934d2faafff5c8ed4322609e
-  CLIENTS_REF: 54874e9f7df6009fccd9034fce39306daef2c043
+  SYNCER_C_REF: 8d2b275a89062403666f4bdf196d246a07c84484
+  CLIENTS_REF: 38f0fcc6a471455a0a20aec5f7fa63d3f70d5f89
 
 jobs:
   repository-contract:
@@ -174,14 +174,14 @@ jobs:
           docker compose --profile fulltest --profile fullstack --profile dart --profile sagitta \
             up --build --exit-code-from test-runner-full
 
-      - name: conformance — test/conformance/run.mjs vs node+Postgres
+      - name: conformance — suite/conformance/run.mjs vs node+Postgres
         if: matrix.id == 'conformance'
         working-directory: opto-sync-e2e
         run: |
           docker compose --profile conformance \
             up --build --exit-code-from conformance
 
-      - name: protocol — test/protocol/run.mjs vs node+Postgres
+      - name: protocol — suite/protocol/run.mjs vs node+Postgres
         if: matrix.id == 'protocol'
         working-directory: opto-sync-e2e
         run: |
@@ -223,7 +223,7 @@ jobs:
           docker compose --profile recovery \
             up --build --exit-code-from protocol-backup-restore
 
-      - name: crossserver — test/cross-server/run.mjs across 4 runtimes
+      - name: crossserver — suite/cross-server/run.mjs across 4 runtimes
         if: matrix.id == 'crossserver'
         working-directory: opto-sync-e2e
         run: |
@@ -237,7 +237,7 @@ jobs:
           docker compose -f docker-compose.yml -f docker-compose.supabase.yml \
             up -d --build postgrest rust-mash
 
-      - name: supabase — run test/supabase/run.mjs in-network
+      - name: supabase — run suite/supabase/run.mjs in-network
         if: matrix.id == 'supabase'
         working-directory: opto-sync-e2e
         run: |

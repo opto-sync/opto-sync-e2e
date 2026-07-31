@@ -18,7 +18,7 @@ url = "https://github.com/opto-sync/opto-sync-e2e"
 include_readme = true
 tag_format = "v{version}"
 exclude = [".zed/**", ".zed-pack/**", ".env", "**/*.log"]
-smoke_test = "test -f \"$ZED_PKG_TEST_TARGET/LICENSE\" && test -f \"$ZED_PKG_TEST_TARGET/docker-compose.yml\" && test -f \"$ZED_PKG_TEST_TARGET/test/run_e2e.sh\" && test -f \"$ZED_PKG_TEST_TARGET/test/clients/run_all.sh\""
+smoke_test = "test -f \"$ZED_PKG_TEST_TARGET/LICENSE\" && test -f \"$ZED_PKG_TEST_TARGET/docker-compose.yml\" && test -f \"$ZED_PKG_TEST_TARGET/suite/run_e2e.sh\" && test -f \"$ZED_PKG_TEST_TARGET/suite/clients/run_all.sh\""
 
 [scripts]
 test = "test -f .env || cp .env.example .env; docker compose config --quiet"

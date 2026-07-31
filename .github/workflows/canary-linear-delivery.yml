@@ -9,8 +9,8 @@ on:
       - 'scripts/canary_delivery_linear.py'
       - 'scripts/canary_delivery_github.py'
       - 'scripts/linear-canary-delivery.py'
-      - 'test/operations/test_canary_incident.py'
-      - 'test/operations/test_linear_canary_delivery.py'
+      - 'suite/operations/test_canary_incident.py'
+      - 'suite/operations/test_linear_canary_delivery.py'
       - 'docs/CANARY_INCIDENT_ROUTING.md'
       - 'docs/CANARY_LINEAR_DELIVERY.md'
       - '.github/workflows/canary-linear-delivery.yml'
@@ -23,8 +23,8 @@ on:
       - 'scripts/canary_delivery_linear.py'
       - 'scripts/canary_delivery_github.py'
       - 'scripts/linear-canary-delivery.py'
-      - 'test/operations/test_canary_incident.py'
-      - 'test/operations/test_linear_canary_delivery.py'
+      - 'suite/operations/test_canary_incident.py'
+      - 'suite/operations/test_linear_canary_delivery.py'
       - 'docs/CANARY_INCIDENT_ROUTING.md'
       - 'docs/CANARY_LINEAR_DELIVERY.md'
       - '.github/workflows/canary-linear-delivery.yml'
@@ -63,8 +63,8 @@ jobs:
         run: python3 scripts/linear-canary-delivery.py validate-config
       - name: Test state and delivery contracts
         run: |
-          python3 -m unittest discover -s test/operations -p 'test_canary_incident.py' -v
-          python3 -m unittest discover -s test/operations -p 'test_linear_canary_delivery.py' -v
+          python3 -m unittest discover -s suite/operations -p 'test_canary_incident.py' -v
+          python3 -m unittest discover -s suite/operations -p 'test_linear_canary_delivery.py' -v
       - name: Compile Python entrypoints
         run: >-
           python3 -m py_compile

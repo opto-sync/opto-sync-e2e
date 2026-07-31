@@ -59,7 +59,7 @@ python3 scripts/plan-downstream-bumps.py validate
 python3 scripts/plan-downstream-bumps.py plan \
   --out /tmp/opto-sync-downstream-plan.json
 python3 -m unittest discover \
-  -s test/operations \
+  -s suite/operations \
   -p 'test_downstream_bump_plan.py' \
   -v
 ```
