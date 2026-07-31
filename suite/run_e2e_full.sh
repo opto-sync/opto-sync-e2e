@@ -122,12 +122,12 @@ test_server() {
     # APPLIED — element 1 goes from "one" to "NEWEST".
     curl -s --max-time 10 -X POST "$URL/doc/$DOC/sync" \
         -H "Content-Type: application/json" \
-        -d '{"rows": [{"id": 1, "createdAt": 5000, "updatedAt": 5000, "v": "NEWEST"}]}' \
+        -d '{"rows": [{"id": 1, "createdAt": 5000, "updatedAt": 5000, "v": "ka-NEWEST"}]}' \
         >/dev/null 2>&1 || true
     NO_FWW=$(curl -s --max-time 10 "$URL/doc/$DOC" 2>/dev/null || echo "FAIL")
     echo "No-FWW default: $NO_FWW"
-    check        "$NAME: later createdAt no longer vetoes a newer write" "$NO_FWW" '"NEWEST"'
-    check_absent "$NAME: the superseded value is gone"                   "$NO_FWW" '"v":"one"'
+    check        "$NAME: later createdAt no longer vetoes a newer write" "$NO_FWW" '"ka-NEWEST"'
+    check_absent "$NAME: the superseded value is gone"                   "$NO_FWW" '"ka-one"'
 
     # The engine feature itself is still exercised, on the one server that lets a
     # request name its own policy (node, in test mode). Everywhere else the
