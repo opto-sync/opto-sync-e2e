@@ -36,7 +36,7 @@ docker compose -f docker-compose.yml -f docker-compose.supabase.yml \
   --profile supabasetest run --rm supabase-test
 
 # 2b. ...or from the host (ports 3001 and 3010 are published)
-node test/supabase/run.mjs
+node suite/supabase/run.mjs
 
 # teardown of just this stack (leaves postgres and node running)
 docker compose -f docker-compose.yml -f docker-compose.supabase.yml \

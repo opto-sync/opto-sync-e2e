@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "linear": {
+    "teamId": "eb8ab169-5afe-4b6f-9cab-3f2aa3e887dc",
+    "projectId": "88c60373-3e46-4a12-8f10-907d239d48f8",
+    "assigneeId": "dc316f79-f1da-4994-a395-df436e3fe81f",
+    "openStateId": "afb7ed8a-ca77-4a74-b401-b4a7dda32e21",
+    "recoveredStateId": "562f3e0d-6cc9-4673-bcf9-1e8c6948264a"
+  },
+  "certifiedPair": {
+    "syncerSha": "7795ce2d1342e17d934d2faafff5c8ed4322609e",
+    "clientsSha": "54874e9f7df6009fccd9034fce39306daef2c043"
+  },
+  "workflows": [
+    {
+      "repository": "opto-sync/syncer.c",
+      "workflowFile": "fuzz-canary.yml",
+      "workflowName": "Fuzz and leak canary",
+      "intervalMinutes": 1440,
+      "graceMinutes": 180,
+      "monitorSince": "2026-07-27T05:23:00Z",
+      "failureSummary": "AddressSanitizer, LeakSanitizer, or UndefinedBehaviorSanitizer canary failed"
+    },
+    {
+      "repository": "opto-sync/opto-sync-clients",
+      "workflowFile": "upstream-main-canary.yml",
+      "workflowName": "Upstream engine main canary",
+      "intervalMinutes": 1440,
+      "graceMinutes": 180,
+      "monitorSince": "2026-07-27T06:11:00Z",
+      "failureSummary": "opto-sync client compatibility or core parity canary failed"
+    },
+    {
+      "repository": "opto-sync/opto-sync-e2e",
+      "workflowFile": "e2e-docker.yml",
+      "workflowName": "E2E (docker)",
+      "intervalMinutes": 10080,
+      "graceMinutes": 360,
+      "monitorSince": "2026-07-27T04:37:00Z",
+      "failureSummary": "opto-sync protocol compatibility Docker E2E scheduled certification failed"
+    },
+    {
+      "repository": "opto-sync/opto-sync-e2e",
+      "workflowFile": "e2e-clients.yml",
+      "workflowName": "E2E (client-in-the-loop)",
+      "intervalMinutes": 10080,
+      "graceMinutes": 360,
+      "monitorSince": "2026-07-27T07:17:00Z",
+      "failureSummary": "opto-sync cross-client compatibility scheduled certification failed"
+    }
+  ]
+}

@@ -1,0 +1,117 @@
+name: Canary Linear delivery
+
+on:
+  pull_request:
+    paths:
+      - 'operations/canary-workflows.v1.json'
+      - 'scripts/canary-incident.py'
+      - 'scripts/canary_delivery_common.py'
+      - 'scripts/canary_delivery_linear.py'
+      - 'scripts/canary_delivery_github.py'
+      - 'scripts/linear-canary-delivery.py'
+      - 'suite/operations/test_canary_incident.py'
+      - 'suite/operations/test_linear_canary_delivery.py'
+      - 'docs/CANARY_INCIDENT_ROUTING.md'
+      - 'docs/CANARY_LINEAR_DELIVERY.md'
+      - '.github/workflows/canary-linear-delivery.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'operations/canary-workflows.v1.json'
+      - 'scripts/canary-incident.py'
+      - 'scripts/canary_delivery_common.py'
+      - 'scripts/canary_delivery_linear.py'
+      - 'scripts/canary_delivery_github.py'
+      - 'scripts/linear-canary-delivery.py'
+      - 'suite/operations/test_canary_incident.py'
+      - 'suite/operations/test_linear_canary_delivery.py'
+      - 'docs/CANARY_INCIDENT_ROUTING.md'
+      - 'docs/CANARY_LINEAR_DELIVERY.md'
+      - '.github/workflows/canary-linear-delivery.yml'
+  schedule:
+    - cron: '7 * * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Credential-free planning, live monitoring, or a protected controlled delivery drill'
+        required: true
+        default: dry-run
+        type: choice
+        options:
+          - dry-run
+          - live-monitor
+          - controlled-drill
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: canary-linear-delivery-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name != 'schedule' }}
+
+jobs:
+  contract:
+    if: github.event_name != 'schedule' || vars.LINEAR_CANARY_DELIVERY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Validate monitored workflow inventory
+        run: python3 scripts/linear-canary-delivery.py validate-config
+      - name: Test state and delivery contracts
+        run: |
+          python3 -m unittest discover -s suite/operations -p 'test_canary_incident.py' -v
+          python3 -m unittest discover -s suite/operations -p 'test_linear_canary_delivery.py' -v
+      - name: Compile Python entrypoints
+        run: >-
+          python3 -m py_compile
+          scripts/canary-incident.py
+          scripts/canary_delivery_common.py
+          scripts/canary_delivery_linear.py
+          scripts/canary_delivery_github.py
+          scripts/linear-canary-delivery.py
+
+  manual-dry-run:
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'dry-run'
+    needs: contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Inspect current scheduled-run state without Linear credentials
+        env:
+          GITHUB_TOKEN: ${{ secrets.OPTO_SYNC_CANARY_GITHUB_TOKEN || github.token }}
+        run: python3 scripts/linear-canary-delivery.py dry-run
+
+  live-delivery:
+    if: >-
+      (github.event_name == 'schedule' && vars.LINEAR_CANARY_DELIVERY_ENABLED == 'true') ||
+      (github.event_name == 'workflow_dispatch' && inputs.mode != 'dry-run')
+    needs: contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: linear-canary-incidents
+    env:
+      LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+      GITHUB_TOKEN: ${{ secrets.OPTO_SYNC_CANARY_GITHUB_TOKEN || github.token }}
+      GITHUB_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Require protected delivery credential
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$LINEAR_API_KEY"
+      - name: Deliver latest scheduled outcomes
+        if: github.event_name == 'schedule' || inputs.mode == 'live-monitor'
+        run: python3 scripts/linear-canary-delivery.py deliver
+      - name: Run controlled create/update/manual-evidence/recovery drill
+        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'controlled-drill'
+        run: python3 scripts/linear-canary-delivery.py drill

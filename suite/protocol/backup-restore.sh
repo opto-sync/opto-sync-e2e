@@ -29,7 +29,7 @@ createdb -h postgres -U syncer "$restore_database"
 pg_restore --exit-on-error --no-owner --no-privileges \
   -h postgres -U syncer -d "$restore_database" "$backup_file"
 psql -v ON_ERROR_STOP=1 -h postgres -U syncer -d "$restore_database" \
-  -f /test/protocol/recovery-assert.sql
+  -f /suite/protocol/recovery-assert.sql
 
 # Reproduce the dangerous lock interleaving deterministically. The holder owns
 # protocol state first. A correctly registered direct SQL statement blocks in
@@ -41,7 +41,7 @@ psql -v ON_ERROR_STOP=1 -h postgres -U syncer -d "$restore_database" \
       VALUES ('recovery-lock-order', 'shared', '{\"lockOrder\":\"seed\"}'::JSONB)"
 rm -f "$lock_marker"
 psql -v ON_ERROR_STOP=1 -h postgres -U syncer -d "$restore_database" \
-  -f /test/protocol/lock-order-holder.sql &
+  -f /suite/protocol/lock-order-holder.sql &
 holder_pid=$!
 attempt=0
 while [ ! -f "$lock_marker" ]; do
@@ -61,6 +61,6 @@ psql -v ON_ERROR_STOP=1 -h postgres -U syncer -d "$restore_database" \
        WHERE workspace = 'recovery-lock-order' AND task_key = 'shared'"
 wait "$holder_pid"
 psql -v ON_ERROR_STOP=1 -h postgres -U syncer -d "$restore_database" \
-  -f /test/protocol/lock-order-assert.sql
+  -f /suite/protocol/lock-order-assert.sql
 
 echo "Backup/restore drill passed ($backup_bytes-byte custom-format dump)"

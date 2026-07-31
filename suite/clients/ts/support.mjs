@@ -14,7 +14,7 @@ import { inspect } from 'node:util';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
-/** test/clients/ts -> .../opto-sync-clients/clients/ts */
+/** suite/clients/ts -> .../opto-sync-clients/clients/ts */
 export const TS_CLIENT_DIR = resolve(HERE, '../../../../opto-sync-clients/clients/ts');
 export const FIXTURES_DIR = resolve(HERE, '../fixtures');
 

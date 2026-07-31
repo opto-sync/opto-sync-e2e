@@ -27,7 +27,7 @@ build context (slow) and can shadow in-image dependency installs.
   batch replay, jsonb specifics
 - [Test topology](docs/TEST_TOPOLOGY.md) — every server and suite, and what each
   uniquely catches
-- [Remote browser e2e](test/remote-browser/README.md) — the suite that runs in a
+- [Remote browser e2e](suite/remote-browser/README.md) — the suite that runs in a
   real browser on real Kubernetes clusters
 
 ## Servers
@@ -81,7 +81,7 @@ Transactional schema evolution and the automated dump/restore drill are in
 ### Supabase / rust-mash
 
 `rust-mash` can run against a real Supabase project *or* against the local
-PostgREST stand-in used by `test/supabase/`. **It only works with one or the
+PostgREST stand-in used by `suite/supabase/`. **It only works with one or the
 other configured**: bringing it up from the main compose file alone leaves it
 pointed at the `.env` placeholder and every request fails. For the local path,
 always include the override:
@@ -93,7 +93,7 @@ docker compose -f docker-compose.yml -f docker-compose.supabase.yml \
 
 `SUPABASE_REST_PREFIX` (default `/rest/v1`) is what makes both targets work
 from the same code — real Supabase keeps the default; PostgREST serves tables
-at the root. See `test/supabase/README.md`, which also states plainly which
+at the root. See `suite/supabase/README.md`, which also states plainly which
 Supabase features (RLS, GoTrue, realtime) that stand-in does **not** cover.
 
 ## Configuration
@@ -109,11 +109,11 @@ Copy `.env.example` to `.env` and fill in:
 Two curl-based test runners live in `test/` and run as compose profiles:
 
 ```sh
-# Default profile: postgres + node, runs test/run_e2e.sh
+# Default profile: postgres + node, runs suite/run_e2e.sh
 docker compose --profile test up --build
 
 # Full suite: also builds rust-fullstack, dart and sagitta,
-# runs test/run_e2e_full.sh against every in-memory server
+# runs suite/run_e2e_full.sh against every in-memory server
 docker compose --profile fulltest --profile fullstack --profile dart --profile sagitta up --build
 ```
 
@@ -128,17 +128,17 @@ rather than merely that a merge occurred.
 
 | Suite | What it proves | Run |
 |---|---|---|
-| `test/conformance/` | Scenario-level behavior against the Postgres-backed node server: jsonb round-trip fidelity, tombstones, CAS conflicts, unique-index identity, strategy matrix, robustness | `docker compose --profile conformance up --exit-code-from conformance` |
-| `test/protocol/run.mjs` | Protocol v1 idempotency, immutable mutation ids, transactional push, committed-but-response-lost retry recovery, durable rejection, commit-ordered protocol/direct-SQL capture through the canonical multi-table mirror, explicit tombstones, tenant-filtered pagination, compaction reset, and snapshot consistency | `docker compose --profile protocol up --exit-code-from protocol` |
-| `test/protocol/auth.mjs` | Production-mode bearer authentication, exact client binding, durable subject ownership, token rotation, cross-tenant pull/snapshot isolation, and separate compaction administration | `docker compose --profile auth up --exit-code-from auth-protocol` |
-| `test/protocol/operations.mjs` | Production-mode push/mutation/snapshot quotas, valid- and invalid-principal rate limiting, protected bounded-cardinality metrics, and structured audit paths | `docker compose --profile operations up --exit-code-from operations-protocol` |
-| `test/protocol/load.mjs` | 96 concurrent writers and ambiguous retries, ordered-log/snapshot correctness first, then configurable p95/max latency bounds | `docker compose --profile load up --exit-code-from protocol-load` |
-| `test/cross-server/` | Four runtimes produce semantically identical documents from one mutation sequence; non-contending mutations converge in any apply order | `docker compose --profile crossserver --profile fullstack --profile dart --profile sagitta up --exit-code-from cross-server` |
-| `test/clients/` | The client libraries in `../opto-sync-clients` (ts/dart/rust) syncing against a live server: offline queue, replay, pull-back reconcile, cross-client convergence | `test/clients/run_all.sh` (from the host) |
-| `test/supabase/` | The Supabase REST path end to end via a local PostgREST stand-in, with JWT auth enforced | see `test/supabase/README.md` |
+| `suite/conformance/` | Scenario-level behavior against the Postgres-backed node server: jsonb round-trip fidelity, tombstones, CAS conflicts, unique-index identity, strategy matrix, robustness | `docker compose --profile conformance up --exit-code-from conformance` |
+| `suite/protocol/run.mjs` | Protocol v1 idempotency, immutable mutation ids, transactional push, committed-but-response-lost retry recovery, durable rejection, commit-ordered protocol/direct-SQL capture through the canonical multi-table mirror, explicit tombstones, tenant-filtered pagination, compaction reset, and snapshot consistency | `docker compose --profile protocol up --exit-code-from protocol` |
+| `suite/protocol/auth.mjs` | Production-mode bearer authentication, exact client binding, durable subject ownership, token rotation, cross-tenant pull/snapshot isolation, and separate compaction administration | `docker compose --profile auth up --exit-code-from auth-protocol` |
+| `suite/protocol/operations.mjs` | Production-mode push/mutation/snapshot quotas, valid- and invalid-principal rate limiting, protected bounded-cardinality metrics, and structured audit paths | `docker compose --profile operations up --exit-code-from operations-protocol` |
+| `suite/protocol/load.mjs` | 96 concurrent writers and ambiguous retries, ordered-log/snapshot correctness first, then configurable p95/max latency bounds | `docker compose --profile load up --exit-code-from protocol-load` |
+| `suite/cross-server/` | Four runtimes produce semantically identical documents from one mutation sequence; non-contending mutations converge in any apply order | `docker compose --profile crossserver --profile fullstack --profile dart --profile sagitta up --exit-code-from cross-server` |
+| `suite/clients/` | The client libraries in `../opto-sync-clients` (ts/dart/rust) syncing against a live server: offline queue, replay, pull-back reconcile, cross-client convergence | `suite/clients/run_all.sh` (from the host) |
+| `suite/supabase/` | The Supabase REST path end to end via a local PostgREST stand-in, with JWT auth enforced | see `suite/supabase/README.md` |
 
 Suites that need a specific server can also be iterated from the host against
-the published ports (e.g. `HOST_MODE=1 node test/cross-server/run.mjs`).
+the published ports (e.g. `HOST_MODE=1 node suite/cross-server/run.mjs`).
 
 ### Known runtime limit: integer precision
 
@@ -170,6 +170,6 @@ exactly as the Setup section above describes.
   `crossserver`, and the Supabase/PostgREST path. Each leg tears the stack down
   with `docker compose down -v` and uploads full container logs on failure.
 - [`.github/workflows/e2e-clients.yml`](.github/workflows/e2e-clients.yml) — the
-  host-run `test/clients/run_all.sh` (ts + dart + rust clients against a live
+  host-run `suite/clients/run_all.sh` (ts + dart + rust clients against a live
   `postgres` + `node` stack), with `OPTO_SYNC_REQUIRE_SERVER=1` so an
   unreachable server fails instead of silently skipping.

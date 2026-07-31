@@ -1,0 +1,62 @@
+name: Canary incident contract
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/canary-incident.py'
+      - 'suite/operations/test_canary_incident.py'
+      - 'docs/CANARY_INCIDENT_ROUTING.md'
+      - '.github/workflows/canary-incident-contract.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/canary-incident.py'
+      - 'suite/operations/test_canary_incident.py'
+      - 'docs/CANARY_INCIDENT_ROUTING.md'
+      - '.github/workflows/canary-incident-contract.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: canary-incident-contract-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  state-machine:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Test normalization, deduplication, recovery, and missed schedules
+        run: python3 -m unittest discover -s suite/operations -p 'test_canary_incident.py' -v
+      - name: Exercise the credential-free CLI surface
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat <<'JSON' | python3 scripts/canary-incident.py classify > /tmp/incident.json
+          {
+            "repository": "opto-sync/syncer.c",
+            "workflow": "Fuzz and leak canary",
+            "event": "schedule",
+            "conclusion": "failure",
+            "runId": 1,
+            "runUrl": "https://github.com/opto-sync/syncer.c/actions/runs/1",
+            "headSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "completedAt": "2026-07-28T05:25:00Z",
+            "job": "fuzz",
+            "step": "Run all fuzzers plus dedicated leak passes",
+            "error": "AddressSanitizer: heap-use-after-free at 0x1234"
+          }
+          JSON
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          incident = json.loads(Path('/tmp/incident.json').read_text())
+          assert incident['priority'] == 'urgent'
+          assert len(incident['signature']) == 24
+          assert incident['linear']['project'] == 'github.com/opto-sync'
+          PY

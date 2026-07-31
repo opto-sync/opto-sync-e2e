@@ -7,7 +7,7 @@ set -e
 echo "==========================================="
 echo " opto-sync Full E2E Integration Tests"
 echo " Testing: Node, Rust Fullstack, Dart, Sagitta"
-echo " (rust-mash covered by test/supabase, not here)"
+echo " (rust-mash covered by suite/supabase, not here)"
 echo "==========================================="
 echo "Waiting for all servers to start..."
 sleep 10
@@ -83,26 +83,34 @@ test_server() {
     # Asserting only '"merged":true' here would pass even under REPLACE
     # semantics, so seed a two-element array and then prove element-level
     # behavior: stale element rejected, untouched element kept, new appended.
+    #
+    # Every value carries a `ka-` prefix so it is UNIQUE within the document.
+    # These checks are whole-document substring greps, and this doc is shared
+    # with the cross-server convergence/commutativity scenarios, which store
+    # `xcomm_*` subtrees whose rows legitimately contain "v":"one"/"two"/"three".
+    # Bare values therefore matched foreign data: the positive checks passed
+    # even when reconciliation was wrong, and the "superseded value is gone"
+    # check failed even when it was right. Keep these sentinels unique.
     curl -s --max-time 10 -X POST "$URL/doc/$DOC/sync" \
         -H "Content-Type: application/json" \
-        -d '{"rows": [{"id": 1, "createdAt": 100, "updatedAt": 500, "v": "one"},
-                      {"id": 2, "createdAt": 100, "updatedAt": 500, "v": "two"}]}' \
+        -d '{"rows": [{"id": 1, "createdAt": 100, "updatedAt": 500, "v": "ka-one"},
+                      {"id": 2, "createdAt": 100, "updatedAt": 500, "v": "ka-two"}]}' \
         >/dev/null 2>&1 || true
 
     ARRAY_SYNC=$(curl -s --max-time 10 -X POST "$URL/doc/$DOC/sync" \
         -H "Content-Type: application/json" \
-        -d '{"rows": [{"id": 2, "updatedAt": 100, "v": "STALE"},
-                      {"id": 3, "createdAt": 900, "updatedAt": 900, "v": "three"}]}' \
+        -d '{"rows": [{"id": 2, "updatedAt": 100, "v": "ka-STALE"},
+                      {"id": 3, "createdAt": 900, "updatedAt": 900, "v": "ka-three"}]}' \
         2>/dev/null || echo "FAIL")
     echo "Array Sync: $ARRAY_SYNC"
     check "$NAME: keyed-array merge accepted" "$ARRAY_SYNC" '"merged":true'
 
     ROWS=$(curl -s --max-time 10 "$URL/doc/$DOC" 2>/dev/null || echo "FAIL")
     echo "Rows after: $ROWS"
-    check        "$NAME: keyed-array kept untouched element"   "$ROWS" '"one"'
-    check        "$NAME: keyed-array kept fresher element"     "$ROWS" '"two"'
-    check_absent "$NAME: keyed-array rejected stale element"   "$ROWS" 'STALE'
-    check        "$NAME: keyed-array appended new element"     "$ROWS" '"three"'
+    check        "$NAME: keyed-array kept untouched element"   "$ROWS" '"ka-one"'
+    check        "$NAME: keyed-array kept fresher element"     "$ROWS" '"ka-two"'
+    check_absent "$NAME: keyed-array rejected stale element"   "$ROWS" 'ka-STALE'
+    check        "$NAME: keyed-array appended new element"     "$ROWS" '"ka-three"'
 
     # createdAt is NOT a first-write-wins key in the default policy.
     #

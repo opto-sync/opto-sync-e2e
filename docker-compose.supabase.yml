@@ -7,7 +7,7 @@
 # needed live cloud credentials — so the Supabase sync path had zero coverage.
 # Supabase's REST API *is* PostgREST, so running PostgREST locally exercises
 # the same wire protocol, auth headers, upsert semantics and jsonb round trip
-# with no cloud project. See test/supabase/README.md for what this does and
+# with no cloud project. See suite/supabase/README.md for what this does and
 # does NOT cover.
 #
 # --- RUN -------------------------------------------------------------------
@@ -21,7 +21,7 @@
 #     --profile supabasetest run --rm supabase-test
 #
 #   # ...or from the host (ports 3001 / 3010 are published):
-#   node test/supabase/run.mjs
+#   node suite/supabase/run.mjs
 #
 #   # teardown of just this stack:
 #   docker compose -f docker-compose.yml -f docker-compose.supabase.yml \
@@ -37,7 +37,7 @@ services:
     environment:
       PGPASSWORD: syncer_test
     volumes:
-      - ./test/supabase/init.sql:/init.sql:ro
+      - ./suite/supabase/init.sql:/init.sql:ro
     entrypoint:
       - /bin/sh
       - -c
@@ -114,15 +114,15 @@ services:
   #   --profile supabasetest run --rm supabase-test
   supabase-test:
     image: node:22-alpine
-    working_dir: /test
+    working_dir: /suite
     environment:
       - RUST_MASH_URL=http://rust-mash:3001
       - POSTGREST_URL=http://postgrest:3000
       - SUPABASE_TABLE=supabase_sync_docs
       - SUPABASE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzeW5jZXItZTJlIiwicm9sZSI6ImFub24iLCJpYXQiOjE1Nzc4MzY4MDAsImV4cCI6MzM3NjY4NDgwMH0.VbjxUdv0mxNy0AnYA-y18kqcL_7r4cjAWEL7alIh5u0
     volumes:
-      - ./test:/test:ro
-    entrypoint: ["node", "/test/supabase/run.mjs"]
+      - ./suite:/suite:ro
+    entrypoint: ["node", "/suite/supabase/run.mjs"]
     networks:
       - syncer-net
     depends_on:

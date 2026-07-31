@@ -1,0 +1,31 @@
+{
+  "formatVersion": 1,
+  "handshake": {
+    "protocol": 1,
+    "schema": 1,
+    "mutationLog": 1,
+    "checkpoint": 1,
+    "indexedDbStorage": 2,
+    "sqliteStorage": 2
+  },
+  "push": {
+    "tenantId": "fixture-tenant",
+    "clientId": "fixture-client",
+    "baseCheckpoint": "0",
+    "mutations": [
+      {
+        "mutationId": "fixture-mutation-1",
+        "documentId": "fixture-doc-1",
+        "payload": {
+          "title": "queued before migration",
+          "updatedAt": "1000"
+        }
+      }
+    ]
+  },
+  "expected": {
+    "result": "accepted",
+    "checkpoint": "1",
+    "duplicateReplay": "duplicate"
+  }
+}
