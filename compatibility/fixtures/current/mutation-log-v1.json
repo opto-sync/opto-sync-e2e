@@ -1,0 +1,23 @@
+{
+  "formatVersion": 1,
+  "clientId": "fixture-client",
+  "entries": [
+    {
+      "sequence": 1,
+      "mutationId": "fixture-mutation-1",
+      "state": "pending",
+      "checkpoint": null
+    },
+    {
+      "sequence": 2,
+      "mutationId": "fixture-mutation-1",
+      "state": "acknowledged",
+      "checkpoint": "1"
+    }
+  ],
+  "replayExpectation": {
+    "mutationId": "fixture-mutation-1",
+    "result": "duplicate",
+    "checkpoint": "1"
+  }
+}

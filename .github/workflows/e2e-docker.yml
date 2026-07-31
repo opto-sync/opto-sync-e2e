@@ -10,7 +10,7 @@ name: E2E (docker)
 #
 #   $GITHUB_WORKSPACE/          <- docker build context
 #     syncer.c/
-#     opto-sync-clients/        (not COPYd by any image; kept for layout parity)
+#     opto-sync-clients/        (recursive clone; embeds the same core gitlink)
 #     opto-sync-e2e/            <- this repo, compose working directory
 #
 # Docker only honors a .dockerignore at the CONTEXT root, so
@@ -18,10 +18,6 @@ name: E2E (docker)
 # exactly as README.md's Setup section instructs. Without it, host
 # node_modules/target/build trees leak into the context and can shadow in-image
 # dependency installs.
-#
-# PLATFORM: ubuntu-latest. All images are Linux images that compile the core to
-# libsyncer.so themselves (see servers/*/Dockerfile) -- nothing here depends on
-# the macOS .dylib produced on the dev machines.
 #
 # Docker layer caching is intentionally NOT enabled: the images embed the C core
 # by COPYing syncer.c/, and a cross-run layer cache is one more place a stale
@@ -31,7 +27,18 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: '37 4 * * 0'
   workflow_dispatch:
+    inputs:
+      syncer_ref:
+        description: 'Optional syncer.c ref for compatibility testing'
+        required: false
+        type: string
+      clients_ref:
+        description: 'Optional opto-sync-clients ref for compatibility testing'
+        required: false
+        type: string
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -41,15 +48,28 @@ permissions:
   contents: read
 
 env:
-  SYNCER_C_REF: main
-  CLIENTS_REF: main
+  # Exact pair certified by this E2E revision. Manual dispatch may opt into
+  # candidate refs, but the sibling server core and the client repository's
+  # nested gitlink must still resolve to the same commit.
+  SYNCER_C_REF: 7795ce2d1342e17d934d2faafff5c8ed4322609e
+  CLIENTS_REF: 54874e9f7df6009fccd9034fce39306daef2c043
 
 jobs:
+  repository-contract:
+    name: cross-repository CI contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout opto-sync-e2e
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify immutable refs and secret-safe workflow text
+        run: python3 scripts/check-ci-contract.py
+
   suite:
     name: e2e ${{ matrix.name }}
     runs-on: ubuntu-latest
-    # Two of the five images are static Rust/musl builds (rust-mash links
-    # OpenSSL statically), so a cold build is slow -- but nowhere near 6 hours.
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -80,47 +100,64 @@ jobs:
         uses: actions/checkout@v4
         with:
           path: opto-sync-e2e
+          persist-credentials: false
 
-      - name: Checkout syncer.c (sibling — every image COPYs syncer.c/)
+      - name: Checkout syncer.c (pinned sibling used by every image)
         uses: actions/checkout@v4
         with:
           repository: opto-sync/syncer.c
-          ref: ${{ env.SYNCER_C_REF }}
+          ref: ${{ github.event.inputs.syncer_ref || env.SYNCER_C_REF }}
           path: syncer.c
+          persist-credentials: false
 
-      - name: Checkout opto-sync-clients (sibling — documented layout)
+      - name: Checkout opto-sync-clients and its pinned core
         uses: actions/checkout@v4
         with:
           repository: opto-sync/opto-sync-clients
-          ref: ${{ env.CLIENTS_REF }}
+          ref: ${{ github.event.inputs.clients_ref || env.CLIENTS_REF }}
           path: opto-sync-clients
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: recursive
 
-      # README.md, "Setup": the build context is the parent directory, so the
-      # .dockerignore has to live there.
+      - name: Verify sibling and nested core parity
+        shell: bash
+        run: |
+          set -euo pipefail
+          sibling_sha="$(git -C syncer.c rev-parse HEAD)"
+          gitlink_sha="$(git -C opto-sync-clients rev-parse HEAD:syncer.c)"
+          nested_sha="$(git -C opto-sync-clients/syncer.c rev-parse HEAD)"
+          test "$sibling_sha" = "$gitlink_sha"
+          test "$nested_sha" = "$gitlink_sha"
+          test -f opto-sync-clients/syncer.c/core/include/syncer.h
+          git -C opto-sync-clients submodule status --cached syncer.c
+
       - name: Install .dockerignore at the build context root
         run: |
           cp opto-sync-e2e/context.dockerignore .dockerignore
           echo "context root: $(pwd)"
           ls -a
 
-      # .env is tracked in the repo, but compose hard-fails on a missing
-      # env_file, so make that impossible.
-      - name: Ensure .env exists
+      # Compose hard-fails on a missing env_file. Never print the file: a local
+      # or future CI override may contain credentials even though the checked-in
+      # example is non-secret.
+      - name: Ensure .env exists without logging values
         working-directory: opto-sync-e2e
         run: |
+          set -euo pipefail
           [ -f .env ] || cp .env.example .env
-          echo "--- .env ---"
-          cat .env
+          test -s .env
+          count="$(grep -Ec '^[A-Za-z_][A-Za-z0-9_]*=' .env || true)"
+          echo ".env is present with ${count} declared variable(s); values redacted"
 
-      - name: docker / compose versions
+      - name: Docker and Compose preflight
+        working-directory: opto-sync-e2e
         run: |
           docker --version
           docker compose version
+          docker compose config --quiet
+          docker compose -f docker-compose.yml -f docker-compose.supabase.yml config --quiet
 
-      # These profiles start additional containers from the same image as the
-      # `node` service. Compose may try to pull those aliases before `node` has
-      # finished building, even with `up --build`, so materialize the shared
-      # image first on each isolated runner that exercises an alias.
       - name: Build shared Node image for profile aliases
         if: >-
           matrix.id == 'auth' ||
@@ -130,9 +167,6 @@ jobs:
         working-directory: opto-sync-e2e
         run: docker compose build node
 
-      # --- suites ------------------------------------------------------------
-      # `--exit-code-from <svc>` implies --abort-on-container-exit, so the job's
-      # exit status is the test runner's.
       - name: fulltest — run_e2e_full.sh across all in-memory servers
         if: matrix.id == 'fulltest'
         working-directory: opto-sync-e2e
@@ -196,12 +230,6 @@ jobs:
           docker compose --profile crossserver --profile fullstack --profile dart --profile sagitta \
             up --build --exit-code-from cross-server
 
-      # Two-step by design (test/supabase/README.md): the override file repoints
-      # rust-mash at the local PostgREST stand-in, and supabase-init must have
-      # completed (it creates the anon/authenticator roles and the
-      # supabase_sync_docs table) before the suite runs. Bringing rust-mash up
-      # from the main compose file alone leaves it on the .env placeholder and
-      # every request fails, so the override is mandatory here.
       - name: supabase — bring up postgrest + rust-mash (override file)
         if: matrix.id == 'supabase'
         working-directory: opto-sync-e2e
@@ -216,7 +244,6 @@ jobs:
           docker compose -f docker-compose.yml -f docker-compose.supabase.yml \
             --profile supabasetest run --rm supabase-test
 
-      # --- diagnostics + teardown -------------------------------------------
       - name: Collect compose logs
         if: failure()
         working-directory: opto-sync-e2e
@@ -243,11 +270,6 @@ jobs:
         run: |
           echo "::error title=opto-sync-e2e ${{ matrix.id }} FAILED::The '${{ matrix.id }}' e2e suite broke. Full container logs are in the compose-logs-${{ matrix.id }} artifact."
 
-      # Safe here in a way it is NOT locally: this runner is ephemeral and owns
-      # the whole stack, so `down -v` cannot yank the shared Postgres out from
-      # under a concurrent suite (which is why test/supabase/README.md tells
-      # humans never to run it). `down` is project-wide, so it removes services
-      # from every profile regardless of which ones were selected for `up`.
       - name: Tear down (always)
         if: always()
         working-directory: opto-sync-e2e

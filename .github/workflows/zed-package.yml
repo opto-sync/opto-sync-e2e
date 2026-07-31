@@ -1,0 +1,95 @@
+name: Zed package contract
+
+on:
+  pull_request:
+    paths:
+      - '.zpkg.toml'
+      - '.zpkg.lock'
+      - 'LICENSE'
+      - 'docker-compose*.yml'
+      - 'test/**'
+      - '.github/workflows/zed-package.yml'
+  push:
+    branches: [main]
+    paths:
+      - '.zpkg.toml'
+      - '.zpkg.lock'
+      - 'LICENSE'
+      - 'docker-compose*.yml'
+      - 'test/**'
+      - '.github/workflows/zed-package.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pack:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout package
+        uses: actions/checkout@v4
+        with:
+          path: package
+
+      - name: Checkout pinned Zed CLI
+        uses: actions/checkout@v4
+        with:
+          repository: zed-pkg/zed-cli
+          ref: c636fb8f6b08695c6b4fe94e2481f4d57270b2d7
+          path: zed-cli
+
+      - name: Checkout pinned Zed interfaces
+        uses: actions/checkout@v4
+        with:
+          repository: zed-pkg/zed-interfaces
+          ref: 415e871b1fb3dd97744c134351408a3224805dfb
+          path: zed-interfaces
+
+      - name: Build pinned Zed CLI
+        run: cargo build --locked --manifest-path zed-cli/Cargo.toml --bin zed
+
+      - name: Validate compose and package structure
+        working-directory: package
+        run: |
+          set -euo pipefail
+          test -f LICENSE
+          test -f .env || cp .env.example .env
+          docker compose config --quiet
+          test -f test/run_e2e.sh
+          test -f test/clients/run_all.sh
+          test -f test/protocol/run.mjs
+          test -f test/cross-server/run.mjs
+
+      - name: Pack, inspect, and dry-run publish
+        working-directory: package
+        run: |
+          set -euo pipefail
+          ../zed-cli/target/debug/zed pack
+
+          shopt -s nullglob
+          archives=(.zed/pack/*.tar.gz)
+          test "${#archives[@]}" -eq 1
+          tar -tzf "${archives[0]}" | grep -Fx 'pkg/LICENSE'
+          ! tar -tzf "${archives[0]}" | grep -Fx 'pkg/.env'
+
+          ../zed-cli/target/debug/zed publish \
+            --dry-run \
+            --allow-dirty \
+            --skip-vcs-checks | tee ../zed-dry-run.txt
+
+          grep -F 'opto-sync/opto-sync-e2e@0.1.0' ../zed-dry-run.txt
+          test "$(grep -c '^dry run: would publish opto-sync/' ../zed-dry-run.txt)" -eq 1
+
+      - name: Upload deterministic package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: opto-sync-e2e-zed-package
+          path: package/.zed/pack/
+          if-no-files-found: error
+          retention-days: 7
