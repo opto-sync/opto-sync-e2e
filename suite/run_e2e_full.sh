@@ -148,7 +148,7 @@ test_server() {
         curl -s --max-time 10 -X POST "$URL/doc/$DOC/sync" \
             -H "Content-Type: application/json" \
             -H 'X-Syncer-Options: {"fwwKeys":"createdAt"}' \
-            -d '{"rows": [{"id": 1, "createdAt": 9000, "updatedAt": 9000, "v": "ka-VETOED"}]}' \
+            -d "{\"$KA\": [{\"id\": 1, \"createdAt\": 9000, \"updatedAt\": 9000, \"v\": \"ka-VETOED\"}]}" \
             >/dev/null 2>&1 || true
         FWW=$(curl -s --max-time 10 "$URL/doc/$DOC" 2>/dev/null || echo "FAIL")
         echo "Explicit FWW: $FWW"
