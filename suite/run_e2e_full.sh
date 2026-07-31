@@ -134,7 +134,7 @@ test_server() {
     # APPLIED — element 1 goes from "one" to "NEWEST".
     curl -s --max-time 10 -X POST "$URL/doc/$DOC/sync" \
         -H "Content-Type: application/json" \
-        -d '{"rows": [{"id": 1, "createdAt": 5000, "updatedAt": 5000, "v": "ka-NEWEST"}]}' \
+        -d "{\"$KA\": [{\"id\": 1, \"createdAt\": 5000, \"updatedAt\": 5000, \"v\": \"ka-NEWEST\"}]}" \
         >/dev/null 2>&1 || true
     NO_FWW=$(curl -s --max-time 10 "$URL/doc/$DOC" 2>/dev/null || echo "FAIL")
     echo "No-FWW default: $NO_FWW"
