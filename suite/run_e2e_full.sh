@@ -98,16 +98,21 @@ test_server() {
     # Bare values therefore matched foreign data: the positive checks passed
     # even when reconciliation was wrong, and the "superseded value is gone"
     # check failed even when it was right. Keep these sentinels unique.
+    #
+    # The array also lives under a per-run key: these payloads carry FIXED
+    # timestamps, so re-seeding the same key on a later run would be a stale
+    # write and be rejected on a correctly-working server.
+    KA="karows_$RUNNS"
     curl -s --max-time 10 -X POST "$URL/doc/$DOC/sync" \
         -H "Content-Type: application/json" \
-        -d '{"rows": [{"id": 1, "createdAt": 100, "updatedAt": 500, "v": "ka-one"},
-                      {"id": 2, "createdAt": 100, "updatedAt": 500, "v": "ka-two"}]}' \
+        -d "{\"$KA\": [{\"id\": 1, \"createdAt\": 100, \"updatedAt\": 500, \"v\": \"ka-one\"},
+                      {\"id\": 2, \"createdAt\": 100, \"updatedAt\": 500, \"v\": \"ka-two\"}]}" \
         >/dev/null 2>&1 || true
 
     ARRAY_SYNC=$(curl -s --max-time 10 -X POST "$URL/doc/$DOC/sync" \
         -H "Content-Type: application/json" \
-        -d '{"rows": [{"id": 2, "updatedAt": 100, "v": "ka-STALE"},
-                      {"id": 3, "createdAt": 900, "updatedAt": 900, "v": "ka-three"}]}' \
+        -d "{\"$KA\": [{\"id\": 2, \"updatedAt\": 100, \"v\": \"ka-STALE\"},
+                      {\"id\": 3, \"createdAt\": 900, \"updatedAt\": 900, \"v\": \"ka-three\"}]}" \
         2>/dev/null || echo "FAIL")
     echo "Array Sync: $ARRAY_SYNC"
     check "$NAME: keyed-array merge accepted" "$ARRAY_SYNC" '"merged":true'
