@@ -28,7 +28,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  OPTO_SYNC_CLIENTS_SHA: 54874e9f7df6009fccd9034fce39306daef2c043
+  OPTO_SYNC_CLIENTS_SHA: 4c1ec1110eccc6e8c3f7caa1d97266d213f231ba
   SYNCER_C_SHA: 7795ce2d1342e17d934d2faafff5c8ed4322609e
 
 jobs:

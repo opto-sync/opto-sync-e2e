@@ -15,6 +15,13 @@ sleep 10
 PASS=0
 FAIL=0
 
+# Per-run namespace for scratch subtrees, matching suite/cross-server/run.mjs.
+# These documents are long-lived and shared between suites, so any key this
+# script seeds with fixed timestamps must live under a fresh key each run —
+# otherwise a second run's seed is STALER than the first run's final state and
+# is correctly rejected, making the assertions fail on a healthy server.
+RUNNS="p$$"
+
 check() {
     if echo "$2" | grep -q "$3"; then
         echo "✅ $1"
