@@ -209,6 +209,44 @@ services:
       timeout: 5s
       retries: 20
 
+  # Test-mode instance with the realtime transports under test. WebSocket
+  # always rides the HTTP port at /sync/ws; setting SYNCER_TCP_PORT is what
+  # enables the TCP NDJSON listener (native/server-side clients only —
+  # browsers cannot open raw TCP sockets).
+  node-ws:
+    image: opto-sync-e2e-node:latest
+    ports:
+      - "3053:3053"
+      - "3054:3054"
+    env_file:
+      - .env
+    environment:
+      - SERVER_PORT=3053
+      - SYNCER_REQUIRE_NATIVE=1
+      - E2E_ALLOW_OPTION_OVERRIDE=1
+      - SYNCER_TCP_PORT=3054
+    networks:
+      - syncer-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      node:
+        condition: service_healthy
+    restart: unless-stopped
+    profiles:
+      - wstest
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3053/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 2s
+      timeout: 5s
+      retries: 20
+
   # --- Dart Shelf Server (in-memory, C FFI merging) ---
   dart:
     build:
@@ -317,6 +355,29 @@ services:
       - syncer-net
     profiles:
       - protocol
+
+  # WebSocket + TCP transport parity against the shared protocol handlers:
+  # push/pull/snapshot frame bodies must match the HTTP endpoints exactly,
+  # committed pushes must broadcast `changed` hints to every other
+  # connection, and malformed frames must never take a connection down. Run:
+  #   docker compose --profile wstest up --build --exit-code-from ws-protocol
+  ws-protocol:
+    image: node:22-alpine
+    working_dir: /test
+    depends_on:
+      node-ws:
+        condition: service_healthy
+    environment:
+      - BASE_URL=http://node-ws:3053
+      - SYNCER_TCP_PORT=3054
+      - TCP_HOST=node-ws
+    volumes:
+      - ./test:/test:ro
+    entrypoint: ["node", "/test/protocol/ws-transport.mjs"]
+    networks:
+      - syncer-net
+    profiles:
+      - wstest
 
   # Adversarial authentication and cross-tenant isolation checks. Run:
   #   docker compose --profile auth up --exit-code-from auth-protocol
