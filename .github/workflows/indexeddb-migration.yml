@@ -28,8 +28,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  OPTO_SYNC_CLIENTS_SHA: 4c1ec1110eccc6e8c3f7caa1d97266d213f231ba
-  SYNCER_C_SHA: 7795ce2d1342e17d934d2faafff5c8ed4322609e
+  OPTO_SYNC_CLIENTS_SHA: 38f0fcc6a471455a0a20aec5f7fa63d3f70d5f89
+  SYNCER_C_SHA: 8d2b275a89062403666f4bdf196d246a07c84484
 
 jobs:
   chromium-indexeddb:
