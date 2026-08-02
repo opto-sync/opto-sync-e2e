@@ -31,6 +31,9 @@ async function startHarness() {
     } else if (pathname === '/api/session') {
       response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       response.end(JSON.stringify({ cookieSeen: String(request.headers.cookie ?? '').includes('e2e_session=contract') }));
+    } else if (pathname === '/favicon.ico') {
+      response.writeHead(204);
+      response.end();
     } else if (pathname === '/healthz') {
       response.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
       response.end('ok');
