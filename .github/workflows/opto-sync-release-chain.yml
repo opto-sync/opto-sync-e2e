@@ -1,0 +1,134 @@
+name: opto-sync release chain
+
+on:
+  pull_request:
+    paths:
+      - 'operations/opto-sync-release-chain.v1.json'
+      - 'scripts/check-opto-sync-release-chain.py'
+      - 'suite/operations/test_opto_sync_release_chain.py'
+      - '.github/workflows/opto-sync-release-chain.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'operations/opto-sync-release-chain.v1.json'
+      - 'scripts/check-opto-sync-release-chain.py'
+      - 'suite/operations/test_opto_sync_release_chain.py'
+      - '.github/workflows/opto-sync-release-chain.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    name: Monotonic core to wrapper promotion
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout release-chain controller
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Compile validator and run adversarial state-transition tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/check-opto-sync-release-chain.py
+          python3 -m unittest suite.operations.test_opto_sync_release_chain -v
+
+      - name: Render the current evidence-free state twice
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-chain/a release-chain/b release-chain/dashboard
+          python3 scripts/check-opto-sync-release-chain.py \
+            --output release-chain/a/state.json
+          python3 scripts/check-opto-sync-release-chain.py \
+            --output release-chain/b/state.json
+          cmp release-chain/a/state.json release-chain/b/state.json
+          cp release-chain/a/state.json release-chain/dashboard/current-state.json
+          python3 - <<'PY'
+          import json
+          state = json.load(open('release-chain/dashboard/current-state.json'))
+          assert state['readOnly'] is True
+          assert state['currentState'] == 'await_core_publication_verification'
+          assert state['verifiedStages'] == []
+          assert state['pendingStage'] == 'core'
+          assert state['allowedActions'] == [
+              'run_core_publication_outcome_audit'
+          ]
+          assert state['packagePlane'] == {
+              'zedCliSha': 'a850dbcc799aeaccf1093741ab58439a049c14c9',
+              'zedInterfacesSha': 'c2e049006453c26ca8ca291783f681fce75cb01f',
+          }
+          assert all(
+              report == {'provided': False, 'verified': False}
+              for report in state['reports'].values()
+          )
+          PY
+
+      - name: Prove downstream evidence cannot skip an unverified core
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          contract = json.load(open('operations/opto-sync-release-chain.v1.json'))
+          stage = next(item for item in contract['stages'] if item['id'] == 'clients')
+          report = {
+              'schemaVersion': 1,
+              'stage': 'clients',
+              'ownerIssue': stage['outcomeIssue'],
+              'repository': stage['repository'],
+              'publicationVerified': True,
+              'state': 'published_verified',
+              'release': {
+                  'tag': stage['tag'],
+                  'version': stage['version'],
+                  'targetSha': stage['sourceSha'],
+                  'targetTreeSha': stage['treeSha'],
+              },
+              'dependencies': {},
+              'packages': [],
+              'errors': [],
+              'summary': {'checks': 4, 'passed': 4, 'failed': 0, 'locks': 1},
+          }
+          Path('release-chain/clients-without-core.json').write_text(
+              json.dumps(report, indent=2) + '\n'
+          )
+          PY
+          if python3 scripts/check-opto-sync-release-chain.py \
+            --clients-report release-chain/clients-without-core.json \
+            --output release-chain/invalid-skip.json; then
+            echo 'clients evidence unexpectedly skipped the core prerequisite' >&2
+            exit 1
+          fi
+          python3 - <<'PY'
+          import json
+          result = json.load(open('release-chain/invalid-skip.json'))
+          assert result['currentState'] == 'contract_invalid'
+          assert result['allowedActions'] == []
+          assert any('before core evidence' in error for error in result['errors'])
+          PY
+
+      - name: Prove the workflow carries no publication credential
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "${SYNC_FLEET_TOKEN:-}"
+          test -z "${ZED_PKG_TOKEN:-}"
+
+      - name: Upload deterministic release-chain dashboard
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: opto-sync-release-chain-state
+          path: release-chain/dashboard/current-state.json
+          if-no-files-found: error
+          retention-days: 30
