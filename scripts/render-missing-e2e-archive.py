@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """Write canonical gzip-compressed starter archives for missing E2E repos.
 
-`render-missing-e2e-repository.py` owns the reviewed file tree.  This companion
-entrypoint owns the archive representation: sorted file order, fixed tar member
-metadata, no directory entries, and a gzip header with mtime zero and no source
-filename.  Keeping the concerns separate makes archive determinism easy to
-exercise without weakening the repository-tree generator.
+`render-missing-e2e-starter.py` owns the reviewed file tree and structured
+mutable-ref validation. This companion entrypoint owns the archive
+representation: sorted file order, fixed tar member metadata, no directory
+entries, and a gzip header with mtime zero and no source filename.
 """
 
 from __future__ import annotations
@@ -20,10 +19,10 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
-GENERATOR_PATH = ROOT / "scripts/render-missing-e2e-repository.py"
-SPEC = importlib.util.spec_from_file_location("missing_e2e_generator", GENERATOR_PATH)
+GENERATOR_PATH = ROOT / "scripts/render-missing-e2e-starter.py"
+SPEC = importlib.util.spec_from_file_location("missing_e2e_starter", GENERATOR_PATH)
 if SPEC is None or SPEC.loader is None:
-    raise RuntimeError(f"cannot load generator: {GENERATOR_PATH}")
+    raise RuntimeError(f"cannot load starter renderer: {GENERATOR_PATH}")
 GENERATOR = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(GENERATOR)
 
@@ -70,6 +69,8 @@ def inspect_archive(data: bytes, repository: str) -> list[dict[str, Any]]:
         raise ValueError("archive does not have a gzip header")
     if data[4:8] != b"\x00\x00\x00\x00":
         raise ValueError("gzip mtime is not zero")
+    if data[3] & 0x08:
+        raise ValueError("gzip header unexpectedly stores a source filename")
     root_name = repository.split("/", 1)[1]
     entries: list[dict[str, Any]] = []
     with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as handle:
