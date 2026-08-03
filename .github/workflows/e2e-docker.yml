@@ -65,7 +65,9 @@ jobs:
         with:
           persist-credentials: false
       - name: Verify immutable refs and secret-safe workflow text
-        run: python3 scripts/check-ci-contract.py
+        run: |
+          python3 scripts/check-ci-contract.py
+          python3 scripts/test_downstream_workflow_supply_chain.py
 
   suite:
     name: e2e ${{ matrix.name }}

@@ -11,6 +11,10 @@ servers/node/dist/
 **/.dart_tool/
 **/pubspec.lock
 
+# Python test caches
+**/__pycache__/
+*.pyc
+
 # Environment files (keep .env.example if present)
 .env
 *.env.local
