@@ -1,0 +1,176 @@
+name: final Zed package-plane pins
+
+on:
+  pull_request:
+    paths:
+      - 'operations/zed-package-plane-contract.v1.json'
+      - 'operations/downstream-wrapper-fleet.v1.json'
+      - 'scripts/audit-final-zed-package-plane-pins.py'
+      - 'scripts/render-missing-e2e-starter.py'
+      - 'suite/operations/test_final_zed_package_plane_pins.py'
+      - 'suite/operations/test_final_zed_pin_starter.py'
+      - '.github/workflows/final-zed-package-plane-pins.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'operations/zed-package-plane-contract.v1.json'
+      - 'operations/downstream-wrapper-fleet.v1.json'
+      - 'scripts/audit-final-zed-package-plane-pins.py'
+      - 'scripts/render-missing-e2e-starter.py'
+      - 'suite/operations/test_final_zed_package_plane_pins.py'
+      - 'suite/operations/test_final_zed_pin_starter.py'
+      - '.github/workflows/final-zed-package-plane-pins.yml'
+  workflow_dispatch:
+    inputs:
+      live_audit:
+        description: Read every reviewed wrapper/E2E branch and verify the exact final Zed pins
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static-contract:
+    name: Validate final pins, targets, and generated starters
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout package-plane audit controller
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Compile validators and run adversarial tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile \
+            scripts/audit-final-zed-package-plane-pins.py \
+            scripts/render-missing-e2e-repository.py \
+            scripts/render-missing-e2e-starter.py \
+            scripts/render-missing-e2e-archive.py
+          python3 -m unittest \
+            suite.operations.test_final_zed_package_plane_pins \
+            suite.operations.test_final_zed_pin_starter \
+            suite.operations.test_missing_e2e_bootstrap \
+            -v
+
+      - name: Render the deterministic 32-target read-only plan twice
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p pin-plan/a pin-plan/b
+          python3 scripts/audit-final-zed-package-plane-pins.py plan \
+            --output pin-plan/a/plan.json
+          python3 scripts/audit-final-zed-package-plane-pins.py plan \
+            --output pin-plan/b/plan.json
+          cmp pin-plan/a/plan.json pin-plan/b/plan.json
+          python3 - <<'PY'
+          import json
+          plan = json.load(open('pin-plan/a/plan.json'))
+          assert plan['readOnly'] is True
+          assert plan['ownerIssue'] == 'DEN-1576'
+          assert plan['packagePlane'] == {
+              'ZED_CLI_SHA': 'a850dbcc799aeaccf1093741ab58439a049c14c9',
+              'ZED_INTERFACES_SHA': 'c2e049006453c26ca8ca291783f681fce75cb01f',
+          }
+          assert plan['summary'] == {
+              'targets': 32,
+              'wrappers': 17,
+              'e2e': 15,
+              'provisioningRequired': 2,
+          }
+          assert len({(item['repository'], item['path']) for item in plan['targets']}) == 32
+          PY
+
+      - name: Render both missing E2E starters and prove their final package-plane pins
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p starters
+          for repository in \
+            akrion-sim/akrion-sim-e2e \
+            benefactor-cc/benefactor-e2e; do
+            name="${repository#*/}"
+            python3 scripts/render-missing-e2e-starter.py \
+              --repository "$repository" \
+              --out "starters/$name"
+            workflow="starters/$name/.github/workflows/opto-sync-adoption.yml"
+            test "$(grep -c 'ZED_CLI_SHA: a850dbcc799aeaccf1093741ab58439a049c14c9' "$workflow")" -eq 1
+            test "$(grep -c 'ZED_INTERFACES_SHA: c2e049006453c26ca8ca291783f681fce75cb01f' "$workflow")" -eq 1
+            ! grep -Fq 'c636fb8f6b08695c6b4fe94e2481f4d57270b2d7' "$workflow"
+            ! grep -Fq '415e871b1fb3dd97744c134351408a3224805dfb' "$workflow"
+          done
+
+      - name: Upload deterministic pin plan and starter evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: final-zed-package-plane-pin-plan
+          path: |
+            pin-plan/a/plan.json
+            starters/*/bootstrap-receipt.json
+            starters/*/.github/workflows/opto-sync-adoption.yml
+          if-no-files-found: error
+          retention-days: 14
+
+  live-audit:
+    name: Read all 32 adoption workflows and reject stale Zed pins
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.live_audit }}
+    needs:
+      - static-contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SYNC_FLEET_TOKEN: ${{ secrets.SYNC_FLEET_TOKEN }}
+    steps:
+      - name: Checkout package-plane audit controller
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Run bounded read-only final-pin audit
+        id: audit
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/audit-final-zed-package-plane-pins.py audit \
+            --output final-zed-pin-audit.json
+
+      - name: Upload bounded final-pin audit
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: final-zed-package-plane-pin-audit
+          path: final-zed-pin-audit.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Fail when any reviewed branch uses a stale package-plane pair
+        if: always()
+        shell: bash
+        env:
+          AUDIT_OUTCOME: ${{ steps.audit.outcome }}
+        run: |
+          set -euo pipefail
+          test "$AUDIT_OUTCOME" = success || {
+            echo 'Final Zed pin audit failed; inspect the bounded JSON artifact.' >&2
+            exit 1
+          }
+          python3 - <<'PY'
+          import json
+          report = json.load(open('final-zed-pin-audit.json'))
+          assert report['readOnly'] is True
+          assert report['summary'] == {
+              'targets': 32,
+              'passed': 32,
+              'failed': 0,
+          }
+          PY

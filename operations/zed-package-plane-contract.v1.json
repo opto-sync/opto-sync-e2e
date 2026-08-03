@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "ownerIssue": "DEN-1576",
+  "parentIssue": "DEN-313",
+  "zedCli": {
+    "repository": "zed-pkg/zed-cli",
+    "sha": "a850dbcc799aeaccf1093741ab58439a049c14c9",
+    "evidencePullRequest": 43,
+    "interfaceDependencySha": "c2e049006453c26ca8ca291783f681fce75cb01f"
+  },
+  "zedInterfaces": {
+    "repository": "zed-pkg/zed-interfaces",
+    "sha": "c2e049006453c26ca8ca291783f681fce75cb01f",
+    "strictParserSha": "cc5ed7339672543c734c5f1fd19f7e017a771854",
+    "evidencePullRequests": [21, 23]
+  },
+  "requiredWorkflowVariables": {
+    "ZED_CLI_SHA": "a850dbcc799aeaccf1093741ab58439a049c14c9",
+    "ZED_INTERFACES_SHA": "c2e049006453c26ca8ca291783f681fce75cb01f"
+  },
+  "forbiddenPins": [
+    "c636fb8f6b08695c6b4fe94e2481f4d57270b2d7",
+    "dc0e0a0620b9462817950b552d3d334a184b1cb1",
+    "415e871b1fb3dd97744c134351408a3224805dfb",
+    "625ba7bdf4339df7d0880f791a0715ca894558fe",
+    "cc5ed7339672543c734c5f1fd19f7e017a771854"
+  ],
+  "requiredProperties": [
+    "committed locks require explicit immutable artifact and source provenance",
+    "missing or malformed committed lock fields fail before materialization",
+    "legacy in-memory missing revisions serialize as artifact-sha256 of exact bytes",
+    "frozen replay preserves committed lock bytes",
+    "Zed package bootstrap remains independent of Opto-Sync runtime code"
+  ],
+  "releaseGates": ["DEN-309", "DEN-363"]
+}
