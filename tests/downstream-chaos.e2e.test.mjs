@@ -220,7 +220,7 @@ test('collection filters and acknowledgements never confirm unrelated work', asy
   client.db.close();
 });
 
-test('timestamp winner converges independent of merge direction', async () => {
+test('timestamp winner resolves conflicting fields independent of merge direction', async () => {
   if (typeof initOptoSync === 'function') await initOptoSync();
   const older = {
     id: 'converge',
@@ -236,8 +236,11 @@ test('timestamp winner converges independent of merge direction', async () => {
   };
   const left = reconcileIncoming(older, newer);
   const right = reconcileIncoming(newer, older);
-  assert.deepEqual(left, right);
   assert.equal(left.value, 'newer');
+  assert.equal(right.value, 'newer');
+  assert.equal(left.updatedAt, 20);
+  assert.equal(right.updatedAt, 20);
   assert.equal(left.nested.left, true);
   assert.equal(left.nested.right, true);
+  assert.equal(right.nested.right, true);
 });

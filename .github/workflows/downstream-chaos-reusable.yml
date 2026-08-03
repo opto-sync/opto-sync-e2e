@@ -30,6 +30,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  OPTO_SYNC_CLIENT_SHA: d5339b5c0213c760c219c7f6df1652e30b703ba6
   ZED_CLI_SHA: c636fb8f6b08695c6b4fe94e2481f4d57270b2d7
   ZED_INTERFACES_SHA: dc0e0a0620b9462817950b552d3d334a184b1cb1
 
@@ -81,6 +82,64 @@ jobs:
               output.write(f"sync_repository={profile['syncRepository']}\n")
               output.write(f"sync_ref={profile['syncRef']}\n")
           PY
+
+  source-chaos-and-service-worker:
+    needs: contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      PROFILE_PATH: ${{ inputs.profile_path }}
+      CHAOS_TEST_PATH: .opto-chaos/tests/downstream-chaos.e2e.test.mjs
+    steps:
+      - name: Checkout caller repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          path: downstream
+          persist-credentials: false
+      - name: Checkout the exact reusable-workflow implementation
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .opto-chaos
+          persist-credentials: false
+      - name: Checkout the exact hardened opto-sync clients source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: opto-sync/opto-sync-clients
+          ref: ${{ env.OPTO_SYNC_CLIENT_SHA }}
+          path: opto-sync-clients
+          persist-credentials: false
+          submodules: recursive
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22.16.0'
+          cache: npm
+          cache-dependency-path: |
+            opto-sync-clients/syncer.c/bindings/typescript/package-lock.json
+            opto-sync-clients/clients/ts/package-lock.json
+      - name: Build the immutable native and browser SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd opto-sync-clients/syncer.c/bindings/typescript && npm ci)
+          (cd opto-sync-clients/clients/ts && npm ci && npm run build)
+      - name: Run crash, replay, quota, and convergence E2E
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp "$CHAOS_TEST_PATH" \
+            opto-sync-clients/clients/ts/test/downstream-chaos.e2e.test.mjs
+          cd opto-sync-clients/clients/ts
+          OPTO_SYNC_PROFILE="$GITHUB_WORKSPACE/downstream/$PROFILE_PATH" \
+            node --test test/downstream-chaos.e2e.test.mjs
+      - name: Run real Chrome two-tab Service Worker termination and restart E2E
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd opto-sync-clients/clients/ts
+          npx playwright install --with-deps chromium
+          OPTO_SYNC_REQUIRE_BROWSER=1 npm run test:service-worker-browser
 
   live-chaos:
     needs: contract
@@ -167,6 +226,7 @@ jobs:
           npm run test:node
           npx playwright install --with-deps chromium
           OPTO_SYNC_REQUIRE_BROWSER=1 npm run test:browser
+          OPTO_SYNC_REQUIRE_BROWSER=1 npm run test:service-worker-browser
           cp "$GITHUB_WORKSPACE/$CHAOS_TEST_PATH" test/downstream-chaos.e2e.test.mjs
           OPTO_SYNC_PROFILE="$GITHUB_WORKSPACE/$PROFILE_PATH" \
             node --test test/downstream-chaos.e2e.test.mjs
