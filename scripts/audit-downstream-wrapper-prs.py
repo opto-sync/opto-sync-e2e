@@ -2,10 +2,10 @@
 """Read-only audit of the actual downstream wrapper and E2E pull requests.
 
 The reviewed inventory in operations/downstream-wrapper-fleet.v1.json is the
-source of expected repository, branch, pull-request, and provisioning state.
-This script compares that contract with GitHub's REST metadata without making
-any GitHub write. Authentication is read only from SYNC_FLEET_TOKEN; it is
-never accepted as a command-line argument or included in reports/errors.
+source of expected repository, branch, pull-request, and provisioned-baseline
+state. This script compares that contract with GitHub's REST metadata without
+making any GitHub write. Authentication is read only from SYNC_FLEET_TOKEN; it
+is never accepted as a command-line argument or included in reports/errors.
 """
 
 from __future__ import annotations
@@ -46,6 +46,20 @@ E2E_REQUIRED_FILES = {
         "tests/opto-sync-wrapper/profile.json",
         "tests/opto-sync-wrapper/product.e2e.test.mjs",
         ".github/workflows/opto-sync-wrapper-e2e.yml",
+    },
+}
+PROVISIONED_E2E_REQUIRED_FILES = {
+    "akrion-sim/akrion-sim-e2e": {
+        "tests/opto-sync-wrapper/profile.json",
+        "tests/opto-sync-wrapper/product.e2e.test.mjs",
+        ".github/workflows/opto-sync-product-e2e.yml",
+        ".github/workflows/opto-sync-chaos-e2e.yml",
+    },
+    "benefactor-cc/benefactor-e2e": {
+        "tests/opto-sync-wrapper/profile.json",
+        "tests/opto-sync-wrapper/product.e2e.test.mjs",
+        ".github/workflows/opto-sync-product-e2e.yml",
+        ".github/workflows/opto-sync-chaos-e2e.yml",
     },
 }
 
@@ -114,6 +128,13 @@ def pull_files_resource(repository: str, number: int) -> str:
     return f"{pull_resource(repository, number)}/files"
 
 
+def e2e_required_files(wrapper: dict[str, Any]) -> set[str]:
+    repository = wrapper["e2e"]["repository"]
+    if repository in PROVISIONED_E2E_REQUIRED_FILES:
+        return set(PROVISIONED_E2E_REQUIRED_FILES[repository])
+    return set(E2E_REQUIRED_FILES[wrapper["wave"]])
+
+
 class GitHubClient:
     def __init__(
         self,
@@ -139,7 +160,7 @@ class GitHubClient:
             headers={
                 "Accept": "application/vnd.github+json",
                 "Authorization": f"Bearer {self._token}",
-                "User-Agent": "opto-sync-downstream-pr-audit/1",
+                "User-Agent": "opto-sync-downstream-pr-audit/2",
                 "X-GitHub-Api-Version": "2022-11-28",
             },
         )
@@ -147,8 +168,8 @@ class GitHubClient:
             with urllib.request.urlopen(request, timeout=self._timeout_seconds) as response:
                 return json.load(response)
         except urllib.error.HTTPError as exc:
-            # Do not read or expose response bodies. They can contain private
-            # repository metadata and are unnecessary for a bounded audit.
+            # Response bodies can contain private metadata. Status and resource
+            # are sufficient for the bounded audit report.
             raise GitHubApiError(exc.code, resource) from None
         except urllib.error.URLError as exc:
             reason = type(exc.reason).__name__
@@ -216,14 +237,11 @@ def validate_pull_request(
         errors.append(f"base branch is {actual_base!r}, expected 'main'")
     actual_head = nested(pull, "head", "ref")
     if actual_head != expected_branch:
-        errors.append(
-            f"head branch is {actual_head!r}, expected {expected_branch!r}"
-        )
+        errors.append(f"head branch is {actual_head!r}, expected {expected_branch!r}")
     actual_head_repository = nested(pull, "head", "repo", "full_name")
     if actual_head_repository != repository:
         errors.append(
-            "head repository is "
-            f"{actual_head_repository!r}, expected {repository!r}"
+            f"head repository is {actual_head_repository!r}, expected {repository!r}"
         )
 
     filenames: list[str] = []
@@ -271,8 +289,8 @@ def api_error_entry(
     *,
     kind: str,
     repository: str,
-    number: int | None,
-    expected_branch: str | None,
+    number: int,
+    expected_branch: str,
     error: Exception,
 ) -> dict[str, Any]:
     status = error.status if isinstance(error, GitHubApiError) else None
@@ -288,120 +306,63 @@ def api_error_entry(
     }
 
 
+def audit_one(
+    *,
+    kind: str,
+    repository: str,
+    number: int,
+    branch: str,
+    required_files: set[str],
+    client: Client,
+) -> dict[str, Any]:
+    try:
+        pull = client.get_json(pull_resource(repository, number))
+        files = client.get_paginated(pull_files_resource(repository, number))
+        return validate_pull_request(
+            kind=kind,
+            repository=repository,
+            number=number,
+            expected_branch=branch,
+            required_files=required_files,
+            pull=pull,
+            files=files,
+        )
+    except (GitHubApiError, RuntimeError, AuditContractError) as exc:
+        return api_error_entry(
+            kind=kind,
+            repository=repository,
+            number=number,
+            expected_branch=branch,
+            error=exc,
+        )
+
+
 def audit_fleet(manifest: dict[str, Any], client: Client) -> dict[str, Any]:
     entries: list[dict[str, Any]] = []
     for wrapper in manifest["wrappers"]:
-        repository = wrapper["repository"]
-        number = wrapper["pullRequest"]
-        branch = wrapper["branch"]
-        try:
-            pull = client.get_json(pull_resource(repository, number))
-            files = client.get_paginated(pull_files_resource(repository, number))
-            entries.append(
-                validate_pull_request(
-                    kind="wrapper",
-                    repository=repository,
-                    number=number,
-                    expected_branch=branch,
-                    required_files=WRAPPER_REQUIRED_FILES,
-                    pull=pull,
-                    files=files,
-                )
+        entries.append(
+            audit_one(
+                kind="wrapper",
+                repository=wrapper["repository"],
+                number=wrapper["pullRequest"],
+                branch=wrapper["branch"],
+                required_files=WRAPPER_REQUIRED_FILES,
+                client=client,
             )
-        except (GitHubApiError, RuntimeError, AuditContractError) as exc:
-            entries.append(
-                api_error_entry(
-                    kind="wrapper",
-                    repository=repository,
-                    number=number,
-                    expected_branch=branch,
-                    error=exc,
-                )
-            )
-
+        )
         e2e = wrapper["e2e"]
-        e2e_repository = e2e["repository"]
-        if e2e["status"] == "existing":
-            e2e_number = e2e["pullRequest"]
-            e2e_branch = e2e["branch"]
-            try:
-                pull = client.get_json(pull_resource(e2e_repository, e2e_number))
-                files = client.get_paginated(
-                    pull_files_resource(e2e_repository, e2e_number)
-                )
-                entries.append(
-                    validate_pull_request(
-                        kind="e2e",
-                        repository=e2e_repository,
-                        number=e2e_number,
-                        expected_branch=e2e_branch,
-                        required_files=E2E_REQUIRED_FILES[wrapper["wave"]],
-                        pull=pull,
-                        files=files,
-                    )
-                )
-            except (GitHubApiError, RuntimeError, AuditContractError) as exc:
-                entries.append(
-                    api_error_entry(
-                        kind="e2e",
-                        repository=e2e_repository,
-                        number=e2e_number,
-                        expected_branch=e2e_branch,
-                        error=exc,
-                    )
-                )
-        else:
-            try:
-                client.get_json(repository_resource(e2e_repository))
-            except GitHubApiError as exc:
-                if exc.status == 404:
-                    entries.append(
-                        {
-                            "kind": "provisioning_gap",
-                            "repository": e2e_repository,
-                            "pullRequest": None,
-                            "expected": {"repositoryExists": False},
-                            "actual": {"repositoryExists": False, "httpStatus": 404},
-                            "missingFiles": [],
-                            "errors": [],
-                            "passed": True,
-                        }
-                    )
-                else:
-                    entries.append(
-                        api_error_entry(
-                            kind="provisioning_gap",
-                            repository=e2e_repository,
-                            number=None,
-                            expected_branch=None,
-                            error=exc,
-                        )
-                    )
-            except (RuntimeError, AuditContractError) as exc:
-                entries.append(
-                    api_error_entry(
-                        kind="provisioning_gap",
-                        repository=e2e_repository,
-                        number=None,
-                        expected_branch=None,
-                        error=exc,
-                    )
-                )
-            else:
-                entries.append(
-                    {
-                        "kind": "provisioning_gap",
-                        "repository": e2e_repository,
-                        "pullRequest": None,
-                        "expected": {"repositoryExists": False},
-                        "actual": {"repositoryExists": True, "httpStatus": 200},
-                        "missingFiles": [],
-                        "errors": [
-                            "repository exists while inventory still says provisioning_required"
-                        ],
-                        "passed": False,
-                    }
-                )
+        if e2e.get("status") != "existing":
+            fail(f"{e2e.get('repository')}: validated manifest unexpectedly lacks an E2E PR")
+        entries.append(
+            audit_one(
+                kind="e2e",
+                repository=e2e["repository"],
+                number=e2e["pullRequest"],
+                branch=e2e["branch"],
+                required_files=e2e_required_files(wrapper),
+                client=client,
+            )
+        )
 
     failures = [entry for entry in entries if not entry["passed"]]
     counts: dict[str, int] = {}
@@ -410,6 +371,7 @@ def audit_fleet(manifest: dict[str, Any], client: Client) -> dict[str, Any]:
     return {
         "schemaVersion": 1,
         "ownerIssue": "DEN-1473",
+        "reconciliationIssue": manifest["reconciliationIssue"],
         "parentIssue": manifest["ownerIssue"],
         "readOnly": True,
         "summary": {
@@ -456,6 +418,7 @@ def main() -> int:
             report = {
                 "schemaVersion": 1,
                 "ownerIssue": "DEN-1473",
+                "reconciliationIssue": manifest["reconciliationIssue"],
                 "readOnly": True,
                 "summary": {
                     "wrappers": len(manifest["wrappers"]),
@@ -465,6 +428,10 @@ def main() -> int:
                     ),
                     "provisioningRequired": sum(
                         wrapper["e2e"]["status"] == "provisioning_required"
+                        for wrapper in manifest["wrappers"]
+                    ),
+                    "provisionedBaselines": sum(
+                        wrapper["e2e"].get("provisionedByIssue") == "DEN-1469"
                         for wrapper in manifest["wrappers"]
                     ),
                 },
