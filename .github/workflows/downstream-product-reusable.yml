@@ -1,0 +1,167 @@
+name: reusable downstream opto-sync product e2e
+
+on:
+  workflow_call:
+    inputs:
+      profile_path:
+        description: Product profile in the caller repository
+        required: false
+        default: tests/opto-sync-wrapper/profile.json
+        type: string
+      product_test_path:
+        description: Product-specific executable test in the caller repository
+        required: false
+        default: tests/opto-sync-wrapper/product.e2e.test.mjs
+        type: string
+      live_e2e:
+        description: Run frozen package, native, real-browser, and product tests
+        required: false
+        default: false
+        type: boolean
+      wrapper_ref:
+        description: Optional exact wrapper branch, tag, or commit override
+        required: false
+        default: ''
+        type: string
+    secrets:
+      SYNC_FLEET_TOKEN:
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: downstream-opto-product-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ZED_CLI_SHA: c636fb8f6b08695c6b4fe94e2481f4d57270b2d7
+  ZED_INTERFACES_SHA: dc0e0a0620b9462817950b552d3d334a184b1cb1
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      sync_repository: ${{ steps.profile.outputs.sync_repository }}
+      sync_ref: ${{ steps.profile.outputs.sync_ref }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - id: profile
+        name: Validate product profile and executable test
+        shell: bash
+        env:
+          PROFILE_PATH: ${{ inputs.profile_path }}
+          PRODUCT_TEST_PATH: ${{ inputs.product_test_path }}
+        run: |
+          set -euo pipefail
+          node --check "$PRODUCT_TEST_PATH"
+          python3 - <<'PY'
+          import json, os, pathlib, re
+
+          profile = json.loads(pathlib.Path(os.environ['PROFILE_PATH']).read_text())
+          suite = pathlib.Path(os.environ['PRODUCT_TEST_PATH']).read_text()
+          assert profile['schemaVersion'] == 1
+          assert profile['repository'] == os.environ['GITHUB_REPOSITORY']
+          assert profile['syncRepository'] and profile['syncRef']
+          assert profile['dependency'] == {
+              'package': 'opto-sync/opto-sync-clients',
+              'range': '^0.2.0',
+          }
+          assert profile['collections'] and len(profile['collections']) == len(set(profile['collections']))
+          assert {'queuedOptimistic', 'remoteConfirmed'} <= set(profile['writeStrategies'])
+          assert 'indexeddb' in profile['persistence']['web']
+          assert 'sqlite' in profile['persistence']['mobile']
+          assert {'postgres', 'supabase'} <= set(profile['persistence']['backend'])
+          assert profile['domainGuards'] and profile['requiredScenarios']
+          required_tokens = (
+              'queueMutation(', 'protocolPushRequest(', 'pendingMutations(',
+              'localView(', 'queueDelete(', 'reconcileIncoming(',
+              'indexedDB.deleteDatabase(',
+          )
+          assert all(token in suite for token in required_tokens)
+          serialized = json.dumps(profile).lower()
+          assert 'refs/heads/main' not in serialized and '"latest"' not in serialized
+          assert re.fullmatch(r'agent/[a-z0-9._/-]+|[0-9a-f]{40}|v?[0-9]+\.[0-9]+\.[0-9]+(?:[-+][a-z0-9.-]+)?', profile['syncRef'])
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f"sync_repository={profile['syncRepository']}\n")
+              output.write(f"sync_ref={profile['syncRef']}\n")
+          PY
+
+  live-product:
+    needs: contract
+    if: ${{ inputs.live_e2e }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      SYNC_FLEET_TOKEN: ${{ secrets.SYNC_FLEET_TOKEN }}
+      PROFILE_PATH: ${{ inputs.profile_path }}
+      PRODUCT_TEST_PATH: ${{ inputs.product_test_path }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Require private fleet read credentials
+        shell: bash
+        run: test -n "$SYNC_FLEET_TOKEN"
+      - name: Resolve wrapper ref
+        id: wrapper
+        shell: bash
+        env:
+          REQUESTED_REF: ${{ inputs.wrapper_ref }}
+          PROFILE_REF: ${{ needs.contract.outputs.sync_ref }}
+        run: |
+          set -euo pipefail
+          ref="${REQUESTED_REF:-$PROFILE_REF}"
+          test -n "$ref"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: ${{ needs.contract.outputs.sync_repository }}
+          ref: ${{ steps.wrapper.outputs.ref }}
+          path: wrapper
+          token: ${{ secrets.SYNC_FLEET_TOKEN }}
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.ZED_CLI_SHA }}
+          path: .tools/zed-cli
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: zed-pkg/zed-interfaces
+          ref: ${{ env.ZED_INTERFACES_SHA }}
+          path: .tools/zed-interfaces
+          persist-credentials: false
+      - name: Build pinned Zed CLI
+        run: cargo build --locked --release --manifest-path .tools/zed-cli/Cargo.toml --bin zed
+      - name: Frozen-install and run native, browser, and product tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          zed="$GITHUB_WORKSPACE/.tools/zed-cli/target/release/zed"
+          (cd wrapper && "$zed" install --frozen --install-mode copy)
+          python3 - <<'PY'
+          import pathlib, re, tomllib
+          lock = tomllib.loads(pathlib.Path('wrapper/.zpkg.lock').read_text())
+          package = next(
+              p for p in lock.get('package', [])
+              if p.get('org') == 'opto-sync' and p.get('name') == 'opto-sync-clients'
+          )
+          assert re.fullmatch(r'[0-9a-f]{64}', package['sha256'])
+          assert package['size'] > 0 and package['format'] and package['vcs_tag'] and package['source']
+          assert re.fullmatch(r'[0-9a-f]{40}', package['vcs_commit'])
+          PY
+          client="$GITHUB_WORKSPACE/wrapper/zed_modules/opto-sync/opto-sync-clients/clients/ts"
+          cd "$client"
+          npm ci
+          npm run build
+          npm run test:node
+          npx playwright install --with-deps chromium
+          OPTO_SYNC_REQUIRE_BROWSER=1 npm run test:browser
+          cp "$GITHUB_WORKSPACE/$PRODUCT_TEST_PATH" test/downstream-product.e2e.test.mjs
+          OPTO_SYNC_PROFILE="$GITHUB_WORKSPACE/$PROFILE_PATH" \
+            node --test test/downstream-product.e2e.test.mjs
