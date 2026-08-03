@@ -4,7 +4,6 @@ import copy
 import hashlib
 import importlib.util
 import json
-import os
 import shutil
 import stat
 import subprocess
@@ -17,7 +16,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 MANIFEST = ROOT / "operations/downstream-wrapper-fleet.v1.json"
-GENERATOR_PATH = ROOT / "scripts/render-missing-e2e-repository.py"
+GENERATOR_PATH = ROOT / "scripts/render-missing-e2e-starter.py"
 ARCHIVE_PATH = ROOT / "scripts/render-missing-e2e-archive.py"
 
 
@@ -29,7 +28,7 @@ def load_module(name: str, path: Path):
     return module
 
 
-GENERATOR = load_module("missing_e2e_generator_tests", GENERATOR_PATH)
+GENERATOR = load_module("missing_e2e_starter_tests", GENERATOR_PATH)
 ARCHIVE = load_module("missing_e2e_archive_tests", ARCHIVE_PATH)
 REPOSITORIES = (
     "akrion-sim/akrion-sim-e2e",
