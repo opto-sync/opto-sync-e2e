@@ -1,0 +1,131 @@
+name: downstream wrapper pull request audit
+
+on:
+  pull_request:
+    paths:
+      - 'operations/downstream-wrapper-fleet.v1.json'
+      - 'scripts/check-downstream-wrapper-fleet.py'
+      - 'scripts/audit-downstream-wrapper-prs.py'
+      - 'suite/operations/test_downstream_wrapper_pr_audit.py'
+      - '.github/workflows/downstream-wrapper-pr-audit.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'operations/downstream-wrapper-fleet.v1.json'
+      - 'scripts/check-downstream-wrapper-fleet.py'
+      - 'scripts/audit-downstream-wrapper-prs.py'
+      - 'suite/operations/test_downstream_wrapper_pr_audit.py'
+      - '.github/workflows/downstream-wrapper-pr-audit.yml'
+  workflow_dispatch:
+    inputs:
+      live_audit:
+        description: Query actual wrapper and E2E pull requests using SYNC_FLEET_TOKEN
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static-contract:
+    name: Mocked and adversarial PR audit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout audit controller
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Compile the read-only audit and run unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile \
+            scripts/check-downstream-wrapper-fleet.py \
+            scripts/audit-downstream-wrapper-prs.py
+          python3 -m unittest suite.operations.test_downstream_wrapper_pr_audit -v
+
+      - name: Render deterministic read-only audit plan
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p audit-plan/a audit-plan/b
+          python3 scripts/audit-downstream-wrapper-prs.py plan \
+            --output audit-plan/a/plan.json
+          python3 scripts/audit-downstream-wrapper-prs.py plan \
+            --output audit-plan/b/plan.json
+          cmp audit-plan/a/plan.json audit-plan/b/plan.json
+          python3 - <<'PY'
+          import json
+          plan = json.load(open('audit-plan/a/plan.json'))
+          assert plan['readOnly'] is True
+          assert plan['summary'] == {
+              'wrappers': 17,
+              'existingE2e': 15,
+              'provisioningRequired': 2,
+          }
+          PY
+
+  live-audit:
+    name: Verify actual GitHub PR and provisioning state
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.live_audit }}
+    needs:
+      - static-contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SYNC_FLEET_TOKEN: ${{ secrets.SYNC_FLEET_TOKEN }}
+    steps:
+      - name: Checkout audit controller
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Run bounded read-only GitHub audit
+        id: audit
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/audit-downstream-wrapper-prs.py audit \
+            --output downstream-wrapper-pr-audit.json
+
+      - name: Upload bounded audit summary
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: downstream-wrapper-pr-audit
+          path: downstream-wrapper-pr-audit.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Fail when live metadata differs from the reviewed inventory
+        if: always()
+        shell: bash
+        env:
+          AUDIT_OUTCOME: ${{ steps.audit.outcome }}
+        run: |
+          set -euo pipefail
+          test "$AUDIT_OUTCOME" = success || {
+            echo 'Live wrapper PR audit failed; inspect the bounded JSON artifact.' >&2
+            exit 1
+          }
+          python3 - <<'PY'
+          import json
+          report = json.load(open('downstream-wrapper-pr-audit.json'))
+          assert report['readOnly'] is True
+          assert report['summary']['entries'] == 34
+          assert report['summary']['failed'] == 0
+          assert report['summary']['counts'] == {
+              'e2e': 15,
+              'provisioning_gap': 2,
+              'wrapper': 17,
+          }
+          PY
