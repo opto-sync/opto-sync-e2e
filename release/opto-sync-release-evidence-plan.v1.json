@@ -50,7 +50,9 @@
     "zedInterfacesSha": "415e871b1fb3dd97744c134351408a3224805dfb"
   },
   "evidenceRequirements": {
+    "packFromUntouchedCheckouts": true,
     "packTwiceAndCompare": true,
+    "rejectGeneratedTestBinaries": true,
     "verifyRecursiveCoreParity": true,
     "runSourcePackageChecks": true,
     "runPublishDryRuns": true,
