@@ -3,7 +3,7 @@
   "releaseSet": {
     "id": "opto-sync-2026-07-31-suite-certified-candidate",
     "status": "candidate",
-    "createdAt": "2026-08-03T03:19:59Z"
+    "createdAt": "2026-08-03T04:04:51.993239Z"
   },
   "packages": {
     "syncer": {
@@ -38,52 +38,53 @@
     }
   },
   "certification": {
+    "packagingMethod": "independent_untouched_checkouts_before_build",
     "requiredRuns": [
       {
         "repository": "opto-sync/syncer.c",
         "workflowRepository": "opto-sync/opto-sync-e2e",
         "workflow": "Coordinated deterministic release evidence",
-        "runId": 30781413337,
+        "runId": 30783265479,
         "runAttempt": 1,
         "conclusion": "success",
-        "headSha": "cd72ff21fabb4a5b75ce0a86552277dcafd9395e",
-        "workflowSha": "06671cb057efba03fff05aacfeef4ea8c2d367f6",
+        "headSha": "af21090b152482694b74e7701a97766c9b70a5ff",
+        "workflowSha": "986366b6fb326b174cd9e147d1184fd988903966",
         "testedSha": "8d2b275a89062403666f4bdf196d246a07c84484",
-        "evidenceArtifact": "opto-sync-coordinated-release-evidence",
-        "evidenceArtifactId": 8843820571,
-        "evidenceArtifactDigest": "sha256:c61cc2b80638f4f4628027af6037c3ce179f572fa8587c69cde0ce3ad1226d2a"
+        "evidenceArtifact": "opto-sync-clean-source-release-evidence",
+        "evidenceArtifactId": 8844418512,
+        "evidenceArtifactDigest": "sha256:71c89a2c0672156839ec7a472ca4d8fad770563f27f6f71fe5ea5b91a1963257"
       },
       {
         "repository": "opto-sync/opto-sync-clients",
         "workflowRepository": "opto-sync/opto-sync-e2e",
         "workflow": "Coordinated deterministic release evidence",
-        "runId": 30781413337,
+        "runId": 30783265479,
         "runAttempt": 1,
         "conclusion": "success",
-        "headSha": "cd72ff21fabb4a5b75ce0a86552277dcafd9395e",
-        "workflowSha": "06671cb057efba03fff05aacfeef4ea8c2d367f6",
+        "headSha": "af21090b152482694b74e7701a97766c9b70a5ff",
+        "workflowSha": "986366b6fb326b174cd9e147d1184fd988903966",
         "testedSha": "38f0fcc6a471455a0a20aec5f7fa63d3f70d5f89",
-        "evidenceArtifact": "opto-sync-coordinated-release-evidence",
-        "evidenceArtifactId": 8843820571,
-        "evidenceArtifactDigest": "sha256:c61cc2b80638f4f4628027af6037c3ce179f572fa8587c69cde0ce3ad1226d2a"
+        "evidenceArtifact": "opto-sync-clean-source-release-evidence",
+        "evidenceArtifactId": 8844418512,
+        "evidenceArtifactDigest": "sha256:71c89a2c0672156839ec7a472ca4d8fad770563f27f6f71fe5ea5b91a1963257"
       },
       {
         "repository": "opto-sync/opto-sync-e2e",
         "workflowRepository": "opto-sync/opto-sync-e2e",
         "workflow": "Coordinated deterministic release evidence",
-        "runId": 30781413337,
+        "runId": 30783265479,
         "runAttempt": 1,
         "conclusion": "success",
-        "headSha": "cd72ff21fabb4a5b75ce0a86552277dcafd9395e",
-        "workflowSha": "06671cb057efba03fff05aacfeef4ea8c2d367f6",
+        "headSha": "af21090b152482694b74e7701a97766c9b70a5ff",
+        "workflowSha": "986366b6fb326b174cd9e147d1184fd988903966",
         "testedSha": "562e3f62645252ed79328b7ac30ce404ceb5fc92",
-        "evidenceArtifact": "opto-sync-coordinated-release-evidence",
-        "evidenceArtifactId": 8843820571,
-        "evidenceArtifactDigest": "sha256:c61cc2b80638f4f4628027af6037c3ce179f572fa8587c69cde0ce3ad1226d2a"
+        "evidenceArtifact": "opto-sync-clean-source-release-evidence",
+        "evidenceArtifactId": 8844418512,
+        "evidenceArtifactDigest": "sha256:71c89a2c0672156839ec7a472ca4d8fad770563f27f6f71fe5ea5b91a1963257"
       }
     ],
     "artifactChecksums": {
-      "syncer": "b264be9ac8325e231e8bd2c98af5711f0c6c49934fb203178368490fe2f81c2c",
+      "syncer": "444d57c04f80a910e418dec02ebaab1032f4e72fcaf43c1ed1c15d08d7aa163b",
       "clients": "0719690cbadec372ec1dad95ca91b1cb6ec8ec9d2a8caf1e9551e3396fcaba14",
       "e2e": "f88f128a221ce7cbcc08c521393cf9ada7bf6315b009e704617dd1a636ee1180"
     },
@@ -92,9 +93,9 @@
         "source": "syncer",
         "filename": "opto-sync-syncer-0.2.1.tar.gz",
         "canonical": true,
-        "sha256": "b264be9ac8325e231e8bd2c98af5711f0c6c49934fb203178368490fe2f81c2c",
-        "size": 5775114,
-        "fileCount": 221
+        "sha256": "444d57c04f80a910e418dec02ebaab1032f4e72fcaf43c1ed1c15d08d7aa163b",
+        "size": 554540,
+        "fileCount": 217
       },
       {
         "source": "syncer",
