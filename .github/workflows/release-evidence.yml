@@ -6,6 +6,7 @@ on:
       - 'release/opto-sync-release-evidence-plan.v1.json'
       - 'release/ROLLBACK.md'
       - 'scripts/generate-release-evidence.py'
+      - 'scripts/check-clean-release-archives.py'
       - '.github/workflows/release-evidence.yml'
   workflow_dispatch:
 
@@ -34,49 +35,85 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Validate plan, rollback, and generator syntax
+      - name: Validate plan, rollback, and evidence scripts
         shell: bash
         run: |
           set -euo pipefail
-          python3 -m py_compile scripts/generate-release-evidence.py
+          python3 -m py_compile \
+            scripts/generate-release-evidence.py \
+            scripts/check-clean-release-archives.py
           python3 scripts/generate-release-evidence.py validate-plan
+          python3 - <<'PY'
+          import json
+          plan = json.load(open('release/opto-sync-release-evidence-plan.v1.json'))
+          requirements = plan['evidenceRequirements']
+          assert requirements['packFromUntouchedCheckouts'] is True
+          assert requirements['packTwiceAndCompare'] is True
+          assert requirements['rejectGeneratedTestBinaries'] is True
+          assert requirements['publishArtifacts'] is False
+          PY
           grep -F 'Never overwrite' release/ROLLBACK.md
           grep -F 'Never roll back only' release/ROLLBACK.md
 
   evidence:
-    name: Pack exact sources twice and record provenance
+    name: Pack independent untouched checkouts and record provenance
     needs: contract
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - name: Checkout evidence controller
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
 
-      - name: Checkout exact syncer source
+      - name: Checkout untouched syncer source A
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: opto-sync/syncer.c
           ref: ${{ env.SYNCER_SHA }}
-          path: sources/syncer
+          path: package-a/syncer
           persist-credentials: false
 
-      - name: Checkout exact clients source and embedded core
+      - name: Checkout untouched clients source A and embedded core
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: opto-sync/opto-sync-clients
           ref: ${{ env.CLIENTS_SHA }}
-          path: sources/clients
+          path: package-a/clients
           submodules: recursive
           persist-credentials: false
 
-      - name: Checkout exact corrected E2E package source
+      - name: Checkout untouched E2E source A
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: opto-sync/opto-sync-e2e
           ref: ${{ env.E2E_SHA }}
-          path: sources/e2e
+          path: package-a/e2e
+          persist-credentials: false
+
+      - name: Checkout independent untouched syncer source B
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: opto-sync/syncer.c
+          ref: ${{ env.SYNCER_SHA }}
+          path: package-b/syncer
+          persist-credentials: false
+
+      - name: Checkout independent untouched clients source B and embedded core
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: opto-sync/opto-sync-clients
+          ref: ${{ env.CLIENTS_SHA }}
+          path: package-b/clients
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Checkout independent untouched E2E source B
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: opto-sync/opto-sync-e2e
+          ref: ${{ env.E2E_SHA }}
+          path: package-b/e2e
           persist-credentials: false
 
       - name: Checkout pinned Zed CLI
@@ -95,45 +132,31 @@ jobs:
           path: .tools/zed-interfaces
           persist-credentials: false
 
-      - name: Prove source identity and recursive core parity before builds
+      - name: Prove both package source sets are exact and untouched
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C sources/syncer rev-parse HEAD)" = "$SYNCER_SHA"
-          test "$(git -C sources/clients rev-parse HEAD)" = "$CLIENTS_SHA"
-          test "$(git -C sources/e2e rev-parse HEAD)" = "$E2E_SHA"
-          test "$(git -C sources/clients rev-parse HEAD:syncer.c)" = "$SYNCER_SHA"
-          test "$(git -C sources/clients/syncer.c rev-parse HEAD)" = "$SYNCER_SHA"
-          grep -F "$SYNCER_SHA" sources/e2e/.github/workflows/e2e-docker.yml
-          grep -F "$CLIENTS_SHA" sources/e2e/.github/workflows/e2e-docker.yml
-          grep -F "$SYNCER_SHA" sources/e2e/.github/workflows/e2e-clients.yml
-          grep -F "$CLIENTS_SHA" sources/e2e/.github/workflows/e2e-clients.yml
+          for root in package-a package-b; do
+            test "$(git -C "$root/syncer" rev-parse HEAD)" = "$SYNCER_SHA"
+            test "$(git -C "$root/clients" rev-parse HEAD)" = "$CLIENTS_SHA"
+            test "$(git -C "$root/e2e" rev-parse HEAD)" = "$E2E_SHA"
+            test "$(git -C "$root/clients" rev-parse HEAD:syncer.c)" = "$SYNCER_SHA"
+            test "$(git -C "$root/clients/syncer.c" rev-parse HEAD)" = "$SYNCER_SHA"
+            test -z "$(git -C "$root/syncer" status --porcelain --untracked-files=all)"
+            test -z "$(git -C "$root/clients" status --porcelain --untracked-files=all)"
+            test -z "$(git -C "$root/clients/syncer.c" status --porcelain --untracked-files=all)"
+            test -z "$(git -C "$root/e2e" status --porcelain --untracked-files=all)"
+          done
+          grep -F "$SYNCER_SHA" package-a/e2e/.github/workflows/e2e-docker.yml
+          grep -F "$CLIENTS_SHA" package-a/e2e/.github/workflows/e2e-docker.yml
+          grep -F "$SYNCER_SHA" package-a/e2e/.github/workflows/e2e-clients.yml
+          grep -F "$CLIENTS_SHA" package-a/e2e/.github/workflows/e2e-clients.yml
           python3 scripts/generate-release-evidence.py validate-plan
-
-      - name: Run source-owned package and safety checks
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 sources/syncer/scripts/check-release-version.py
-          make -C sources/syncer/core
-          make -C sources/syncer/core sanitize
-
-          python3 sources/clients/scripts/check-dependency-boundary.py
-          python3 sources/clients/scripts/check-package-layout.py
-          python3 sources/clients/scripts/check-zed-packaging.py
-
-          (
-            cd sources/e2e
-            python3 scripts/check-zed-package.py
-            test -f .env || cp .env.example .env
-            docker compose config --quiet
-            docker compose -f docker-compose.yml -f docker-compose.supabase.yml config --quiet
-          )
 
       - name: Build the exact Zed packer
         run: cargo build --locked --release --manifest-path .tools/zed-cli/Cargo.toml --bin zed
 
-      - name: Pack every exact source twice and compare bytes
+      - name: Pack both untouched source sets before running any build
         shell: bash
         run: |
           set -euo pipefail
@@ -143,10 +166,8 @@ jobs:
           mkdir -p "$first" "$second"
 
           for source in syncer clients e2e; do
-            (cd "sources/$source" && "$zed" pack --out "$first")
-            rm -rf "sources/$source/.zed"
-            (cd "sources/$source" && "$zed" pack --out "$second")
-            rm -rf "sources/$source/.zed"
+            (cd "package-a/$source" && "$zed" pack --out "$first")
+            (cd "package-b/$source" && "$zed" pack --out "$second")
           done
 
           expected=(
@@ -165,8 +186,46 @@ jobs:
             sha256sum "$first/$archive" "$second/$archive"
           done
 
+          python3 scripts/check-clean-release-archives.py --archive-root "$first"
+          python3 scripts/check-clean-release-archives.py --archive-root "$second"
+
           mkdir -p release-evidence/archives
           cp "$first"/*.tar.gz release-evidence/archives/
+
+      - name: Run non-mutating publication preflight from the untouched B sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          zed="$GITHUB_WORKSPACE/.tools/zed-cli/target/release/zed"
+          for source in syncer clients e2e; do
+            (
+              cd "package-b/$source"
+              "$zed" publish --dry-run --allow-dirty --skip-vcs-checks
+            ) | tee "$RUNNER_TEMP/$source-publish-dry-run.txt"
+          done
+          grep -F 'opto-sync/syncer@0.2.1' "$RUNNER_TEMP/syncer-publish-dry-run.txt"
+          grep -F 'opto-sync/opto-sync-clients@0.2.0' "$RUNNER_TEMP/clients-publish-dry-run.txt"
+          grep -F 'opto-sync/opto-sync-e2e@0.1.0' "$RUNNER_TEMP/e2e-publish-dry-run.txt"
+
+      - name: Run source-owned checks only after the immutable archives exist
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 package-a/syncer/scripts/check-release-version.py
+          make -C package-a/syncer/core
+          make -C package-a/syncer/core sanitize
+
+          python3 package-a/clients/scripts/check-dependency-boundary.py
+          python3 package-a/clients/scripts/check-package-layout.py
+          python3 package-a/clients/scripts/check-zed-packaging.py
+
+          (
+            cd package-a/e2e
+            python3 scripts/check-zed-package.py
+            test -f .env || cp .env.example .env
+            docker compose config --quiet
+            docker compose -f docker-compose.yml -f docker-compose.supabase.yml config --quiet
+          )
 
       - name: Execute extracted package smoke contracts
         shell: bash
@@ -181,46 +240,33 @@ jobs:
           tar -xzf release-evidence/archives/opto-sync-opto-sync-clients-0.2.0.tar.gz -C "$root/clients"
           tar -xzf release-evidence/archives/opto-sync-opto-sync-e2e-0.1.0.tar.gz -C "$root/e2e"
 
-          sh sources/syncer/scripts/zpkg-smoke.sh "$root/syncer/pkg"
-          sh sources/syncer/scripts/zpkg-smoke.sh "$root/syncer-c/pkg"
-          node sources/syncer/scripts/zpkg-wasm-smoke.mjs "$root/syncer-wasm/pkg"
+          sh package-a/syncer/scripts/zpkg-smoke.sh "$root/syncer/pkg"
+          sh package-a/syncer/scripts/zpkg-smoke.sh "$root/syncer-c/pkg"
+          node package-a/syncer/scripts/zpkg-wasm-smoke.mjs "$root/syncer-wasm/pkg"
           python3 "$root/clients/pkg/scripts/check-package-layout.py" "$root/clients/pkg"
           python3 "$root/clients/pkg/scripts/check-zed-packaging.py" "$root/clients/pkg"
-          python3 sources/e2e/scripts/check-zed-package.py "$root/e2e/pkg"
+          python3 package-a/e2e/scripts/check-zed-package.py "$root/e2e/pkg"
           cp "$root/e2e/pkg/.env.example" "$root/e2e/pkg/.env"
           (cd "$root/e2e/pkg" && docker compose config --quiet)
 
-      - name: Run non-mutating publication preflight for every source
-        shell: bash
-        run: |
-          set -euo pipefail
-          zed="$GITHUB_WORKSPACE/.tools/zed-cli/target/release/zed"
-          for source in syncer clients e2e; do
-            (
-              cd "sources/$source"
-              "$zed" publish --dry-run --allow-dirty --skip-vcs-checks
-            ) | tee "$RUNNER_TEMP/$source-publish-dry-run.txt"
-          done
-          grep -F 'opto-sync/syncer@0.2.1' "$RUNNER_TEMP/syncer-publish-dry-run.txt"
-          grep -F 'opto-sync/opto-sync-clients@0.2.0' "$RUNNER_TEMP/clients-publish-dry-run.txt"
-          grep -F 'opto-sync/opto-sync-e2e@0.1.0' "$RUNNER_TEMP/e2e-publish-dry-run.txt"
-
-      - name: Generate machine-readable checksums and source evidence
+      - name: Generate machine-readable clean-source checksums and provenance
         shell: bash
         run: |
           set -euo pipefail
           python3 scripts/generate-release-evidence.py generate \
-            --syncer-dir sources/syncer \
-            --clients-dir sources/clients \
-            --e2e-dir sources/e2e \
+            --syncer-dir package-a/syncer \
+            --clients-dir package-a/clients \
+            --e2e-dir package-a/e2e \
             --archive-root release-evidence/archives \
             --output release-evidence/evidence.json
+          python3 scripts/check-clean-release-archives.py \
+            --archive-root release-evidence/archives
           cat release-evidence/evidence.json
 
-      - name: Upload immutable candidate evidence
+      - name: Upload immutable clean-source candidate evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: opto-sync-coordinated-release-evidence
+          name: opto-sync-clean-source-release-evidence
           path: release-evidence/
           if-no-files-found: error
           retention-days: 30
