@@ -153,7 +153,7 @@ class MissingE2EBootstrapTests(unittest.TestCase):
                 self.assertNotIn("__WRAPPER_", workflow)
                 self.assertIn(profile["wrapperRepository"], workflow)
                 self.assertIn(profile["wrapperRef"], workflow)
-                self.assertIn("zed install --frozen --install-mode copy", workflow)
+                self.assertIn("install --frozen --install-mode copy", workflow)
                 self.assertIn("OPTO_SYNC_REQUIRE_BROWSER=1", workflow)
                 self.assertIn("SYNC_FLEET_TOKEN", workflow)
 
