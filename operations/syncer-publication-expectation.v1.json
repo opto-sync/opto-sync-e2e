@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "ownerIssue": "DEN-1584",
+  "repository": "opto-sync/syncer.c",
+  "activationPullRequest": 20,
+  "activationMergeSha": "39aa65805dde93f29945e29cf66b830e0b55868a",
+  "activationFile": "release/zed-publication-activation.v1.json",
+  "tag": "v0.2.1",
+  "version": "0.2.1",
+  "targetSha": "8d2b275a89062403666f4bdf196d246a07c84484",
+  "targetTreeSha": "8935c7ce94657a68ad22829f3dcbd299fafddb93",
+  "trustedWorkflow": {
+    "name": "Approved Zed release activation",
+    "path": ".github/workflows/approved-zed-release-activation.yml",
+    "event": "pull_request_target",
+    "actor": "ORESoftware"
+  },
+  "expectedArtifact": {
+    "name": "published-syncer-v0.2.1-locks",
+    "lockFiles": [
+      "syncer.zpkg.lock",
+      "syncer-c.zpkg.lock",
+      "syncer-wasm.zpkg.lock"
+    ]
+  },
+  "registrySource": "https://registry.zpkg.tech",
+  "packages": [
+    {
+      "org": "opto-sync",
+      "name": "syncer",
+      "version": "0.2.1",
+      "sha256": "444d57c04f80a910e418dec02ebaab1032f4e72fcaf43c1ed1c15d08d7aa163b",
+      "size": 554540,
+      "format": "tar.gz",
+      "vcsTag": "v0.2.1",
+      "vcsCommit": "8d2b275a89062403666f4bdf196d246a07c84484",
+      "lockFile": "syncer.zpkg.lock"
+    },
+    {
+      "org": "opto-sync",
+      "name": "syncer-c",
+      "version": "0.2.1",
+      "sha256": "9a65dc901c89e95175b03263efa61cd6d990e42b05bb34a8ec847cab6dcb9b3d",
+      "size": 138264,
+      "format": "tar.gz",
+      "vcsTag": "v0.2.1",
+      "vcsCommit": "8d2b275a89062403666f4bdf196d246a07c84484",
+      "lockFile": "syncer-c.zpkg.lock"
+    },
+    {
+      "org": "opto-sync",
+      "name": "syncer-wasm",
+      "version": "0.2.1",
+      "sha256": "ae458615cc05635d58cb400a4e187186b7685c73cd81e1fef42bbb9a64226f03",
+      "size": 142226,
+      "format": "tar.gz",
+      "vcsTag": "v0.2.1",
+      "vcsCommit": "8d2b275a89062403666f4bdf196d246a07c84484",
+      "lockFile": "syncer-wasm.zpkg.lock"
+    }
+  ],
+  "releaseStateRules": {
+    "activationMergeIsNotPublication": true,
+    "tagMustResolveTargetSha": true,
+    "trustedRunMustSucceed": true,
+    "artifactMustExistAndNotBeExpired": true,
+    "artifactDigestMustBePresent": true,
+    "allLocksMustMatch": true,
+    "conflictingIdentityFailsClosed": true
+  }
+}
