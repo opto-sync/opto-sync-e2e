@@ -1,69 +1,145 @@
 {
   "schemaVersion": 1,
   "releaseSet": {
-    "id": "opto-sync-2026-07-27-certified-candidate",
+    "id": "opto-sync-2026-07-31-suite-certified-candidate",
     "status": "candidate",
-    "createdAt": "2026-07-27T00:00:00Z"
+    "createdAt": "2026-08-03T03:19:59Z"
   },
   "packages": {
     "syncer": {
       "repository": "opto-sync/syncer.c",
-      "sha": "7795ce2d1342e17d934d2faafff5c8ed4322609e",
+      "sha": "8d2b275a89062403666f4bdf196d246a07c84484",
+      "treeSha": "8935c7ce94657a68ad22829f3dcbd299fafddb93",
       "tag": "v0.2.1",
       "version": "0.2.1",
-      "zedPackage": "opto-sync/syncer"
+      "zedPackage": "opto-sync/syncer",
+      "canonicalArchive": "opto-sync-syncer-0.2.1.tar.gz"
     },
     "clients": {
       "repository": "opto-sync/opto-sync-clients",
-      "sha": "54874e9f7df6009fccd9034fce39306daef2c043",
+      "sha": "38f0fcc6a471455a0a20aec5f7fa63d3f70d5f89",
+      "treeSha": "c89cc0e08ab156bcdf9487a7c2f0515d6c88c865",
       "tag": "v0.2.0",
       "version": "0.2.0",
       "zedPackage": "opto-sync/opto-sync-clients",
-      "embeddedSyncerSha": "7795ce2d1342e17d934d2faafff5c8ed4322609e"
+      "canonicalArchive": "opto-sync-opto-sync-clients-0.2.0.tar.gz",
+      "embeddedSyncerSha": "8d2b275a89062403666f4bdf196d246a07c84484"
     },
     "e2e": {
       "repository": "opto-sync/opto-sync-e2e",
-      "sha": "1d47bd46cf3785416295daf6af84afb8053f1cfd",
+      "sha": "562e3f62645252ed79328b7ac30ce404ceb5fc92",
+      "treeSha": "3ef8320a00b3b382ea8b5153e6615eff6f0efc5a",
       "tag": "v0.1.0",
       "version": "0.1.0",
       "zedPackage": "opto-sync/opto-sync-e2e",
-      "pinnedSyncerSha": "7795ce2d1342e17d934d2faafff5c8ed4322609e",
-      "pinnedClientsSha": "54874e9f7df6009fccd9034fce39306daef2c043"
+      "canonicalArchive": "opto-sync-opto-sync-e2e-0.1.0.tar.gz",
+      "pinnedSyncerSha": "8d2b275a89062403666f4bdf196d246a07c84484",
+      "pinnedClientsSha": "38f0fcc6a471455a0a20aec5f7fa63d3f70d5f89"
     }
   },
   "certification": {
     "requiredRuns": [
       {
         "repository": "opto-sync/syncer.c",
-        "workflow": "CI and Zed package contract",
-        "runId": 30242208216,
+        "workflowRepository": "opto-sync/opto-sync-e2e",
+        "workflow": "Coordinated deterministic release evidence",
+        "runId": 30781413337,
+        "runAttempt": 1,
         "conclusion": "success",
-        "headSha": "f6a56d070779404acf188ffac766e39741a15466"
+        "headSha": "cd72ff21fabb4a5b75ce0a86552277dcafd9395e",
+        "workflowSha": "06671cb057efba03fff05aacfeef4ea8c2d367f6",
+        "testedSha": "8d2b275a89062403666f4bdf196d246a07c84484",
+        "evidenceArtifact": "opto-sync-coordinated-release-evidence",
+        "evidenceArtifactId": 8843820571,
+        "evidenceArtifactDigest": "sha256:c61cc2b80638f4f4628027af6037c3ce179f572fa8587c69cde0ce3ad1226d2a"
       },
       {
         "repository": "opto-sync/opto-sync-clients",
-        "workflow": "CI and Zed package contract",
-        "runId": 30265301843,
+        "workflowRepository": "opto-sync/opto-sync-e2e",
+        "workflow": "Coordinated deterministic release evidence",
+        "runId": 30781413337,
+        "runAttempt": 1,
         "conclusion": "success",
-        "headSha": "5bda7d35675aa29e1204df357808caa703cf35a8"
+        "headSha": "cd72ff21fabb4a5b75ce0a86552277dcafd9395e",
+        "workflowSha": "06671cb057efba03fff05aacfeef4ea8c2d367f6",
+        "testedSha": "38f0fcc6a471455a0a20aec5f7fa63d3f70d5f89",
+        "evidenceArtifact": "opto-sync-coordinated-release-evidence",
+        "evidenceArtifactId": 8843820571,
+        "evidenceArtifactDigest": "sha256:c61cc2b80638f4f4628027af6037c3ce179f572fa8587c69cde0ce3ad1226d2a"
       },
       {
         "repository": "opto-sync/opto-sync-e2e",
-        "workflow": "Docker and client-in-the-loop certification",
-        "runId": 30265770126,
+        "workflowRepository": "opto-sync/opto-sync-e2e",
+        "workflow": "Coordinated deterministic release evidence",
+        "runId": 30781413337,
+        "runAttempt": 1,
         "conclusion": "success",
-        "headSha": "babb6ae1200dd83f091f38fe891bf126835effb0"
+        "headSha": "cd72ff21fabb4a5b75ce0a86552277dcafd9395e",
+        "workflowSha": "06671cb057efba03fff05aacfeef4ea8c2d367f6",
+        "testedSha": "562e3f62645252ed79328b7ac30ce404ceb5fc92",
+        "evidenceArtifact": "opto-sync-coordinated-release-evidence",
+        "evidenceArtifactId": 8843820571,
+        "evidenceArtifactDigest": "sha256:c61cc2b80638f4f4628027af6037c3ce179f572fa8587c69cde0ce3ad1226d2a"
       }
     ],
     "artifactChecksums": {
-      "syncer": "0000000000000000000000000000000000000000000000000000000000000000",
-      "clients": "0000000000000000000000000000000000000000000000000000000000000000",
-      "e2e": "0000000000000000000000000000000000000000000000000000000000000000"
-    }
+      "syncer": "b264be9ac8325e231e8bd2c98af5711f0c6c49934fb203178368490fe2f81c2c",
+      "clients": "0719690cbadec372ec1dad95ca91b1cb6ec8ec9d2a8caf1e9551e3396fcaba14",
+      "e2e": "f88f128a221ce7cbcc08c521393cf9ada7bf6315b009e704617dd1a636ee1180"
+    },
+    "artifactFiles": [
+      {
+        "source": "syncer",
+        "filename": "opto-sync-syncer-0.2.1.tar.gz",
+        "canonical": true,
+        "sha256": "b264be9ac8325e231e8bd2c98af5711f0c6c49934fb203178368490fe2f81c2c",
+        "size": 5775114,
+        "fileCount": 221
+      },
+      {
+        "source": "syncer",
+        "filename": "opto-sync-syncer-c-0.2.1.tar.gz",
+        "canonical": false,
+        "sha256": "9a65dc901c89e95175b03263efa61cd6d990e42b05bb34a8ec847cab6dcb9b3d",
+        "size": 138264,
+        "fileCount": 9
+      },
+      {
+        "source": "syncer",
+        "filename": "opto-sync-syncer-wasm-0.2.1.tar.gz",
+        "canonical": false,
+        "sha256": "ae458615cc05635d58cb400a4e187186b7685c73cd81e1fef42bbb9a64226f03",
+        "size": 142226,
+        "fileCount": 15
+      },
+      {
+        "source": "clients",
+        "filename": "opto-sync-opto-sync-clients-0.2.0.tar.gz",
+        "canonical": true,
+        "sha256": "0719690cbadec372ec1dad95ca91b1cb6ec8ec9d2a8caf1e9551e3396fcaba14",
+        "size": 858022,
+        "fileCount": 378
+      },
+      {
+        "source": "e2e",
+        "filename": "opto-sync-opto-sync-e2e-0.1.0.tar.gz",
+        "canonical": true,
+        "sha256": "f88f128a221ce7cbcc08c521393cf9ada7bf6315b009e704617dd1a636ee1180",
+        "size": 308386,
+        "fileCount": 143
+      }
+    ],
+    "tooling": {
+      "zedCliRepository": "zed-pkg/zed-cli",
+      "zedCliSha": "c636fb8f6b08695c6b4fe94e2481f4d57270b2d7",
+      "zedInterfacesRepository": "zed-pkg/zed-interfaces",
+      "zedInterfacesSha": "415e871b1fb3dd97744c134351408a3224805dfb"
+    },
+    "publicationPerformed": false
   },
   "rollback": {
-    "owner": "REQUIRED_BEFORE_APPROVAL",
-    "procedure": "REQUIRED_BEFORE_APPROVAL",
-    "partialReleasePolicy": "Stop publication, do not replace immutable versions, and follow the documented deprecation/yank procedure before resuming."
+    "owner": "Opto-Sync maintainers; the protected release approver is incident commander",
+    "procedure": "release/ROLLBACK.md",
+    "partialReleasePolicy": "Never overwrite or retag an immutable version; stop publication, deprecate or yank only through reviewed controls, and roll consumers back as one core-plus-clients release set."
   }
 }
