@@ -8,6 +8,11 @@ on:
         required: false
         default: tests/opto-sync-wrapper/profile.json
         type: string
+      product_test_path:
+        description: Product-specific Opto-Sync E2E test in the caller repository
+        required: false
+        default: tests/opto-sync-wrapper/product.e2e.test.mjs
+        type: string
       live_e2e:
         description: Run frozen package, native, real-browser, and downstream chaos tests
         required: false
@@ -58,10 +63,12 @@ jobs:
         shell: bash
         env:
           PROFILE_PATH: ${{ inputs.profile_path }}
+          PRODUCT_TEST_PATH: ${{ inputs.product_test_path }}
           CHAOS_TEST_PATH: .opto-chaos/tests/downstream-chaos.e2e.test.mjs
         run: |
           set -euo pipefail
           node --check "$CHAOS_TEST_PATH"
+          node --check "$PRODUCT_TEST_PATH"
           python3 - <<'PY'
           import json, os, pathlib
           profile_path = pathlib.Path(os.environ['PROFILE_PATH'])
@@ -89,6 +96,7 @@ jobs:
     timeout-minutes: 40
     env:
       PROFILE_PATH: ${{ inputs.profile_path }}
+      PRODUCT_TEST_PATH: ${{ inputs.product_test_path }}
       CHAOS_TEST_PATH: .opto-chaos/tests/downstream-chaos.e2e.test.mjs
     steps:
       - name: Checkout caller repository
@@ -130,9 +138,13 @@ jobs:
           set -euo pipefail
           cp "$CHAOS_TEST_PATH" \
             opto-sync-clients/clients/ts/test/downstream-chaos.e2e.test.mjs
+          cp "downstream/$PRODUCT_TEST_PATH" \
+            opto-sync-clients/clients/ts/test/downstream-product.e2e.test.mjs
           cd opto-sync-clients/clients/ts
           OPTO_SYNC_PROFILE="$GITHUB_WORKSPACE/downstream/$PROFILE_PATH" \
-            node --test test/downstream-chaos.e2e.test.mjs
+            node --test \
+              test/downstream-chaos.e2e.test.mjs \
+              test/downstream-product.e2e.test.mjs
       - name: Run real Chrome two-tab Service Worker termination and restart E2E
         shell: bash
         run: |
@@ -149,6 +161,7 @@ jobs:
     env:
       SYNC_FLEET_TOKEN: ${{ secrets.SYNC_FLEET_TOKEN }}
       PROFILE_PATH: ${{ inputs.profile_path }}
+      PRODUCT_TEST_PATH: ${{ inputs.product_test_path }}
       CHAOS_TEST_PATH: .opto-chaos/tests/downstream-chaos.e2e.test.mjs
     steps:
       - name: Checkout caller repository
@@ -228,5 +241,8 @@ jobs:
           OPTO_SYNC_REQUIRE_BROWSER=1 npm run test:browser
           OPTO_SYNC_REQUIRE_BROWSER=1 npm run test:service-worker-browser
           cp "$GITHUB_WORKSPACE/$CHAOS_TEST_PATH" test/downstream-chaos.e2e.test.mjs
+          cp "$GITHUB_WORKSPACE/$PRODUCT_TEST_PATH" test/downstream-product.e2e.test.mjs
           OPTO_SYNC_PROFILE="$GITHUB_WORKSPACE/$PROFILE_PATH" \
-            node --test test/downstream-chaos.e2e.test.mjs
+            node --test \
+              test/downstream-chaos.e2e.test.mjs \
+              test/downstream-product.e2e.test.mjs
