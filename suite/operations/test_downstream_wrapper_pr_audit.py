@@ -15,6 +15,10 @@ assert SPEC and SPEC.loader
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 MANIFEST = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+PROVISIONED = {
+    "akrion-sim/akrion-sim-e2e",
+    "benefactor-cc/benefactor-e2e",
+}
 
 
 def pull(repository: str, number: int, branch: str) -> dict[str, Any]:
@@ -55,22 +59,14 @@ class FixtureClient:
             ] = changed_files(MODULE.WRAPPER_REQUIRED_FILES)
 
             e2e = wrapper["e2e"]
-            if e2e["status"] == "existing":
-                e2e_repository = e2e["repository"]
-                e2e_number = e2e["pullRequest"]
-                self.json_resources[
-                    MODULE.pull_resource(e2e_repository, e2e_number)
-                ] = pull(e2e_repository, e2e_number, e2e["branch"])
-                self.paginated_resources[
-                    MODULE.pull_files_resource(e2e_repository, e2e_number)
-                ] = changed_files(MODULE.E2E_REQUIRED_FILES[wrapper["wave"]])
-            else:
-                self.json_resources[
-                    MODULE.repository_resource(e2e["repository"])
-                ] = MODULE.GitHubApiError(
-                    404,
-                    MODULE.repository_resource(e2e["repository"]),
-                )
+            e2e_repository = e2e["repository"]
+            e2e_number = e2e["pullRequest"]
+            self.json_resources[
+                MODULE.pull_resource(e2e_repository, e2e_number)
+            ] = pull(e2e_repository, e2e_number, e2e["branch"])
+            self.paginated_resources[
+                MODULE.pull_files_resource(e2e_repository, e2e_number)
+            ] = changed_files(MODULE.e2e_required_files(wrapper))
 
     def get_json(self, resource: str) -> Any:
         value = self.json_resources[resource]
@@ -109,12 +105,12 @@ class DownstreamWrapperPrAuditTests(unittest.TestCase):
                 "passed": 34,
                 "failed": 0,
                 "counts": {
-                    "e2e": 15,
-                    "provisioning_gap": 2,
+                    "e2e": 17,
                     "wrapper": 17,
                 },
             },
         )
+        self.assertEqual(report["reconciliationIssue"], "DEN-1534")
         self.assertTrue(report["readOnly"])
         self.assertTrue(all(entry["passed"] for entry in report["entries"]))
 
@@ -160,21 +156,39 @@ class DownstreamWrapperPrAuditTests(unittest.TestCase):
         self.assertEqual(entry["errors"], [f"GitHub API returned HTTP 404 for {path}"])
         self.assertNotIn("token", json.dumps(entry).lower())
 
-    def test_provisioning_gap_becoming_a_repository_fails(self):
+    def test_provisioned_e2e_branch_and_product_chaos_files_are_audited(self):
         client = FixtureClient(MANIFEST)
-        repository = "akrion-sim/akrion-sim-e2e"
-        client.json_resources[MODULE.repository_resource(repository)] = {
-            "full_name": repository,
-            "private": True,
-        }
-        report = MODULE.audit_fleet(MANIFEST, client)
-        entry = next(
-            item
-            for item in report["entries"]
-            if item["repository"] == repository
-        )
-        self.assertFalse(entry["passed"])
-        self.assertIn("inventory still says", entry["errors"][0])
+        for repository in PROVISIONED:
+            wrapper = next(
+                item
+                for item in MANIFEST["wrappers"]
+                if item["e2e"]["repository"] == repository
+            )
+            e2e = wrapper["e2e"]
+            required = MODULE.e2e_required_files(wrapper)
+            self.assertEqual(required, MODULE.PROVISIONED_E2E_REQUIRED_FILES[repository])
+            self.assertIn(".github/workflows/opto-sync-product-e2e.yml", required)
+            self.assertIn(".github/workflows/opto-sync-chaos-e2e.yml", required)
+
+            path = MODULE.pull_files_resource(repository, e2e["pullRequest"])
+            client.paginated_resources[path] = [
+                item
+                for item in client.paginated_resources[path]
+                if item["filename"] != ".github/workflows/opto-sync-chaos-e2e.yml"
+            ]
+            report = MODULE.audit_fleet(MANIFEST, client)
+            entry = next(
+                item
+                for item in report["entries"]
+                if item["kind"] == "e2e" and item["repository"] == repository
+            )
+            self.assertFalse(entry["passed"])
+            self.assertIn(
+                ".github/workflows/opto-sync-chaos-e2e.yml",
+                entry["missingFiles"],
+            )
+            # Restore before checking the second reviewed repository.
+            client.paginated_resources[path] = changed_files(required)
 
     def test_paginated_file_fetch_collects_every_page(self):
         base = "/repos/example/project/pulls/7/files"
@@ -212,18 +226,32 @@ class DownstreamWrapperPrAuditTests(unittest.TestCase):
             any("duplicate changed files" in error for error in result["errors"])
         )
 
-    def test_e2e_file_contract_differs_between_wave_a_and_wave_b(self):
+    def test_e2e_file_contracts_are_distinct_and_exact(self):
         self.assertNotEqual(
             MODULE.E2E_REQUIRED_FILES["A"],
             MODULE.E2E_REQUIRED_FILES["B"],
         )
-        self.assertIn(
-            "opto-sync-adoption.json",
-            MODULE.E2E_REQUIRED_FILES["A"],
-        )
+        self.assertIn("opto-sync-adoption.json", MODULE.E2E_REQUIRED_FILES["A"])
         self.assertIn(
             "tests/opto-sync-wrapper/profile.json",
             MODULE.E2E_REQUIRED_FILES["B"],
+        )
+        for repository, files in MODULE.PROVISIONED_E2E_REQUIRED_FILES.items():
+            self.assertIn(repository, PROVISIONED)
+            self.assertEqual(len(files), 4)
+            self.assertNotIn(".github/workflows/opto-sync-wrapper-e2e.yml", files)
+
+    def test_plan_reports_17_existing_and_two_deterministic_baselines(self):
+        self.assertEqual(
+            sum(wrapper["e2e"]["status"] == "existing" for wrapper in MANIFEST["wrappers"]),
+            17,
+        )
+        self.assertEqual(
+            sum(
+                wrapper["e2e"].get("provisionedByIssue") == "DEN-1469"
+                for wrapper in MANIFEST["wrappers"]
+            ),
+            2,
         )
 
     def test_missing_token_report_contains_no_secret_fields(self):
