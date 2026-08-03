@@ -1,0 +1,86 @@
+name: Opto-Sync monotonic release promotion
+
+on:
+  pull_request:
+    paths:
+      - 'operations/opto-sync-release-promotion-contract.v1.json'
+      - 'operations/zed-package-plane-contract.v1.json'
+      - 'release/opto-sync-release-set.candidate.json'
+      - 'scripts/validate-opto-sync-release-promotion.py'
+      - 'suite/operations/test_opto_sync_release_promotion.py'
+      - '.github/workflows/opto-sync-release-promotion.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'operations/opto-sync-release-promotion-contract.v1.json'
+      - 'operations/zed-package-plane-contract.v1.json'
+      - 'release/opto-sync-release-set.candidate.json'
+      - 'scripts/validate-opto-sync-release-promotion.py'
+      - 'suite/operations/test_opto_sync_release_promotion.py'
+      - '.github/workflows/opto-sync-release-promotion.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    name: Deterministic monotonic promotion contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout release controller
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Compile and run adversarial state-machine tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/validate-opto-sync-release-promotion.py
+          python3 -m unittest suite.operations.test_opto_sync_release_promotion -v
+
+      - name: Render the current empty-evidence state twice
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p promotion-state/a promotion-state/b
+          for output in promotion-state/a/state.json promotion-state/b/state.json; do
+            python3 scripts/validate-opto-sync-release-promotion.py \
+              --contract operations/opto-sync-release-promotion-contract.v1.json \
+              --release-set release/opto-sync-release-set.candidate.json \
+              --package-plane operations/zed-package-plane-contract.v1.json \
+              --output "$output"
+          done
+          cmp promotion-state/a/state.json promotion-state/b/state.json
+          python3 - <<'PY'
+          import json
+          state = json.load(open('promotion-state/a/state.json'))
+          assert state['readOnly'] is True
+          assert state['state'] == 'await_core_publication_verification'
+          assert state['verifiedStages'] == []
+          assert state['nextStage'] == 'core_publication'
+          assert state['allowedActions'] == ['verify_core_publication']
+          assert state['blockedReasons'] == []
+          assert state['snapshotDigest'].startswith('sha256:')
+          PY
+
+      - name: Prove the controller has no write or credential path
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "${SYNC_FLEET_TOKEN:-}"
+          test -z "${ZED_PKG_TOKEN:-}"
+          ! grep -R -nE 'ghp_[A-Za-z0-9]+|github_pat_[A-Za-z0-9_]+' \
+            operations/opto-sync-release-promotion-contract.v1.json \
+            scripts/validate-opto-sync-release-promotion.py \
+            suite/operations/test_opto_sync_release_promotion.py \
+            .github/workflows/opto-sync-release-promotion.yml
+          ! grep -R -nE '(^|[^A-Za-z])(POST|PUT|PATCH|DELETE)([^A-Za-z]|$)' \
+            scripts/validate-opto-sync-release-promotion.py
