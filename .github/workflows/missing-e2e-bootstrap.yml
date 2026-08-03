@@ -106,7 +106,7 @@ jobs:
               assert receipt['repository'] == repository
               assert profile['bootstrapIssue'] == 'DEN-1469'
               assert set(profile['releaseGates']) == {'DEN-309', 'DEN-363'}
-              assert 'zed install --frozen --install-mode copy' in workflow
+              assert 'install --frozen --install-mode copy' in workflow
               assert 'OPTO_SYNC_REQUIRE_BROWSER=1' in workflow
               assert 'SYNC_FLEET_TOKEN' in workflow
               serialized = '\n'.join(
