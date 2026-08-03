@@ -5,6 +5,7 @@ on:
     paths:
       - 'operations/syncer-publication-expectation.v1.json'
       - 'scripts/audit-syncer-publication-outcome.py'
+      - 'scripts/run-syncer-publication-outcome-tests.py'
       - 'suite/operations/test_syncer_publication_outcome.py'
       - '.github/workflows/syncer-publication-outcome-audit.yml'
   push:
@@ -13,6 +14,7 @@ on:
     paths:
       - 'operations/syncer-publication-expectation.v1.json'
       - 'scripts/audit-syncer-publication-outcome.py'
+      - 'scripts/run-syncer-publication-outcome-tests.py'
       - 'suite/operations/test_syncer_publication_outcome.py'
       - '.github/workflows/syncer-publication-outcome-audit.yml'
   workflow_dispatch:
@@ -45,8 +47,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 -m py_compile scripts/audit-syncer-publication-outcome.py
-          python3 -m unittest suite.operations.test_syncer_publication_outcome -v
+          python3 -m py_compile \
+            scripts/audit-syncer-publication-outcome.py \
+            scripts/run-syncer-publication-outcome-tests.py
+          python3 scripts/run-syncer-publication-outcome-tests.py
 
       - name: Render the expectation plan twice and compare bytes
         shell: bash
@@ -89,6 +93,7 @@ jobs:
           ! grep -R -nE 'ghp_[A-Za-z0-9]+|github_pat_[A-Za-z0-9_]+' \
             operations/syncer-publication-expectation.v1.json \
             scripts/audit-syncer-publication-outcome.py \
+            scripts/run-syncer-publication-outcome-tests.py \
             suite/operations/test_syncer_publication_outcome.py \
             .github/workflows/syncer-publication-outcome-audit.yml
 
