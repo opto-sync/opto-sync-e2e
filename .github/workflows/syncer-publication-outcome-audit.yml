@@ -1,0 +1,157 @@
+name: syncer publication outcome audit
+
+on:
+  pull_request:
+    paths:
+      - 'operations/syncer-publication-expectation.v1.json'
+      - 'scripts/audit-syncer-publication-outcome.py'
+      - 'suite/operations/test_syncer_publication_outcome.py'
+      - '.github/workflows/syncer-publication-outcome-audit.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'operations/syncer-publication-expectation.v1.json'
+      - 'scripts/audit-syncer-publication-outcome.py'
+      - 'suite/operations/test_syncer_publication_outcome.py'
+      - '.github/workflows/syncer-publication-outcome-audit.yml'
+  workflow_dispatch:
+    inputs:
+      live_audit:
+        description: Verify tag, protected run, non-expired artifact, and all three frozen locks
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static-contract:
+    name: Adversarial publication-outcome contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout audit controller
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Compile the read-only audit and run adversarial tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/audit-syncer-publication-outcome.py
+          python3 -m unittest suite.operations.test_syncer_publication_outcome -v
+
+      - name: Render the expectation plan twice and compare bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p publication-audit-plan/a publication-audit-plan/b
+          python3 scripts/audit-syncer-publication-outcome.py validate-expectation \
+            --output publication-audit-plan/a/expectation.json
+          python3 scripts/audit-syncer-publication-outcome.py validate-expectation \
+            --output publication-audit-plan/b/expectation.json
+          cmp publication-audit-plan/a/expectation.json \
+              publication-audit-plan/b/expectation.json
+          python3 - <<'PY'
+          import json
+          plan = json.load(open('publication-audit-plan/a/expectation.json'))
+          assert plan['readOnly'] is True
+          assert plan['publicationVerified'] is False
+          assert plan['state'] == 'expectation_valid'
+          expected = plan['expected']
+          assert expected['tag'] == 'v0.2.1'
+          assert expected['activationPullRequest'] == 20
+          assert expected['activationMergeSha'] == '39aa65805dde93f29945e29cf66b830e0b55868a'
+          assert expected['targetSha'] == '8d2b275a89062403666f4bdf196d246a07c84484'
+          assert expected['trustedWorkflow']['event'] == 'pull_request_target'
+          assert expected['expectedArtifact']['name'] == 'published-syncer-v0.2.1-locks'
+          assert [package['name'] for package in expected['packages']] == [
+              'syncer',
+              'syncer-c',
+              'syncer-wasm',
+          ]
+          assert all(package['sha256'] != '0' * 64 for package in expected['packages'])
+          PY
+
+      - name: Prove the static lane contains no release credential
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "${SYNC_FLEET_TOKEN:-}"
+          test -z "${ZED_PKG_TOKEN:-}"
+          ! grep -R -nE 'ghp_[A-Za-z0-9]+|github_pat_[A-Za-z0-9_]+' \
+            operations/syncer-publication-expectation.v1.json \
+            scripts/audit-syncer-publication-outcome.py \
+            suite/operations/test_syncer_publication_outcome.py \
+            .github/workflows/syncer-publication-outcome-audit.yml
+
+  live-audit:
+    name: Verify immutable published release evidence
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.live_audit }}
+    needs:
+      - static-contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SYNC_FLEET_TOKEN: ${{ secrets.SYNC_FLEET_TOKEN }}
+    steps:
+      - name: Checkout audit controller
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Run bounded GET-only publication audit
+        id: audit
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/audit-syncer-publication-outcome.py audit \
+            --output syncer-publication-outcome.json
+
+      - name: Upload the bounded publication report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: syncer-publication-outcome
+          path: syncer-publication-outcome.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Fail unless tag, trusted run, artifact, and all three locks agree
+        if: always()
+        shell: bash
+        env:
+          AUDIT_OUTCOME: ${{ steps.audit.outcome }}
+        run: |
+          set -euo pipefail
+          test "$AUDIT_OUTCOME" = success || {
+            echo 'Syncer publication is not verified; inspect the bounded JSON artifact.' >&2
+            exit 1
+          }
+          python3 - <<'PY'
+          import json
+          report = json.load(open('syncer-publication-outcome.json'))
+          assert report['publicationVerified'] is True
+          assert report['state'] == 'published_verified'
+          assert report['summary'] == {
+              'checks': 4,
+              'passed': 4,
+              'failed': 0,
+              'locks': 3,
+          }
+          assert [check['name'] for check in report['checks']] == [
+              'immutable_tag',
+              'trusted_workflow_run',
+              'bounded_lock_artifact',
+              'three_frozen_locks',
+          ]
+          assert all(check['passed'] is True for check in report['checks'])
+          PY
