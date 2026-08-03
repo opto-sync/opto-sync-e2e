@@ -1,0 +1,142 @@
+name: missing E2E repository bootstrap
+
+on:
+  pull_request:
+    paths:
+      - 'operations/downstream-wrapper-fleet.v1.json'
+      - 'scripts/render-missing-e2e-repository.py'
+      - 'scripts/render-missing-e2e-starter.py'
+      - 'scripts/render-missing-e2e-archive.py'
+      - 'suite/operations/test_missing_e2e_bootstrap.py'
+      - '.github/workflows/missing-e2e-bootstrap.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'operations/downstream-wrapper-fleet.v1.json'
+      - 'scripts/render-missing-e2e-repository.py'
+      - 'scripts/render-missing-e2e-starter.py'
+      - 'scripts/render-missing-e2e-archive.py'
+      - 'suite/operations/test_missing_e2e_bootstrap.py'
+      - '.github/workflows/missing-e2e-bootstrap.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bootstrap:
+    name: Render two deterministic starter repositories
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout bootstrap controller
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Compile generators and run adversarial tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile \
+            scripts/render-missing-e2e-repository.py \
+            scripts/render-missing-e2e-starter.py \
+            scripts/render-missing-e2e-archive.py
+          python3 -m unittest suite.operations.test_missing_e2e_bootstrap -v
+
+      - name: Render each starter tree and archive twice
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p bootstrap/a bootstrap/b bootstrap/artifacts
+          repositories=(
+            akrion-sim/akrion-sim-e2e
+            benefactor-cc/benefactor-e2e
+          )
+          for repository in "${repositories[@]}"; do
+            name="${repository#*/}"
+            for copy in a b; do
+              python3 scripts/render-missing-e2e-starter.py \
+                --repository "$repository" \
+                --out "bootstrap/$copy/$name"
+              python3 scripts/render-missing-e2e-archive.py \
+                --repository "$repository" \
+                --archive "bootstrap/$copy/$name.tar.gz"
+            done
+            diff -qr "bootstrap/a/$name" "bootstrap/b/$name"
+            cmp "bootstrap/a/$name.tar.gz" "bootstrap/b/$name.tar.gz"
+            (
+              cd "bootstrap/a/$name"
+              python3 tests/opto-sync/adoption_contract.py
+              node --check tests/opto-sync/product.e2e.test.mjs
+            )
+            tar -tzf "bootstrap/a/$name.tar.gz" > "bootstrap/artifacts/$name.contents.txt"
+            cp "bootstrap/a/$name.tar.gz" "bootstrap/artifacts/$name.tar.gz"
+          done
+          (
+            cd bootstrap/artifacts
+            sha256sum *.tar.gz > SHA256SUMS
+          )
+
+      - name: Verify generated repositories remain credential-free and reviewable
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import pathlib
+          import re
+          import tarfile
+
+          expected = {
+              'akrion-sim-e2e': 'akrion-sim/akrion-sim-e2e',
+              'benefactor-e2e': 'benefactor-cc/benefactor-e2e',
+          }
+          for name, repository in expected.items():
+              root = pathlib.Path('bootstrap/a') / name
+              profile = json.loads((root / 'opto-sync-adoption.json').read_text())
+              receipt = json.loads((root / 'bootstrap-receipt.json').read_text())
+              workflow = (root / '.github/workflows/opto-sync-adoption.yml').read_text()
+              assert profile['e2eRepository'] == repository
+              assert receipt['repository'] == repository
+              assert profile['bootstrapIssue'] == 'DEN-1469'
+              assert set(profile['releaseGates']) == {'DEN-309', 'DEN-363'}
+              assert 'install --frozen --install-mode copy' in workflow
+              assert 'OPTO_SYNC_REQUIRE_BROWSER=1' in workflow
+              assert 'SYNC_FLEET_TOKEN' in workflow
+              serialized = '\n'.join(
+                  path.read_text(errors='strict')
+                  for path in sorted(root.rglob('*'))
+                  if path.is_file()
+              ).lower()
+              for marker in ('ghp_', 'github_pat_', 'bearer ', 'password=', 'private_key'):
+                  assert marker not in serialized, (repository, marker)
+              archive = pathlib.Path('bootstrap/artifacts') / f'{name}.tar.gz'
+              data = archive.read_bytes()
+              assert data[:2] == b'\x1f\x8b'
+              assert data[4:8] == b'\x00\x00\x00\x00'
+              assert data[3] & 0x08 == 0
+              with tarfile.open(archive, 'r:gz') as handle:
+                  members = handle.getmembers()
+              assert len(members) == 9
+              assert all(member.isfile() for member in members)
+              assert all(member.mtime == 0 for member in members)
+              assert all(member.uid == 0 and member.gid == 0 for member in members)
+              assert all(member.uname == '' and member.gname == '' for member in members)
+              assert [member.name for member in members] == sorted(member.name for member in members)
+              assert all('..' not in pathlib.PurePosixPath(member.name).parts for member in members)
+              assert all(re.fullmatch(r'[0-9a-f]{64}', item['sha256']) for item in receipt['files'])
+          PY
+
+      - name: Upload reviewed starter repository artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: missing-e2e-starter-repositories
+          path: bootstrap/artifacts/
+          if-no-files-found: error
+          retention-days: 30
