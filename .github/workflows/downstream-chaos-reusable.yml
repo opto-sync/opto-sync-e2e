@@ -8,11 +8,6 @@ on:
         required: false
         default: tests/opto-sync-wrapper/profile.json
         type: string
-      chaos_test_path:
-        description: Downstream chaos test in the caller repository
-        required: false
-        default: tests/opto-sync-wrapper/chaos.e2e.test.mjs
-        type: string
       live_e2e:
         description: Run frozen package, native, real-browser, and downstream chaos tests
         required: false
@@ -46,15 +41,23 @@ jobs:
       sync_repository: ${{ steps.profile.outputs.sync_repository }}
       sync_ref: ${{ steps.profile.outputs.sync_ref }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Checkout caller repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
+      - name: Checkout the exact reusable-workflow implementation
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .opto-chaos
+          persist-credentials: false
       - id: profile
-        name: Validate caller profile and chaos coverage
+        name: Validate caller profile and shared chaos coverage
         shell: bash
         env:
           PROFILE_PATH: ${{ inputs.profile_path }}
-          CHAOS_TEST_PATH: ${{ inputs.chaos_test_path }}
+          CHAOS_TEST_PATH: .opto-chaos/tests/downstream-chaos.e2e.test.mjs
         run: |
           set -euo pipefail
           node --check "$CHAOS_TEST_PATH"
@@ -87,10 +90,18 @@ jobs:
     env:
       SYNC_FLEET_TOKEN: ${{ secrets.SYNC_FLEET_TOKEN }}
       PROFILE_PATH: ${{ inputs.profile_path }}
-      CHAOS_TEST_PATH: ${{ inputs.chaos_test_path }}
+      CHAOS_TEST_PATH: .opto-chaos/tests/downstream-chaos.e2e.test.mjs
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Checkout caller repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          persist-credentials: false
+      - name: Checkout the exact reusable-workflow implementation
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .opto-chaos
           persist-credentials: false
       - name: Require private fleet read credentials
         shell: bash
