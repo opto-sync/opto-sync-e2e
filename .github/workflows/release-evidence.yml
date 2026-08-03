@@ -1,0 +1,226 @@
+name: Coordinated deterministic release evidence
+
+on:
+  pull_request:
+    paths:
+      - 'release/opto-sync-release-evidence-plan.v1.json'
+      - 'release/ROLLBACK.md'
+      - 'scripts/generate-release-evidence.py'
+      - '.github/workflows/release-evidence.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SYNCER_SHA: 8d2b275a89062403666f4bdf196d246a07c84484
+  CLIENTS_SHA: 38f0fcc6a471455a0a20aec5f7fa63d3f70d5f89
+  E2E_SHA: 562e3f62645252ed79328b7ac30ce404ceb5fc92
+  ZED_CLI_SHA: c636fb8f6b08695c6b4fe94e2481f4d57270b2d7
+  ZED_INTERFACES_SHA: 415e871b1fb3dd97744c134351408a3224805dfb
+
+jobs:
+  contract:
+    name: Release evidence contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout evidence controller
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Validate plan, rollback, and generator syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/generate-release-evidence.py
+          python3 scripts/generate-release-evidence.py validate-plan
+          grep -F 'Never overwrite' release/ROLLBACK.md
+          grep -F 'Never roll back only' release/ROLLBACK.md
+
+  evidence:
+    name: Pack exact sources twice and record provenance
+    needs: contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout evidence controller
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Checkout exact syncer source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: opto-sync/syncer.c
+          ref: ${{ env.SYNCER_SHA }}
+          path: sources/syncer
+          persist-credentials: false
+
+      - name: Checkout exact clients source and embedded core
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: opto-sync/opto-sync-clients
+          ref: ${{ env.CLIENTS_SHA }}
+          path: sources/clients
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Checkout exact corrected E2E package source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: opto-sync/opto-sync-e2e
+          ref: ${{ env.E2E_SHA }}
+          path: sources/e2e
+          persist-credentials: false
+
+      - name: Checkout pinned Zed CLI
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.ZED_CLI_SHA }}
+          path: .tools/zed-cli
+          persist-credentials: false
+
+      - name: Checkout pinned Zed interfaces beside the CLI
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: zed-pkg/zed-interfaces
+          ref: ${{ env.ZED_INTERFACES_SHA }}
+          path: .tools/zed-interfaces
+          persist-credentials: false
+
+      - name: Prove source identity and recursive core parity before builds
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C sources/syncer rev-parse HEAD)" = "$SYNCER_SHA"
+          test "$(git -C sources/clients rev-parse HEAD)" = "$CLIENTS_SHA"
+          test "$(git -C sources/e2e rev-parse HEAD)" = "$E2E_SHA"
+          test "$(git -C sources/clients rev-parse HEAD:syncer.c)" = "$SYNCER_SHA"
+          test "$(git -C sources/clients/syncer.c rev-parse HEAD)" = "$SYNCER_SHA"
+          grep -F "$SYNCER_SHA" sources/e2e/.github/workflows/e2e-docker.yml
+          grep -F "$CLIENTS_SHA" sources/e2e/.github/workflows/e2e-docker.yml
+          grep -F "$SYNCER_SHA" sources/e2e/.github/workflows/e2e-clients.yml
+          grep -F "$CLIENTS_SHA" sources/e2e/.github/workflows/e2e-clients.yml
+          python3 scripts/generate-release-evidence.py validate-plan
+
+      - name: Run source-owned package and safety checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 sources/syncer/scripts/check-release-version.py
+          make -C sources/syncer/core
+          make -C sources/syncer/core sanitize
+
+          python3 sources/clients/scripts/check-dependency-boundary.py
+          python3 sources/clients/scripts/check-package-layout.py
+          python3 sources/clients/scripts/check-zed-packaging.py
+
+          (
+            cd sources/e2e
+            python3 scripts/check-zed-package.py
+            test -f .env || cp .env.example .env
+            docker compose config --quiet
+            docker compose -f docker-compose.yml -f docker-compose.supabase.yml config --quiet
+          )
+
+      - name: Build the exact Zed packer
+        run: cargo build --locked --release --manifest-path .tools/zed-cli/Cargo.toml --bin zed
+
+      - name: Pack every exact source twice and compare bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          zed="$GITHUB_WORKSPACE/.tools/zed-cli/target/release/zed"
+          first="$RUNNER_TEMP/release-pack-first"
+          second="$RUNNER_TEMP/release-pack-second"
+          mkdir -p "$first" "$second"
+
+          for source in syncer clients e2e; do
+            (cd "sources/$source" && "$zed" pack --out "$first")
+            rm -rf "sources/$source/.zed"
+            (cd "sources/$source" && "$zed" pack --out "$second")
+            rm -rf "sources/$source/.zed"
+          done
+
+          expected=(
+            opto-sync-syncer-0.2.1.tar.gz
+            opto-sync-syncer-c-0.2.1.tar.gz
+            opto-sync-syncer-wasm-0.2.1.tar.gz
+            opto-sync-opto-sync-clients-0.2.0.tar.gz
+            opto-sync-opto-sync-e2e-0.1.0.tar.gz
+          )
+          test "$(find "$first" -maxdepth 1 -type f -name '*.tar.gz' | wc -l)" -eq 5
+          test "$(find "$second" -maxdepth 1 -type f -name '*.tar.gz' | wc -l)" -eq 5
+          for archive in "${expected[@]}"; do
+            test -f "$first/$archive"
+            test -f "$second/$archive"
+            cmp "$first/$archive" "$second/$archive"
+            sha256sum "$first/$archive" "$second/$archive"
+          done
+
+          mkdir -p release-evidence/archives
+          cp "$first"/*.tar.gz release-evidence/archives/
+
+      - name: Execute extracted package smoke contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/release-smoke"
+          mkdir -p "$root/syncer" "$root/syncer-c" "$root/syncer-wasm" "$root/clients" "$root/e2e"
+
+          tar -xzf release-evidence/archives/opto-sync-syncer-0.2.1.tar.gz -C "$root/syncer"
+          tar -xzf release-evidence/archives/opto-sync-syncer-c-0.2.1.tar.gz -C "$root/syncer-c"
+          tar -xzf release-evidence/archives/opto-sync-syncer-wasm-0.2.1.tar.gz -C "$root/syncer-wasm"
+          tar -xzf release-evidence/archives/opto-sync-opto-sync-clients-0.2.0.tar.gz -C "$root/clients"
+          tar -xzf release-evidence/archives/opto-sync-opto-sync-e2e-0.1.0.tar.gz -C "$root/e2e"
+
+          sh sources/syncer/scripts/zpkg-smoke.sh "$root/syncer/pkg"
+          sh sources/syncer/scripts/zpkg-smoke.sh "$root/syncer-c/pkg"
+          node sources/syncer/scripts/zpkg-wasm-smoke.mjs "$root/syncer-wasm/pkg"
+          python3 "$root/clients/pkg/scripts/check-package-layout.py" "$root/clients/pkg"
+          python3 "$root/clients/pkg/scripts/check-zed-packaging.py" "$root/clients/pkg"
+          python3 sources/e2e/scripts/check-zed-package.py "$root/e2e/pkg"
+          cp "$root/e2e/pkg/.env.example" "$root/e2e/pkg/.env"
+          (cd "$root/e2e/pkg" && docker compose config --quiet)
+
+      - name: Run non-mutating publication preflight for every source
+        shell: bash
+        run: |
+          set -euo pipefail
+          zed="$GITHUB_WORKSPACE/.tools/zed-cli/target/release/zed"
+          for source in syncer clients e2e; do
+            (
+              cd "sources/$source"
+              "$zed" publish --dry-run --allow-dirty --skip-vcs-checks
+            ) | tee "$RUNNER_TEMP/$source-publish-dry-run.txt"
+          done
+          grep -F 'opto-sync/syncer@0.2.1' "$RUNNER_TEMP/syncer-publish-dry-run.txt"
+          grep -F 'opto-sync/opto-sync-clients@0.2.0' "$RUNNER_TEMP/clients-publish-dry-run.txt"
+          grep -F 'opto-sync/opto-sync-e2e@0.1.0' "$RUNNER_TEMP/e2e-publish-dry-run.txt"
+
+      - name: Generate machine-readable checksums and source evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/generate-release-evidence.py generate \
+            --syncer-dir sources/syncer \
+            --clients-dir sources/clients \
+            --e2e-dir sources/e2e \
+            --archive-root release-evidence/archives \
+            --output release-evidence/evidence.json
+          cat release-evidence/evidence.json
+
+      - name: Upload immutable candidate evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: opto-sync-coordinated-release-evidence
+          path: release-evidence/
+          if-no-files-found: error
+          retention-days: 30
