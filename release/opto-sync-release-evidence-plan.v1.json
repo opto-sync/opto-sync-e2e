@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "releaseSetId": "opto-sync-2026-07-31-suite-certified-candidate",
-  "evidenceState": "pending",
+  "evidenceState": "produced",
   "sources": {
     "syncer": {
       "repository": "opto-sync/syncer.c",
