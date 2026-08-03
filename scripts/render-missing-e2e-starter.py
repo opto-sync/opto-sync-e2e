@@ -35,6 +35,7 @@ write_tree = LIBRARY.write_tree
 canonical_json = LIBRARY.canonical_json
 sha256_bytes = LIBRARY.sha256_bytes
 sha256_file = LIBRARY.sha256_file
+TEMPLATE_WORKFLOW = LIBRARY.workflow
 
 JSON_MUTABLE_REF = re.compile(
     r'"(?:wrapperRef|branch|ref|defaultBranch)"\s*:\s*"(?:main|latest|refs/heads/main)"',
@@ -73,7 +74,9 @@ def load_package_plane_pins() -> dict[str, str]:
 
 
 def workflow_with_final_pins(profile: dict) -> str:
-    original = LIBRARY.workflow(profile)
+    # build_files temporarily replaces LIBRARY.workflow with this wrapper. Use
+    # the function captured at module load so the wrapper cannot call itself.
+    original = TEMPLATE_WORKFLOW(profile)
     pins = load_package_plane_pins()
     rendered = original
     for name, old in HISTORICAL_TEMPLATE_PINS.items():
