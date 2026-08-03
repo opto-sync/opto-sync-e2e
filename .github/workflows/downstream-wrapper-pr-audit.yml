@@ -20,7 +20,7 @@ on:
   workflow_dispatch:
     inputs:
       live_audit:
-        description: Query actual wrapper and E2E pull requests using SYNC_FLEET_TOKEN
+        description: Query all 17 wrapper and 17 E2E pull requests using SYNC_FLEET_TOKEN
         required: true
         default: false
         type: boolean
@@ -66,15 +66,17 @@ jobs:
           import json
           plan = json.load(open('audit-plan/a/plan.json'))
           assert plan['readOnly'] is True
+          assert plan['reconciliationIssue'] == 'DEN-1534'
           assert plan['summary'] == {
               'wrappers': 17,
-              'existingE2e': 15,
-              'provisioningRequired': 2,
+              'existingE2e': 17,
+              'provisioningRequired': 0,
+              'provisionedBaselines': 2,
           }
           PY
 
   live-audit:
-    name: Verify actual GitHub PR and provisioning state
+    name: Verify all actual wrapper and E2E draft pull requests
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.live_audit }}
     needs:
       - static-contract
@@ -121,11 +123,11 @@ jobs:
           import json
           report = json.load(open('downstream-wrapper-pr-audit.json'))
           assert report['readOnly'] is True
+          assert report['reconciliationIssue'] == 'DEN-1534'
           assert report['summary']['entries'] == 34
           assert report['summary']['failed'] == 0
           assert report['summary']['counts'] == {
-              'e2e': 15,
-              'provisioning_gap': 2,
+              'e2e': 17,
               'wrapper': 17,
           }
           PY
