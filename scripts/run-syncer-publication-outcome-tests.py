@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Run the syncer publication-outcome tests with a safe dynamic-import boundary.
 
-The production audit intentionally keeps its CLI filename hyphenated.  The unit
-suite loads that file through ``importlib.util.spec_from_file_location``.  Python
+The production audit intentionally keeps its CLI filename hyphenated. The unit
+suite loads that file through ``importlib.util.spec_from_file_location``. Python
 3.12's dataclass implementation expects the executing module to be registered
 in ``sys.modules`` while class decorators run, so this runner supplies that
 normal import invariant only for the audit module and restores ``importlib``
@@ -15,14 +15,20 @@ import importlib
 import importlib.util
 import sys
 import unittest
+from pathlib import Path
 from types import ModuleType
 from typing import Any
 
+ROOT = Path(__file__).resolve().parents[1]
 AUDIT_MODULE_NAME = "syncer_publication_outcome"
 TEST_MODULE_NAME = "suite.operations.test_syncer_publication_outcome"
 
 
 def _load_test_module() -> ModuleType:
+    root_text = str(ROOT)
+    if root_text not in sys.path:
+        sys.path.insert(0, root_text)
+
     original_module_from_spec = importlib.util.module_from_spec
 
     def registered_module_from_spec(spec: Any) -> ModuleType:
