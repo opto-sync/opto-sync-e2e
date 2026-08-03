@@ -10,6 +10,8 @@ name: Browser harness contract
     paths:
       - 'tests/browser/**'
       - '.github/workflows/browser-harness-contract.yml'
+  schedule:
+    - cron: '17 9 1 * *'
   workflow_dispatch:
 
 permissions:
@@ -32,8 +34,13 @@ jobs:
       CI: 'true'
       E2E_BROWSER_CONTRACT: '1'
       E2E_FRAMEWORK: ${{ matrix.framework }}
+      NO_COLOR: '1'
+      PUPPETEER_SKIP_DOWNLOAD: 'true'
       npm_config_audit: 'false'
       npm_config_fund: 'false'
+      npm_config_ignore_scripts: 'true'
+      npm_config_package_lock: 'false'
+      npm_config_update_notifier: 'false'
 
     steps:
       - name: Check out repository
@@ -41,47 +48,83 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Use Node.js 22
+      - name: Use Node.js 22.23.1
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22
+          node-version: '22.23.1'
+
+      - name: Prepare isolated contract workspace
+        shell: bash
+        working-directory: tests/browser
+        run: |
+          set -euo pipefail
+          rm -rf node_modules package-lock.json
+          printf '%s\n' '{"name":"browser-harness-contract-ci","private":true,"type":"module"}' > package.json
+          artifact_dir="artifacts/${{ matrix.framework }}"
+          mkdir -p "$artifact_dir"
+          {
+            printf 'framework=%s\n' '${{ matrix.framework }}'
+            printf 'node=%s\n' "$(node --version)"
+            printf 'npm=%s\n' "$(npm --version)"
+            printf 'runner_os=%s\n' '${{ runner.os }}'
+            printf 'runner_arch=%s\n' '${{ runner.arch }}'
+            printf 'image_os=%s\n' "${ImageOS:-unknown}"
+            printf 'image_version=%s\n' "${ImageVersion:-unknown}"
+          } > "$artifact_dir/environment.txt"
 
       - name: Install isolated browser driver
         shell: bash
         working-directory: tests/browser
         run: |
           set -euo pipefail
-          if [[ ! -f package.json ]]; then
-            printf '%s\n' '{"private":true,"type":"module"}' > package.json
-          fi
-          case "${{ matrix.framework }}" in
+          artifact="artifacts/${{ matrix.framework }}/environment.txt"
+          case '${{ matrix.framework }}' in
             playwright)
-              npm install --no-save --no-package-lock playwright@1.61.1
-              npx playwright install --with-deps chromium
+              npm install --no-save --no-package-lock --ignore-scripts playwright@1.61.1
+              ./node_modules/.bin/playwright install --with-deps chromium
+              printf 'driver=%s\n' "$(node -p "require('./node_modules/playwright/package.json').version")" >> "$artifact"
               ;;
             puppeteer)
-              npm install --no-save --no-package-lock puppeteer@25.3.0
+              npm install --no-save --no-package-lock --ignore-scripts puppeteer@25.3.0
+              chrome_bin="$(command -v google-chrome || command -v chromium || true)"
+              test -n "$chrome_bin" && test -x "$chrome_bin"
+              printf 'PUPPETEER_EXECUTABLE_PATH=%s\n' "$chrome_bin" >> "$GITHUB_ENV"
+              printf 'driver=%s\n' "$(node -p "require('./node_modules/puppeteer/package.json').version")" >> "$artifact"
+              printf 'browser=%s\n' "$($chrome_bin --version)" >> "$artifact"
               ;;
             selenium)
-              npm install --no-save --no-package-lock selenium-webdriver@4.46.0
-              google-chrome --version
+              npm install --no-save --no-package-lock --ignore-scripts selenium-webdriver@4.46.0
+              chrome_bin="$(command -v google-chrome || command -v chromium || true)"
+              test -n "$chrome_bin" && test -x "$chrome_bin"
+              printf 'driver=%s\n' "$(node -p "require('./node_modules/selenium-webdriver/package.json').version")" >> "$artifact"
+              printf 'browser=%s\n' "$($chrome_bin --version)" >> "$artifact"
               ;;
             *)
-              echo "unsupported framework: ${{ matrix.framework }}" >&2
+              echo 'unsupported framework: ${{ matrix.framework }}' >&2
               exit 64
               ;;
           esac
+          npm ls --depth=0 --json > "artifacts/${{ matrix.framework }}/dependencies.json"
+
+      - name: Validate contract syntax
+        shell: bash
+        working-directory: tests/browser
+        run: |
+          set -euo pipefail
+          node --check playwright/harness-contract.test.mjs
+          node --check puppeteer/harness-contract.test.mjs
+          node --check selenium/harness-contract.test.mjs
 
       - name: Run browser harness contract
         shell: bash
         working-directory: tests/browser
-        run: node --test "${{ matrix.framework }}/harness-contract.test.mjs"
+        run: node --test --test-reporter=spec '${{ matrix.framework }}/harness-contract.test.mjs'
 
-      - name: Upload browser artifact
+      - name: Upload browser evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: browser-harness-${{ matrix.framework }}-${{ github.run_attempt }}
+          name: browser-harness-${{ matrix.framework }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: tests/browser/artifacts/${{ matrix.framework }}/
-          if-no-files-found: ignore
+          if-no-files-found: error
           retention-days: 7
