@@ -129,7 +129,7 @@ jobs:
           path: app
           token: ${{ secrets.SYNC_FLEET_TOKEN }}
           persist-credentials: false
-      - name: Checkout exact private path dependencies
+      - name: Fetch exact private path dependencies
         shell: bash
         env:
           SYNC_FLEET_TOKEN: ${{ secrets.SYNC_FLEET_TOKEN }}
@@ -148,18 +148,24 @@ jobs:
               destination = root / dependency['path']
               if destination.exists():
                   raise RuntimeError(f'dependency destination already exists: {destination}')
+              destination.mkdir(parents=True)
+              subprocess.run(['git', '-C', str(destination), 'init', '--quiet'], check=True)
               subprocess.run(
                   [
-                      'git', '-c',
-                      f'http.https://github.com/.extraheader={header}',
-                      'clone', '--filter=blob:none', '--no-checkout',
+                      'git', '-C', str(destination), 'remote', 'add', 'origin',
                       f"https://github.com/{dependency['repository']}.git",
-                      str(destination),
                   ],
                   check=True,
               )
               subprocess.run(
-                  ['git', '-C', str(destination), 'checkout', '--detach', dependency['ref']],
+                  [
+                      'git', '-c', f'http.https://github.com/.extraheader={header}',
+                      '-C', str(destination), 'fetch', '--depth=1', 'origin', dependency['ref'],
+                  ],
+                  check=True,
+              )
+              subprocess.run(
+                  ['git', '-C', str(destination), 'checkout', '--detach', 'FETCH_HEAD'],
                   check=True,
               )
               actual = subprocess.check_output(
@@ -176,7 +182,7 @@ jobs:
               )
           PY
       - name: Materialize dependency overrides without credentials
-        if: ${{ matrix.app.kind == 'flutter' && toJSON(matrix.app.dependencyOverrides) != '{}' }}
+        if: ${{ matrix.app.kind == 'flutter' }}
         working-directory: app
         shell: bash
         env:
@@ -185,7 +191,9 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           import json, os, pathlib
-          overrides = json.loads(os.environ['OVERRIDES_JSON'])
+          overrides = json.loads(os.environ.get('OVERRIDES_JSON') or '{}')
+          if not overrides:
+              raise SystemExit(0)
           lines = ['dependency_overrides:']
           for package in sorted(overrides):
               lines.extend([f'  {package}:', f"    path: {overrides[package]}"])
