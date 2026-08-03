@@ -9,6 +9,7 @@ import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+WORKFLOWS = ROOT / ".github/workflows"
 DOCKER = ROOT / ".github/workflows/e2e-docker.yml"
 CLIENTS = ROOT / ".github/workflows/e2e-clients.yml"
 MANIFEST = ROOT / ".zpkg.toml"
@@ -16,6 +17,7 @@ LOCKFILE = ROOT / ".zpkg.lock"
 SHA = r"[0-9a-f]{40}"
 CERTIFIED_SYNCER = "8d2b275a89062403666f4bdf196d246a07c84484"
 CERTIFIED_CLIENTS = "38f0fcc6a471455a0a20aec5f7fa63d3f70d5f89"
+REMOTE_USE = re.compile(r"(?m)^\s*(?:-\s*)?uses:\s*([^\s#]+)")
 
 
 def fail(message: str) -> None:
@@ -35,7 +37,42 @@ def pinned_ref(text: str, name: str) -> str:
     return match.group(1)
 
 
+def check_workflow_supply_chain() -> None:
+    failures: list[str] = []
+    for path in sorted((*WORKFLOWS.glob("*.yml"), *WORKFLOWS.glob("*.yaml"))):
+        text = path.read_text(encoding="utf-8")
+        checkout_count = 0
+        for match in REMOTE_USE.finditer(text):
+            uses = match.group(1)
+            if uses.startswith(("./", "docker://")):
+                continue
+            if uses.startswith("actions/checkout@"):
+                checkout_count += 1
+            ref = uses.rsplit("@", 1)[-1] if "@" in uses else ""
+            if not re.fullmatch(SHA, ref):
+                failures.append(
+                    f"{path.relative_to(ROOT)}: remote action must use a 40-hex "
+                    f"commit, found {uses}"
+                )
+        credential_opt_outs = len(
+            re.findall(r"(?m)^\s*persist-credentials:\s*false\s*$", text)
+        )
+        if credential_opt_outs < checkout_count:
+            failures.append(
+                f"{path.relative_to(ROOT)}: every checkout must disable persisted "
+                f"credentials ({credential_opt_outs}/{checkout_count})"
+            )
+        if re.search(r"(?m)^\s*ref:\s*(?:main|HEAD)\s*(?:#.*)?$", text):
+            failures.append(
+                f"{path.relative_to(ROOT)}: cross-repository checkouts must not "
+                "follow main or HEAD"
+            )
+    if failures:
+        fail("\n".join(failures))
+
+
 def main() -> int:
+    check_workflow_supply_chain()
     docker = DOCKER.read_text(encoding="utf-8")
     clients = CLIENTS.read_text(encoding="utf-8")
 
