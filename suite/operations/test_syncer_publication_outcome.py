@@ -4,6 +4,7 @@ import copy
 import importlib.util
 import io
 import json
+import sys
 import unittest
 import zipfile
 from pathlib import Path
@@ -15,6 +16,7 @@ EXPECTATION_PATH = ROOT / "operations/syncer-publication-expectation.v1.json"
 SPEC = importlib.util.spec_from_file_location("syncer_publication_outcome", SCRIPT)
 assert SPEC and SPEC.loader
 MODULE = importlib.util.module_from_spec(SPEC)
+sys.modules[SPEC.name] = MODULE
 SPEC.loader.exec_module(MODULE)
 RAW_EXPECTATION = json.loads(EXPECTATION_PATH.read_text(encoding="utf-8"))
 EXPECTATION = MODULE.validate_expectation(copy.deepcopy(RAW_EXPECTATION))

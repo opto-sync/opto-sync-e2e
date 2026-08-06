@@ -32,6 +32,7 @@ from typing import Any, Protocol
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_EXPECTATION = ROOT / "operations/syncer-publication-expectation.v1.json"
 API_DEFAULT = "https://api.github.com"
+DEFAULT_MAX_ARTIFACT_BYTES = 16 * 1024 * 1024
 SHA = re.compile(r"^[0-9a-f]{40}$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 ARTIFACT_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -66,6 +67,13 @@ class Client(Protocol):
     def get_paginated(self, resource: str) -> list[Any]: ...
 
     def get_bytes(self, resource: str) -> bytes: ...
+
+
+class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Expose GitHub's artifact redirect without forwarding credentials."""
+
+    def redirect_request(self, request, file_pointer, code, message, headers, url):
+        return None
 
 
 def fail(message: str) -> "NoReturn":
@@ -110,6 +118,46 @@ def require_sha256(value: Any, label: str) -> str:
 
 def normalize_registry_source(value: str) -> str:
     return value.rstrip("/")
+
+
+def artifact_redirect_request(location: str) -> urllib.request.Request:
+    """Build a credential-free request for an HTTPS artifact storage URL."""
+    parsed = urllib.parse.urlparse(location)
+    if (
+        parsed.scheme != "https"
+        or not parsed.netloc
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+    ):
+        fail("artifact redirect must be an absolute HTTPS URL without userinfo")
+    return urllib.request.Request(
+        location,
+        headers={
+            "Accept": "application/octet-stream",
+            "User-Agent": "opto-sync-publication-outcome-audit/1",
+        },
+    )
+
+
+def bounded_read(response: Any, *, max_bytes: int) -> bytes:
+    """Read a nonempty response while enforcing both declared and actual size."""
+    if max_bytes <= 0:
+        fail("artifact download limit must be positive")
+    content_length = response.headers.get("Content-Length")
+    if content_length is not None:
+        try:
+            declared_size = int(content_length)
+        except (TypeError, ValueError):
+            fail("artifact Content-Length is invalid")
+        if declared_size <= 0 or declared_size > max_bytes:
+            fail("artifact Content-Length is outside the allowed bounds")
+    data = response.read(max_bytes + 1)
+    if not data:
+        fail("artifact download is empty")
+    if len(data) > max_bytes:
+        fail("artifact download exceeds the allowed size")
+    return data
 
 
 def validate_expectation(value: dict[str, Any]) -> dict[str, Any]:
@@ -254,6 +302,7 @@ class GitHubClient:
         api_url: str = API_DEFAULT,
         timeout_seconds: int = 20,
         max_pages: int = 10,
+        max_artifact_bytes: int = DEFAULT_MAX_ARTIFACT_BYTES,
     ):
         if not token:
             raise AuditError("SYNC_FLEET_TOKEN is required for the live audit")
@@ -261,11 +310,12 @@ class GitHubClient:
         self._api_url = api_url.rstrip("/")
         self._timeout_seconds = timeout_seconds
         self._max_pages = max_pages
+        self._max_artifact_bytes = max_artifact_bytes
 
-    def _request(self, resource: str) -> urllib.response.addinfourl:
+    def _api_request(self, resource: str) -> urllib.request.Request:
         if not resource.startswith("/"):
             raise AuditError(f"unsafe GitHub resource path: {resource}")
-        request = urllib.request.Request(
+        return urllib.request.Request(
             self._api_url + resource,
             headers={
                 "Accept": "application/vnd.github+json",
@@ -274,6 +324,9 @@ class GitHubClient:
                 "X-GitHub-Api-Version": "2022-11-28",
             },
         )
+
+    def _request(self, resource: str) -> urllib.response.addinfourl:
+        request = self._api_request(resource)
         try:
             return urllib.request.urlopen(request, timeout=self._timeout_seconds)
         except urllib.error.HTTPError as exc:
@@ -291,8 +344,37 @@ class GitHubClient:
             return json.load(response)
 
     def get_bytes(self, resource: str) -> bytes:
-        with self._request(resource) as response:
-            return response.read()
+        request = self._api_request(resource)
+        opener = urllib.request.build_opener(NoRedirectHandler())
+        try:
+            opener.open(request, timeout=self._timeout_seconds)
+        except urllib.error.HTTPError as exc:
+            if exc.code not in {301, 302, 303, 307, 308}:
+                raise GitHubApiError(exc.code, resource) from None
+            location = exc.headers.get("Location")
+        except urllib.error.URLError as exc:
+            reason = type(exc.reason).__name__
+            raise RuntimeError(
+                f"GitHub API transport failed for {resource}: {reason}"
+            ) from None
+        else:
+            raise AuditError("artifact API did not return a storage redirect")
+
+        signed_request = artifact_redirect_request(location or "")
+        try:
+            with urllib.request.urlopen(
+                signed_request, timeout=self._timeout_seconds
+            ) as response:
+                return bounded_read(response, max_bytes=self._max_artifact_bytes)
+        except urllib.error.HTTPError as exc:
+            raise RuntimeError(
+                f"artifact storage returned HTTP {exc.code} for the signed download"
+            ) from None
+        except urllib.error.URLError as exc:
+            reason = type(exc.reason).__name__
+            raise RuntimeError(
+                f"artifact storage transport failed for the signed download: {reason}"
+            ) from None
 
     def get_paginated(self, resource: str) -> list[Any]:
         separator = "&" if "?" in resource else "?"

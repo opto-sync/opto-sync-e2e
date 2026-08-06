@@ -7,6 +7,10 @@
 **/.npm/
 servers/node/dist/
 
+# Python bytecode
+**/__pycache__/
+*.py[cod]
+
 # Dart
 **/.dart_tool/
 **/pubspec.lock
@@ -27,3 +31,7 @@ Thumbs.db
 # Zed pack output
 .zed/
 .zed-pack/
+tmp
+temp
+tmp/worktrees
+temp/worktrees
