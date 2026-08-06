@@ -6,7 +6,7 @@ on:
       - 'compatibility/contract.v1.json'
       - 'compatibility/fixtures/**'
       - 'scripts/check-historical-fixtures.py'
-      - 'test/compatibility/indexeddb-migration.mjs'
+      - 'suite/compatibility/indexeddb-migration.mjs'
       - 'docs/COMPATIBILITY_FIXTURES.md'
       - '.github/workflows/indexeddb-migration.yml'
   push:
@@ -15,7 +15,7 @@ on:
       - 'compatibility/contract.v1.json'
       - 'compatibility/fixtures/**'
       - 'scripts/check-historical-fixtures.py'
-      - 'test/compatibility/indexeddb-migration.mjs'
+      - 'suite/compatibility/indexeddb-migration.mjs'
       - 'docs/COMPATIBILITY_FIXTURES.md'
       - '.github/workflows/indexeddb-migration.yml'
   workflow_dispatch:
@@ -28,8 +28,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  OPTO_SYNC_CLIENTS_SHA: 54874e9f7df6009fccd9034fce39306daef2c043
-  SYNCER_C_SHA: 7795ce2d1342e17d934d2faafff5c8ed4322609e
+  OPTO_SYNC_CLIENTS_SHA: 38f0fcc6a471455a0a20aec5f7fa63d3f70d5f89
+  SYNCER_C_SHA: 8d2b275a89062403666f4bdf196d246a07c84484
 
 jobs:
   chromium-indexeddb:
@@ -86,7 +86,7 @@ jobs:
           OPTO_SYNC_E2E_ROOT: ${{ github.workspace }}/opto-sync-e2e
           OPTO_SYNC_CLIENTS_ROOT: ${{ github.workspace }}/opto-sync-clients
           INDEXEDDB_MIGRATION_DIAGNOSTICS: ${{ runner.temp }}/indexeddb-migration-diagnostics.json
-        run: node opto-sync-e2e/test/compatibility/indexeddb-migration.mjs
+        run: node opto-sync-e2e/suite/compatibility/indexeddb-migration.mjs
 
       - name: Upload synthetic logical diagnostics on failure
         if: failure()

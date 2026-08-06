@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "releaseSetId": "opto-sync-2026-07-31-suite-certified-candidate",
+  "evidenceState": "produced",
+  "sources": {
+    "syncer": {
+      "repository": "opto-sync/syncer.c",
+      "sha": "8d2b275a89062403666f4bdf196d246a07c84484",
+      "version": "0.2.1",
+      "plannedTag": "v0.2.1",
+      "canonicalArchive": "opto-sync-syncer-0.2.1.tar.gz",
+      "archives": [
+        "opto-sync-syncer-0.2.1.tar.gz",
+        "opto-sync-syncer-c-0.2.1.tar.gz",
+        "opto-sync-syncer-wasm-0.2.1.tar.gz"
+      ]
+    },
+    "clients": {
+      "repository": "opto-sync/opto-sync-clients",
+      "sha": "38f0fcc6a471455a0a20aec5f7fa63d3f70d5f89",
+      "version": "0.2.0",
+      "plannedTag": "v0.2.0",
+      "canonicalArchive": "opto-sync-opto-sync-clients-0.2.0.tar.gz",
+      "archives": [
+        "opto-sync-opto-sync-clients-0.2.0.tar.gz"
+      ],
+      "embeddedSyncerSha": "8d2b275a89062403666f4bdf196d246a07c84484"
+    },
+    "e2e": {
+      "repository": "opto-sync/opto-sync-e2e",
+      "sha": "562e3f62645252ed79328b7ac30ce404ceb5fc92",
+      "version": "0.1.0",
+      "plannedTag": "v0.1.0",
+      "canonicalArchive": "opto-sync-opto-sync-e2e-0.1.0.tar.gz",
+      "archives": [
+        "opto-sync-opto-sync-e2e-0.1.0.tar.gz"
+      ],
+      "pinnedSyncerSha": "8d2b275a89062403666f4bdf196d246a07c84484",
+      "pinnedClientsSha": "38f0fcc6a471455a0a20aec5f7fa63d3f70d5f89",
+      "requiredPackagePaths": [
+        "pkg/suite/run_e2e.sh",
+        "pkg/suite/clients/run_all.sh"
+      ]
+    }
+  },
+  "tooling": {
+    "zedCliRepository": "zed-pkg/zed-cli",
+    "zedCliSha": "c636fb8f6b08695c6b4fe94e2481f4d57270b2d7",
+    "zedInterfacesRepository": "zed-pkg/zed-interfaces",
+    "zedInterfacesSha": "415e871b1fb3dd97744c134351408a3224805dfb"
+  },
+  "evidenceRequirements": {
+    "packFromUntouchedCheckouts": true,
+    "packTwiceAndCompare": true,
+    "rejectGeneratedTestBinaries": true,
+    "verifyRecursiveCoreParity": true,
+    "runSourcePackageChecks": true,
+    "runPublishDryRuns": true,
+    "recordSha256AndSize": true,
+    "publishArtifacts": false
+  },
+  "rollback": {
+    "owner": "Opto-Sync maintainers; the protected release approver is incident commander",
+    "procedureDocument": "release/ROLLBACK.md",
+    "partialReleasePolicy": "Never overwrite or retag an immutable version; stop publication, deprecate or yank only through reviewed controls, and roll consumers back as one core-plus-clients release set."
+  }
+}

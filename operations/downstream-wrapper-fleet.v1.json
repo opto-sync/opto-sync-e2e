@@ -1,0 +1,402 @@
+{
+  "schemaVersion": 1,
+  "ownerIssue": "DEN-1466",
+  "parentIssue": "DEN-313",
+  "dependency": {
+    "package": "opto-sync/opto-sync-clients",
+    "range": "^0.2.0"
+  },
+  "releaseGates": ["DEN-309", "DEN-363"],
+  "requiredScenarios": [
+    "frozen-install-provenance",
+    "durable-restart",
+    "optimistic-local-view-rebase",
+    "remote-confirmed-no-premature-view",
+    "stable-mutation-id-replay",
+    "stale-base-conflict",
+    "tombstone-no-resurrection",
+    "indexeddb",
+    "sqlite",
+    "postgres-supabase-authority",
+    "realtime-is-wake-hint",
+    "background-handoff"
+  ],
+  "wrappers": [
+    {
+      "wave": "A",
+      "linearIssue": "DEN-1386",
+      "repository": "zed-pkg/zed-sync",
+      "branch": "agent/den-1386-opto-sync-zed-adapter",
+      "pullRequest": 4,
+      "languages": ["rust", "typescript", "dart"],
+      "persistence": ["indexeddb", "sqlite", "postgres", "supabase"],
+      "bootstrapIndependent": true,
+      "legacyParityRequired": false,
+      "additionalScenarios": ["zed-package-bootstrap-independence"],
+      "domainGuards": [
+        "zed-cli, registry resolution, manifest parsing, lock parsing, and artifact installation remain independent of opto-sync",
+        "zed-sync retains only Zed package-domain schemas, policy defaults, telemetry names, auth mapping, and compatibility facades"
+      ],
+      "e2e": {
+        "status": "existing",
+        "repository": "zed-pkg/zed-e2e",
+        "branch": "agent/den-1386-opto-sync-adoption-e2e",
+        "pullRequest": 7
+      }
+    },
+    {
+      "wave": "A",
+      "linearIssue": "DEN-1386",
+      "repository": "sonus-auris/sonus-auris-sync",
+      "branch": "agent/den-1386-opto-sync-zed-adapter",
+      "pullRequest": 9,
+      "languages": ["rust", "typescript", "dart"],
+      "persistence": ["indexeddb", "sqlite", "postgres", "supabase"],
+      "bootstrapIndependent": false,
+      "legacyParityRequired": true,
+      "additionalScenarios": ["legacy-gitlink-parity", "audio-blob-exclusion"],
+      "domainGuards": [
+        "raw encrypted audio remains in the blob pipeline while sync moves metadata and manifests only",
+        "existing exact syncer.c and opto-sync-clients source pins remain until installed-artifact parity is measured"
+      ],
+      "e2e": {
+        "status": "existing",
+        "repository": "sonus-auris/sonus-auris-e2e",
+        "branch": "agent/den-1386-opto-sync-adoption-e2e",
+        "pullRequest": 11
+      }
+    },
+    {
+      "wave": "A",
+      "linearIssue": "DEN-1386",
+      "repository": "voxletra/voxletra-sync",
+      "branch": "agent/den-1386-opto-sync-zed-adapter",
+      "pullRequest": 3,
+      "languages": ["rust", "typescript", "dart"],
+      "persistence": ["indexeddb", "sqlite", "postgres", "supabase"],
+      "bootstrapIndependent": false,
+      "legacyParityRequired": true,
+      "additionalScenarios": ["legacy-gitlink-parity", "formal-trace-parity", "transcription-schema-parity"],
+      "domainGuards": [
+        "transcription and language-domain schemas remain Voxletra-owned",
+        "existing exact syncer.c and opto-sync-clients source pins remain until installed-artifact and formal-trace parity is measured"
+      ],
+      "e2e": {
+        "status": "existing",
+        "repository": "voxletra/voxletra-e2e",
+        "branch": "agent/den-1386-opto-sync-adoption-e2e",
+        "pullRequest": 2
+      }
+    },
+    {
+      "wave": "B",
+      "linearIssue": "DEN-1387",
+      "repository": "3FA-app/3fa-app-sync",
+      "branch": "agent/den-1387-opto-sync-zed-adapter",
+      "pullRequest": 9,
+      "languages": ["rust", "typescript", "dart"],
+      "persistence": ["indexeddb", "sqlite", "postgres", "supabase"],
+      "bootstrapIndependent": false,
+      "legacyParityRequired": false,
+      "additionalScenarios": ["security-transition-remote-confirmation"],
+      "domainGuards": [
+        "factor secrets, OTP material, password data, biometric data, and recovery secrets never enter generic sync payloads",
+        "subject, device, tenant, role, token refresh, and security-transition policy remain 3FA-owned"
+      ],
+      "e2e": {
+        "status": "existing",
+        "repository": "3FA-app/3fa-app-e2e",
+        "branch": "agent/den-1387-opto-sync-e2e",
+        "pullRequest": 10
+      }
+    },
+    {
+      "wave": "B",
+      "linearIssue": "DEN-1387",
+      "repository": "akrion-sim/akrion-sim-sync",
+      "branch": "agent/den-1387-opto-sync-zed-adapter",
+      "pullRequest": 1,
+      "languages": ["rust", "typescript", "dart"],
+      "persistence": ["indexeddb", "sqlite", "postgres", "supabase"],
+      "bootstrapIndependent": false,
+      "legacyParityRequired": false,
+      "additionalScenarios": ["simulation-checkpoint-parity"],
+      "domainGuards": [
+        "simulation model, match state, policy identity, and deterministic engine checkpoints remain Akrion-owned",
+        "large simulation artifacts and training corpora remain outside generic record synchronization"
+      ],
+      "e2e": {
+        "status": "provisioning_required",
+        "repository": "akrion-sim/akrion-sim-e2e",
+        "branch": null,
+        "pullRequest": null,
+        "blocker": "The authenticated GitHub connector can modify repositories but exposes no repository-creation operation; create this repository before Wave B completion."
+      }
+    },
+    {
+      "wave": "B",
+      "linearIssue": "DEN-1387",
+      "repository": "athlet-o/athleto-sync",
+      "branch": "agent/den-1387-opto-sync-zed-adapter",
+      "pullRequest": 2,
+      "languages": ["rust", "typescript", "dart"],
+      "persistence": ["indexeddb", "sqlite", "postgres", "supabase"],
+      "bootstrapIndependent": false,
+      "legacyParityRequired": false,
+      "additionalScenarios": ["commerce-operation-policy"],
+      "domainGuards": [
+        "shop, tenant, cart, order, inventory, and authorization policy remain Athlet-O-owned",
+        "Postgres outbox, RLS, generated interfaces, and HTMX compatibility remain above the shared engine"
+      ],
+      "e2e": {
+        "status": "existing",
+        "repository": "athlet-o/athleto-e2e",
+        "branch": "agent/den-1387-opto-sync-e2e",
+        "pullRequest": 3
+      }
+    },
+    {
+      "wave": "B",
+      "linearIssue": "DEN-1387",
+      "repository": "daedalus-fab/daedalus-sync",
+      "branch": "agent/den-1387-opto-sync-zed-adapter",
+      "pullRequest": 3,
+      "languages": ["rust", "typescript", "dart"],
+      "persistence": ["indexeddb", "sqlite", "postgres", "supabase"],
+      "bootstrapIndependent": false,
+      "legacyParityRequired": false,
+      "additionalScenarios": ["fabrication-schema-parity"],
+      "domainGuards": [
+        "schema registry, generated interfaces, fabrication validation, workspace authorization, and RPC mapping remain Daedalus-owned",
+        "machine-control or irreversible fabrication commands are not optimistic generic sync operations"
+      ],
+      "e2e": {
+        "status": "existing",
+        "repository": "daedalus-fab/daedalus-fab-e2e",
+        "branch": "agent/den-1387-opto-sync-e2e",
+        "pullRequest": 4
+      }
+    },
+    {
+      "wave": "B",
+      "linearIssue": "DEN-1387",
+      "repository": "fiducia-cloud/fiducia-sync",
+      "branch": "agent/den-1387-opto-sync-zed-adapter",
+      "pullRequest": 17,
+      "languages": ["rust", "typescript"],
+      "persistence": ["indexeddb", "postgres", "supabase"],
+      "bootstrapIndependent": false,
+      "legacyParityRequired": false,
+      "additionalScenarios": ["customer-admin-plane-isolation", "lock-lease-server-authority"],
+      "domainGuards": [
+        "customer and admin planes use separate local databases, Supabase projects, credentials, and cursors",
+        "distributed lock, lease, quorum, fencing-token, consensus, cron, tenant, RLS, and shared-auth authority remain Fiducia-owned"
+      ],
+      "e2e": {
+        "status": "existing",
+        "repository": "fiducia-cloud/fiducia-e2e",
+        "branch": "agent/den-1387-opto-sync-e2e",
+        "pullRequest": 10
+      }
+    },
+    {
+      "wave": "B",
+      "linearIssue": "DEN-1387",
+      "repository": "messaging-intel/msgint-sync",
+      "branch": "agent/den-1387-opto-sync-zed-adapter",
+      "pullRequest": 15,
+      "languages": ["rust", "typescript", "dart"],
+      "persistence": ["indexeddb", "sqlite", "postgres", "supabase"],
+      "bootstrapIndependent": false,
+      "legacyParityRequired": false,
+      "additionalScenarios": ["consent-withdrawal-suppression", "sensitive-data-telemetry-exclusion"],
+      "domainGuards": [
+        "consent, withdrawal, suppression, deletion replay, research policy, and source authorization remain Messaging Intel-owned",
+        "raw messages, health values, model prompts, provider response text, and credentials never enter generic sync telemetry"
+      ],
+      "e2e": {
+        "status": "existing",
+        "repository": "messaging-intel/msgint-e2e",
+        "branch": "agent/den-1387-opto-sync-e2e",
+        "pullRequest": 14
+      }
+    },
+    {
+      "wave": "B",
+      "linearIssue": "DEN-1387",
+      "repository": "quaestor-ledger/quaestor-ledger-sync",
+      "branch": "agent/den-1387-opto-sync-zed-adapter",
+      "pullRequest": 2,
+      "languages": ["rust", "typescript", "dart"],
+      "persistence": ["indexeddb", "sqlite", "postgres", "supabase"],
+      "bootstrapIndependent": false,
+      "legacyParityRequired": false,
+      "additionalScenarios": ["ledger-authority", "decimal-string-canonicalization"],
+      "domainGuards": [
+        "sync never moves money or executes a financial transaction",
+        "amounts, account authority, tenant policy, audit evidence, roles, and conflict escalation remain Quaestor-owned"
+      ],
+      "e2e": {
+        "status": "existing",
+        "repository": "quaestor-ledger/quaestor-ledger-e2e",
+        "branch": "agent/den-1387-opto-sync-e2e",
+        "pullRequest": 5
+      }
+    },
+    {
+      "wave": "B",
+      "linearIssue": "DEN-1387",
+      "repository": "scintilla-run/scintilla-sync",
+      "branch": "agent/den-1387-opto-sync-zed-adapter",
+      "pullRequest": 2,
+      "languages": ["rust", "typescript", "dart", "gleam"],
+      "persistence": ["indexeddb", "sqlite", "postgres", "supabase"],
+      "bootstrapIndependent": false,
+      "legacyParityRequired": false,
+      "additionalScenarios": ["gleam-cross-runtime-parity", "gitops-explicit-tombstone"],
+      "domainGuards": [
+        "Gleam, Rust, TypeScript, and Dart adapters replay the same protocol fixtures",
+        "GitOps state, function source policy, workspace authorization, execution ownership, and secret redaction remain Scintilla-owned"
+      ],
+      "e2e": {
+        "status": "existing",
+        "repository": "scintilla-run/scintilla-run-e2e",
+        "branch": "agent/den-1387-opto-sync-e2e",
+        "pullRequest": 6
+      }
+    },
+    {
+      "wave": "B",
+      "linearIssue": "DEN-1387",
+      "repository": "shared-auth/shared-auth-sync",
+      "branch": "agent/den-1387-opto-sync-zed-adapter",
+      "pullRequest": 4,
+      "languages": ["rust", "typescript", "dart"],
+      "persistence": ["indexeddb", "sqlite", "postgres", "supabase"],
+      "bootstrapIndependent": false,
+      "legacyParityRequired": false,
+      "additionalScenarios": ["server-authoritative-security-state", "credential-exclusion"],
+      "domainGuards": [
+        "identity, session, role, revocation, authorization, token refresh, and OTP authority remain on Shared Auth servers",
+        "tokens, OTP secrets, password material, and biometric data never enter generic sync payloads"
+      ],
+      "e2e": {
+        "status": "existing",
+        "repository": "shared-auth/shared-auth-e2e",
+        "branch": "agent/den-1387-opto-sync-e2e",
+        "pullRequest": 8
+      }
+    },
+    {
+      "wave": "C",
+      "linearIssue": "DEN-1388",
+      "repository": "anticaptrad/act-sync",
+      "branch": "agent/den-1388-opto-sync-zed-adapter",
+      "pullRequest": 4,
+      "languages": ["rust", "typescript", "dart"],
+      "persistence": ["indexeddb", "sqlite", "postgres", "supabase"],
+      "bootstrapIndependent": false,
+      "legacyParityRequired": false,
+      "additionalScenarios": ["python-reducer-semantic-oracle", "provider-terminal-state"],
+      "domainGuards": [
+        "the Python reducer remains an independent semantic oracle for Rust, TypeScript, and Dart adapters",
+        "provider authorization, translation policy, language validation, terminal states, tombstones, and retry classification remain Anticaptrad-owned"
+      ],
+      "e2e": {
+        "status": "existing",
+        "repository": "anticaptrad/act-e2e",
+        "branch": "agent/den-1388-opto-sync-e2e",
+        "pullRequest": 4
+      }
+    },
+    {
+      "wave": "C",
+      "linearIssue": "DEN-1388",
+      "repository": "benefactor-cc/benefactor-sync",
+      "branch": "agent/den-1388-opto-sync-zed-adapter",
+      "pullRequest": 2,
+      "languages": ["rust", "typescript"],
+      "persistence": ["indexeddb", "postgres", "supabase"],
+      "bootstrapIndependent": false,
+      "legacyParityRequired": false,
+      "additionalScenarios": ["lead-source-provenance", "outreach-consent-policy"],
+      "domainGuards": [
+        "lead-source provenance, ICP policy, outreach consent, suppression, provider limits, and CRM ownership remain Benefactor-owned",
+        "scraped source data, provider credentials, and raw outreach content do not enter generic sync telemetry"
+      ],
+      "e2e": {
+        "status": "provisioning_required",
+        "repository": "benefactor-cc/benefactor-e2e",
+        "branch": null,
+        "pullRequest": null,
+        "blocker": "The authenticated GitHub connector can modify repositories but exposes no repository-creation operation; create this repository before Wave C completion."
+      }
+    },
+    {
+      "wave": "C",
+      "linearIssue": "DEN-1388",
+      "repository": "file-tunnel/ftnl-sync",
+      "branch": "agent/den-1388-opto-sync-zed-adapter",
+      "pullRequest": 2,
+      "languages": ["rust", "typescript"],
+      "persistence": ["indexeddb", "sqlite", "postgres", "supabase"],
+      "bootstrapIndependent": false,
+      "legacyParityRequired": true,
+      "additionalScenarios": ["legacy-client-pin-parity", "blob-plane-exclusion", "resume-integrity"],
+      "domainGuards": [
+        "file bytes and encrypted blob transport remain outside the replicated metadata plane",
+        "chunk offsets, integrity hashes, ownership, resume checkpoints, and the retained client source-pin parity remain File Tunnel-owned"
+      ],
+      "e2e": {
+        "status": "existing",
+        "repository": "file-tunnel/ftnl-e2e",
+        "branch": "agent/den-1388-opto-sync-e2e",
+        "pullRequest": 4
+      }
+    },
+    {
+      "wave": "C",
+      "linearIssue": "DEN-1388",
+      "repository": "hypesiege/hypesiege-sync",
+      "branch": "agent/den-1388-opto-sync-zed-adapter",
+      "pullRequest": 2,
+      "languages": ["rust", "typescript", "dart"],
+      "persistence": ["indexeddb", "sqlite", "postgres", "supabase"],
+      "bootstrapIndependent": false,
+      "legacyParityRequired": false,
+      "additionalScenarios": ["media-manifest-blob-exclusion", "provider-transition-authority"],
+      "domainGuards": [
+        "media bytes remain in the product blob pipeline while sync moves manifests and scheduling metadata",
+        "provider credentials, publishing, cancellation, account linking, and irreversible social transitions remain Hypesiege-owned and remote-confirmed"
+      ],
+      "e2e": {
+        "status": "existing",
+        "repository": "hypesiege/hypesiege-e2e",
+        "branch": "agent/den-1388-opto-sync-e2e",
+        "pullRequest": 2
+      }
+    },
+    {
+      "wave": "C",
+      "linearIssue": "DEN-1388",
+      "repository": "StreemPilot/streempilot-sync",
+      "branch": "agent/den-1388-opto-sync-zed-adapter",
+      "pullRequest": 2,
+      "languages": ["rust", "typescript", "dart"],
+      "persistence": ["indexeddb", "sqlite", "postgres", "supabase"],
+      "bootstrapIndependent": false,
+      "legacyParityRequired": false,
+      "additionalScenarios": ["media-plane-exclusion", "live-broadcast-server-authority"],
+      "domainGuards": [
+        "WebRTC media, signaling, and encoded stream data remain outside replicated application metadata",
+        "destination credentials, stream keys, private media URLs, broadcast activation, and irreversible live transitions remain StreemPilot-owned and remote-confirmed"
+      ],
+      "e2e": {
+        "status": "existing",
+        "repository": "StreemPilot/streempilot-e2e",
+        "branch": "agent/den-1388-opto-sync-e2e",
+        "pullRequest": 2
+      }
+    }
+  ]
+}

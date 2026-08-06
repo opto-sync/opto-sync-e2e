@@ -13,6 +13,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 SHA = re.compile(r"^[0-9a-f]{40}$")
 CHECKSUM = re.compile(r"^[0-9a-f]{64}$")
+ARTIFACT_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 SAFE_PATH = re.compile(r"^[A-Za-z0-9._/-]+$")
 PLACEHOLDER = {"", "REQUIRED_BEFORE_APPROVAL"}
 
@@ -96,6 +97,45 @@ def package(value: dict[str, Any], name: str) -> dict[str, Any]:
     return packages[name]
 
 
+def validate_coordinated_run(run: dict[str, Any], package_entry: dict[str, Any], name: str) -> list[str]:
+    blockers: list[str] = []
+    if run.get("conclusion") != "success":
+        blockers.append(f"required certification run for {name} is not successful")
+
+    tested_sha = run.get("testedSha", run.get("headSha"))
+    if tested_sha != package_entry["sha"]:
+        blockers.append(f"required certification run for {name} did not test the package SHA")
+
+    # A source-owned workflow may attest its own head directly. A coordinated
+    # evidence controller may have a distinct workflow head, but then it must
+    # explicitly identify the tested source SHA and immutable evidence artifact.
+    if "testedSha" in run:
+        for field in ("headSha", "workflowSha", "testedSha"):
+            if not isinstance(run.get(field), str) or not SHA.fullmatch(run[field]):
+                blockers.append(f"required certification run for {name} has invalid {field}")
+        try:
+            repository(run.get("workflowRepository"), f"requiredRuns.{name}.workflowRepository")
+        except SystemExit:
+            raise
+        if not isinstance(run.get("runId"), int) or run["runId"] <= 0:
+            blockers.append(f"required certification run for {name} has invalid runId")
+        if not isinstance(run.get("runAttempt"), int) or run["runAttempt"] <= 0:
+            blockers.append(f"required certification run for {name} has invalid runAttempt")
+        if not isinstance(run.get("evidenceArtifactId"), int) or run["evidenceArtifactId"] <= 0:
+            blockers.append(f"required certification run for {name} has no immutable artifact id")
+        if not isinstance(run.get("evidenceArtifact"), str) or not run["evidenceArtifact"].strip():
+            blockers.append(f"required certification run for {name} has no evidence artifact name")
+        digest = run.get("evidenceArtifactDigest")
+        if not isinstance(digest, str) or not ARTIFACT_DIGEST.fullmatch(digest):
+            blockers.append(f"required certification run for {name} has no valid evidence artifact digest")
+    else:
+        head_sha = run.get("headSha")
+        if not isinstance(head_sha, str) or not SHA.fullmatch(head_sha):
+            blockers.append(f"required certification run for {name} has invalid headSha")
+
+    return blockers
+
+
 def release_blockers(value: dict[str, Any]) -> list[str]:
     if value.get("schemaVersion") != 1:
         fail("release.schemaVersion must be 1")
@@ -118,6 +158,12 @@ def release_blockers(value: dict[str, Any]) -> list[str]:
             fail(f"packages.{name}.sha must be a 40-hex commit")
         for field in ("tag", "version", "zedPackage"):
             text(entry.get(field), f"packages.{name}.{field}")
+        tree_sha = entry.get("treeSha")
+        if tree_sha is not None and (not isinstance(tree_sha, str) or not SHA.fullmatch(tree_sha)):
+            fail(f"packages.{name}.treeSha must be a 40-hex tree")
+        archive = entry.get("canonicalArchive")
+        if archive is not None:
+            relative_path(archive, f"packages.{name}.canonicalArchive")
     if clients.get("embeddedSyncerSha") != syncer["sha"]:
         fail("clients.embeddedSyncerSha differs from syncer.sha")
     if e2e.get("pinnedSyncerSha") != syncer["sha"] or e2e.get("pinnedClientsSha") != clients["sha"]:
@@ -138,6 +184,43 @@ def release_blockers(value: dict[str, Any]) -> list[str]:
             fail(f"artifact checksum {name} must be 64 lowercase hex")
         if set(checksum) == {"0"}:
             blockers.append(f"artifact checksum {name} is still a placeholder")
+
+    artifacts = certification.get("artifactFiles")
+    if artifacts is not None:
+        if not isinstance(artifacts, list) or not artifacts:
+            fail("release.certification.artifactFiles must be a non-empty array")
+        canonical: dict[str, dict[str, Any]] = {}
+        seen_files: set[str] = set()
+        for index, artifact in enumerate(artifacts):
+            if not isinstance(artifact, dict):
+                fail(f"artifactFiles[{index}] must be an object")
+            source = text(artifact.get("source"), f"artifactFiles[{index}].source")
+            if source not in {"syncer", "clients", "e2e"}:
+                fail(f"artifactFiles[{index}].source is unsupported")
+            filename = relative_path(artifact.get("filename"), f"artifactFiles[{index}].filename")
+            if filename in seen_files:
+                fail(f"duplicate artifact filename: {filename}")
+            seen_files.add(filename)
+            checksum = artifact.get("sha256")
+            if not isinstance(checksum, str) or not CHECKSUM.fullmatch(checksum):
+                fail(f"artifactFiles[{index}].sha256 must be 64 lowercase hex")
+            for field in ("size", "fileCount"):
+                if not isinstance(artifact.get(field), int) or artifact[field] <= 0:
+                    fail(f"artifactFiles[{index}].{field} must be a positive integer")
+            if artifact.get("canonical") is True:
+                if source in canonical:
+                    fail(f"multiple canonical artifacts for {source}")
+                canonical[source] = artifact
+        if set(canonical) != {"syncer", "clients", "e2e"}:
+            blockers.append("canonical artifact evidence is incomplete")
+        else:
+            for source, entry in (("syncer", syncer), ("clients", clients), ("e2e", e2e)):
+                if canonical[source]["sha256"] != checksums[source]:
+                    blockers.append(f"canonical artifact checksum for {source} differs from release checksum")
+                expected_archive = entry.get("canonicalArchive")
+                if expected_archive and canonical[source]["filename"] != expected_archive:
+                    blockers.append(f"canonical artifact filename for {source} differs from package contract")
+
     runs = certification.get("requiredRuns")
     if not isinstance(runs, list) or len(runs) < 3:
         fail("certification.requiredRuns must contain at least three runs")
@@ -147,10 +230,20 @@ def release_blockers(value: dict[str, Any]) -> list[str]:
         if not isinstance(run, dict):
             blockers.append(f"no required certification run for {name}")
         else:
-            if run.get("conclusion") != "success":
-                blockers.append(f"required certification run for {name} is not successful")
-            if run.get("headSha") != entry["sha"]:
-                blockers.append(f"required certification run for {name} did not test the package SHA")
+            blockers.extend(validate_coordinated_run(run, entry, name))
+
+    tooling = certification.get("tooling")
+    if tooling is not None:
+        if not isinstance(tooling, dict):
+            fail("release.certification.tooling must be an object")
+        repository(tooling.get("zedCliRepository"), "certification.tooling.zedCliRepository")
+        repository(tooling.get("zedInterfacesRepository"), "certification.tooling.zedInterfacesRepository")
+        for field in ("zedCliSha", "zedInterfacesSha"):
+            if not isinstance(tooling.get(field), str) or not SHA.fullmatch(tooling[field]):
+                fail(f"certification.tooling.{field} must be a 40-hex commit")
+    if certification.get("publicationPerformed") not in {None, False}:
+        blockers.append("candidate evidence unexpectedly reports that publication was performed")
+
     rollback = value.get("rollback")
     if not isinstance(rollback, dict):
         fail("release.rollback must be an object")
@@ -158,6 +251,11 @@ def release_blockers(value: dict[str, Any]) -> list[str]:
         item = rollback.get(field)
         if not isinstance(item, str) or item.strip() in PLACEHOLDER:
             blockers.append(f"rollback.{field} is not approved")
+    procedure = rollback.get("procedure")
+    if isinstance(procedure, str) and procedure.strip() not in PLACEHOLDER:
+        path = ROOT / procedure
+        if not path.is_file():
+            blockers.append(f"rollback.procedure does not exist: {procedure}")
     return blockers
 
 

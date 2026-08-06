@@ -209,6 +209,44 @@ services:
       timeout: 5s
       retries: 20
 
+  # Test-mode instance with the realtime transports under test. WebSocket
+  # always rides the HTTP port at /sync/ws; setting SYNCER_TCP_PORT is what
+  # enables the TCP NDJSON listener (native/server-side clients only —
+  # browsers cannot open raw TCP sockets).
+  node-ws:
+    image: opto-sync-e2e-node:latest
+    ports:
+      - "3053:3053"
+      - "3054:3054"
+    env_file:
+      - .env
+    environment:
+      - SERVER_PORT=3053
+      - SYNCER_REQUIRE_NATIVE=1
+      - E2E_ALLOW_OPTION_OVERRIDE=1
+      - SYNCER_TCP_PORT=3054
+    networks:
+      - syncer-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      node:
+        condition: service_healthy
+    restart: unless-stopped
+    profiles:
+      - wstest
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3053/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 2s
+      timeout: 5s
+      retries: 20
+
   # --- Dart Shelf Server (in-memory, C FFI merging) ---
   dart:
     build:
@@ -249,8 +287,8 @@ services:
     depends_on:
       - node
     volumes:
-      - ./test:/test:ro
-    entrypoint: ["/bin/sh", "/test/run_e2e.sh"]
+      - ./suite:/suite:ro
+    entrypoint: ["/bin/sh", "/suite/run_e2e.sh"]
     networks:
       - syncer-net
     profiles:
@@ -265,8 +303,8 @@ services:
       - dart
       - sagitta
     volumes:
-      - ./test:/test:ro
-    entrypoint: ["/bin/sh", "/test/run_e2e_full.sh"]
+      - ./suite:/suite:ro
+    entrypoint: ["/bin/sh", "/suite/run_e2e_full.sh"]
     networks:
       - syncer-net
     profiles:
@@ -279,7 +317,7 @@ services:
   #   docker compose --profile conformance up --exit-code-from conformance
   conformance:
     image: node:22-alpine
-    working_dir: /test
+    working_dir: /suite
     depends_on:
       postgres:
         condition: service_healthy
@@ -288,8 +326,8 @@ services:
     environment:
       - BASE_URL=http://node:3003
     volumes:
-      - ./test:/test:ro
-    entrypoint: ["node", "/test/conformance/run.mjs"]
+      - ./suite:/suite:ro
+    entrypoint: ["node", "/suite/conformance/run.mjs"]
     networks:
       - syncer-net
     profiles:
@@ -302,7 +340,7 @@ services:
   #   docker compose --profile protocol up --exit-code-from protocol
   protocol:
     image: node:22-alpine
-    working_dir: /test
+    working_dir: /suite
     depends_on:
       postgres:
         condition: service_healthy
@@ -311,18 +349,41 @@ services:
     environment:
       - BASE_URL=http://node:3003
     volumes:
-      - ./test:/test:ro
-    entrypoint: ["node", "/test/protocol/run.mjs"]
+      - ./suite:/suite:ro
+    entrypoint: ["node", "/suite/protocol/run.mjs"]
     networks:
       - syncer-net
     profiles:
       - protocol
 
+  # WebSocket + TCP transport parity against the shared protocol handlers:
+  # push/pull/snapshot frame bodies must match the HTTP endpoints exactly,
+  # committed pushes must broadcast `changed` hints to every other
+  # connection, and malformed frames must never take a connection down. Run:
+  #   docker compose --profile wstest up --build --exit-code-from ws-protocol
+  ws-protocol:
+    image: node:22-alpine
+    working_dir: /suite
+    depends_on:
+      node-ws:
+        condition: service_healthy
+    environment:
+      - BASE_URL=http://node-ws:3053
+      - SYNCER_TCP_PORT=3054
+      - TCP_HOST=node-ws
+    volumes:
+      - ./suite:/suite:ro
+    entrypoint: ["node", "/suite/protocol/ws-transport.mjs"]
+    networks:
+      - syncer-net
+    profiles:
+      - wstest
+
   # Adversarial authentication and cross-tenant isolation checks. Run:
   #   docker compose --profile auth up --exit-code-from auth-protocol
   auth-protocol:
     image: node:22-alpine
-    working_dir: /test
+    working_dir: /suite
     depends_on:
       node-auth:
         condition: service_healthy
@@ -334,8 +395,8 @@ services:
       - TENANT_B_TOKEN=tenant-b-test-token-000000000002
       - ADMIN_TOKEN=protocol-admin-test-token-0000000001
     volumes:
-      - ./test:/test:ro
-    entrypoint: ["node", "/test/protocol/auth.mjs"]
+      - ./suite:/suite:ro
+    entrypoint: ["node", "/suite/protocol/auth.mjs"]
     networks:
       - syncer-net
     profiles:
@@ -344,7 +405,7 @@ services:
   # Supabase-compatible asymmetric JWT verification and signed-claim isolation.
   jwt-auth-protocol:
     image: node:22-alpine
-    working_dir: /test
+    working_dir: /suite
     depends_on:
       node-jwt-auth:
         condition: service_healthy
@@ -354,8 +415,8 @@ services:
       - BASE_URL=http://node-jwt-auth:3033
       - RESET_URL=http://node:3003/reset
     volumes:
-      - ./test:/test:ro
-    entrypoint: ["node", "/test/protocol/jwt-auth.mjs"]
+      - ./suite:/suite:ro
+    entrypoint: ["node", "/suite/protocol/jwt-auth.mjs"]
     networks:
       - syncer-net
     profiles:
@@ -371,8 +432,8 @@ services:
       - PGPASSWORD=syncer_test
     volumes:
       - ./deploy/supabase/custom_access_token_hook.sql:/migration.sql:ro
-      - ./test/supabase/auth-hook-setup.sql:/setup.sql:ro
-      - ./test/supabase/auth-hook-test.sql:/test.sql:ro
+      - ./suite/supabase/auth-hook-setup.sql:/setup.sql:ro
+      - ./suite/supabase/auth-hook-test.sql:/test.sql:ro
     entrypoint:
       - /bin/sh
       - -c
@@ -400,7 +461,7 @@ services:
   #     --exit-code-from operations-protocol
   operations-protocol:
     image: node:22-alpine
-    working_dir: /test
+    working_dir: /suite
     depends_on:
       node-ops:
         condition: service_healthy
@@ -412,8 +473,8 @@ services:
       - SNAPSHOT_TOKEN=ops-snapshot-test-token-000000003
       - METRICS_TOKEN=ops-metrics-test-token-0000000000001
     volumes:
-      - ./test:/test:ro
-    entrypoint: ["node", "/test/protocol/operations.mjs"]
+      - ./suite:/suite:ro
+    entrypoint: ["node", "/suite/protocol/operations.mjs"]
     networks:
       - syncer-net
     profiles:
@@ -424,7 +485,7 @@ services:
   # verified before latency percentiles are reported.
   protocol-load:
     image: node:22-alpine
-    working_dir: /test
+    working_dir: /suite
     depends_on:
       node:
         condition: service_healthy
@@ -434,8 +495,8 @@ services:
       - LOAD_P95_MS=10000
       - LOAD_MAX_MS=15000
     volumes:
-      - ./test:/test:ro
-    entrypoint: ["node", "/test/protocol/load.mjs"]
+      - ./suite:/suite:ro
+    entrypoint: ["node", "/suite/protocol/load.mjs"]
     networks:
       - syncer-net
     profiles:
@@ -502,7 +563,7 @@ services:
 
   recovery-seed:
     image: node:22-alpine
-    working_dir: /test
+    working_dir: /suite
     depends_on:
       node:
         condition: service_healthy
@@ -513,8 +574,8 @@ services:
     environment:
       - BASE_URL=http://node:3003
     volumes:
-      - ./test:/test:ro
-    entrypoint: ["node", "/test/protocol/recovery-seed.mjs"]
+      - ./suite:/suite:ro
+    entrypoint: ["node", "/suite/protocol/recovery-seed.mjs"]
     healthcheck:
       test: ["CMD", "test", "-f", "/tmp/opto-sync-recovery-seed-ready"]
       interval: 1s
@@ -535,8 +596,8 @@ services:
       recovery-seed:
         condition: service_healthy
     volumes:
-      - ./test:/test:ro
-    entrypoint: ["/bin/sh", "/test/protocol/backup-restore.sh"]
+      - ./suite:/suite:ro
+    entrypoint: ["/bin/sh", "/suite/protocol/backup-restore.sh"]
     networks:
       - syncer-net
     profiles:
@@ -551,13 +612,13 @@ services:
   #     --profile sagitta up --exit-code-from cross-server
   cross-server:
     image: node:22-alpine
-    working_dir: /test
+    working_dir: /suite
     depends_on:
       node:
         condition: service_started
     volumes:
-      - ./test:/test:ro
-    entrypoint: ["node", "/test/cross-server/run.mjs"]
+      - ./suite:/suite:ro
+    entrypoint: ["node", "/suite/cross-server/run.mjs"]
     networks:
       - syncer-net
     profiles:

@@ -1,6 +1,6 @@
 name: E2E (client-in-the-loop)
 
-# test/clients/run_all.sh is the host-side suite: it drives the four real client
+# suite/clients/run_all.sh is the host-side suite: it drives the four real client
 # libraries (TypeScript, Dart, Rust, and Gleam) against a live Node+Postgres
 # server, then requires cross-client convergence.
 
@@ -32,12 +32,12 @@ env:
   # Exact pair certified by this E2E revision. opto-sync-clients embeds the same
   # syncer.c commit as a root gitlink; CI verifies that invariant before any
   # package manager or test code runs.
-  SYNCER_C_REF: 7795ce2d1342e17d934d2faafff5c8ed4322609e
-  CLIENTS_REF: 54874e9f7df6009fccd9034fce39306daef2c043
+  SYNCER_C_REF: 8d2b275a89062403666f4bdf196d246a07c84484
+  CLIENTS_REF: 38f0fcc6a471455a0a20aec5f7fa63d3f70d5f89
 
 jobs:
   client-in-the-loop:
-    name: test/clients/run_all.sh (ts + dart + rust + gleam vs live server)
+    name: suite/clients/run_all.sh (ts + dart + rust + gleam vs live server)
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -112,7 +112,7 @@ jobs:
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
-          key: cargo-registry-${{ runner.os }}-e2e-clients-${{ hashFiles('opto-sync-e2e/test/clients/rust/Cargo.lock') }}
+          key: cargo-registry-${{ runner.os }}-e2e-clients-${{ hashFiles('opto-sync-e2e/suite/clients/rust/Cargo.lock') }}
           restore-keys: cargo-registry-${{ runner.os }}-e2e-clients-
 
       - name: Build nested syncer.c core shared library for clients
@@ -141,11 +141,11 @@ jobs:
       # run_all.sh uses cargo in offline mode. Populate the committed graph
       # without regenerating or mutating the lockfile.
       - name: Pre-fetch locked Rust dependencies
-        working-directory: opto-sync-e2e/test/clients/rust
+        working-directory: opto-sync-e2e/suite/clients/rust
         run: cargo fetch --locked
 
       - name: Pre-resolve Dart dependencies
-        working-directory: opto-sync-e2e/test/clients/dart
+        working-directory: opto-sync-e2e/suite/clients/dart
         run: dart pub get
 
       - name: Build BEAM NIF and pre-resolve Gleam live-client dependencies
@@ -155,7 +155,7 @@ jobs:
           mix local.rebar --force
           mix deps.get
           mix compile
-          cd ../../../../opto-sync-e2e/test/clients/gleam
+          cd ../../../../opto-sync-e2e/suite/clients/gleam
           gleam deps download
           gleam format --check src test
 
@@ -192,14 +192,14 @@ jobs:
           echo "::error title=node server never became healthy::http://localhost:3003/health did not report {\"syncer\":\"native\"} within 120s"
           exit 1
 
-      - name: test/clients/run_all.sh
+      - name: suite/clients/run_all.sh
         working-directory: opto-sync-e2e
         env:
           OPTO_SYNC_REQUIRE_SERVER: '1'
           OPTO_SYNC_SERVER_URL: http://localhost:3003
           SYNCER_LIB_PATH: ${{ github.workspace }}/opto-sync-clients/syncer.c/core/build/libsyncer.so
           OPTO_SYNC_BEAM_EBIN: ${{ github.workspace }}/opto-sync-clients/syncer.c/bindings/beam/_build/dev/lib/opto_sync_nif/ebin
-        run: ./test/clients/run_all.sh
+        run: ./suite/clients/run_all.sh
 
       - name: Collect compose logs
         if: failure()
@@ -223,7 +223,7 @@ jobs:
       - name: Which suite broke
         if: failure()
         run: |
-          echo "::error title=opto-sync-e2e client-in-the-loop FAILED::test/clients/run_all.sh broke (ts, dart, rust, or gleam client vs the live node server) — the per-language PASS/FAIL summary is at the end of the run_all.sh step, and server logs are in the compose-logs-client-in-the-loop artifact."
+          echo "::error title=opto-sync-e2e client-in-the-loop FAILED::suite/clients/run_all.sh broke (ts, dart, rust, or gleam client vs the live node server) — the per-language PASS/FAIL summary is at the end of the run_all.sh step, and server logs are in the compose-logs-client-in-the-loop artifact."
 
       - name: Tear down (always)
         if: always()

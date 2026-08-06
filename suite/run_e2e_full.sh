@@ -7,13 +7,20 @@ set -e
 echo "==========================================="
 echo " opto-sync Full E2E Integration Tests"
 echo " Testing: Node, Rust Fullstack, Dart, Sagitta"
-echo " (rust-mash covered by test/supabase, not here)"
+echo " (rust-mash covered by suite/supabase, not here)"
 echo "==========================================="
 echo "Waiting for all servers to start..."
 sleep 10
 
 PASS=0
 FAIL=0
+
+# Per-run namespace for scratch subtrees, matching suite/cross-server/run.mjs.
+# These documents are long-lived and shared between suites, so any key this
+# script seeds with fixed timestamps must live under a fresh key each run —
+# otherwise a second run's seed is STALER than the first run's final state and
+# is correctly rejected, making the assertions fail on a healthy server.
+RUNNS="p$$"
 
 check() {
     if echo "$2" | grep -q "$3"; then
@@ -83,26 +90,39 @@ test_server() {
     # Asserting only '"merged":true' here would pass even under REPLACE
     # semantics, so seed a two-element array and then prove element-level
     # behavior: stale element rejected, untouched element kept, new appended.
+    #
+    # Every value carries a `ka-` prefix so it is UNIQUE within the document.
+    # These checks are whole-document substring greps, and this doc is shared
+    # with the cross-server convergence/commutativity scenarios, which store
+    # `xcomm_*` subtrees whose rows legitimately contain "v":"one"/"two"/"three".
+    # Bare values therefore matched foreign data: the positive checks passed
+    # even when reconciliation was wrong, and the "superseded value is gone"
+    # check failed even when it was right. Keep these sentinels unique.
+    #
+    # The array also lives under a per-run key: these payloads carry FIXED
+    # timestamps, so re-seeding the same key on a later run would be a stale
+    # write and be rejected on a correctly-working server.
+    KA="karows_$RUNNS"
     curl -s --max-time 10 -X POST "$URL/doc/$DOC/sync" \
         -H "Content-Type: application/json" \
-        -d '{"rows": [{"id": 1, "createdAt": 100, "updatedAt": 500, "v": "one"},
-                      {"id": 2, "createdAt": 100, "updatedAt": 500, "v": "two"}]}' \
+        -d "{\"$KA\": [{\"id\": 1, \"createdAt\": 100, \"updatedAt\": 500, \"v\": \"ka-one\"},
+                      {\"id\": 2, \"createdAt\": 100, \"updatedAt\": 500, \"v\": \"ka-two\"}]}" \
         >/dev/null 2>&1 || true
 
     ARRAY_SYNC=$(curl -s --max-time 10 -X POST "$URL/doc/$DOC/sync" \
         -H "Content-Type: application/json" \
-        -d '{"rows": [{"id": 2, "updatedAt": 100, "v": "STALE"},
-                      {"id": 3, "createdAt": 900, "updatedAt": 900, "v": "three"}]}' \
+        -d "{\"$KA\": [{\"id\": 2, \"updatedAt\": 100, \"v\": \"ka-STALE\"},
+                      {\"id\": 3, \"createdAt\": 900, \"updatedAt\": 900, \"v\": \"ka-three\"}]}" \
         2>/dev/null || echo "FAIL")
     echo "Array Sync: $ARRAY_SYNC"
     check "$NAME: keyed-array merge accepted" "$ARRAY_SYNC" '"merged":true'
 
     ROWS=$(curl -s --max-time 10 "$URL/doc/$DOC" 2>/dev/null || echo "FAIL")
     echo "Rows after: $ROWS"
-    check        "$NAME: keyed-array kept untouched element"   "$ROWS" '"one"'
-    check        "$NAME: keyed-array kept fresher element"     "$ROWS" '"two"'
-    check_absent "$NAME: keyed-array rejected stale element"   "$ROWS" 'STALE'
-    check        "$NAME: keyed-array appended new element"     "$ROWS" '"three"'
+    check        "$NAME: keyed-array kept untouched element"   "$ROWS" '"ka-one"'
+    check        "$NAME: keyed-array kept fresher element"     "$ROWS" '"ka-two"'
+    check_absent "$NAME: keyed-array rejected stale element"   "$ROWS" 'ka-STALE'
+    check        "$NAME: keyed-array appended new element"     "$ROWS" '"ka-three"'
 
     # createdAt is NOT a first-write-wins key in the default policy.
     #
@@ -114,12 +134,12 @@ test_server() {
     # APPLIED — element 1 goes from "one" to "NEWEST".
     curl -s --max-time 10 -X POST "$URL/doc/$DOC/sync" \
         -H "Content-Type: application/json" \
-        -d '{"rows": [{"id": 1, "createdAt": 5000, "updatedAt": 5000, "v": "NEWEST"}]}' \
+        -d "{\"$KA\": [{\"id\": 1, \"createdAt\": 5000, \"updatedAt\": 5000, \"v\": \"ka-NEWEST\"}]}" \
         >/dev/null 2>&1 || true
     NO_FWW=$(curl -s --max-time 10 "$URL/doc/$DOC" 2>/dev/null || echo "FAIL")
     echo "No-FWW default: $NO_FWW"
-    check        "$NAME: later createdAt no longer vetoes a newer write" "$NO_FWW" '"NEWEST"'
-    check_absent "$NAME: the superseded value is gone"                   "$NO_FWW" '"v":"one"'
+    check        "$NAME: later createdAt no longer vetoes a newer write" "$NO_FWW" '"ka-NEWEST"'
+    check_absent "$NAME: the superseded value is gone"                   "$NO_FWW" '"ka-one"'
 
     # The engine feature itself is still exercised, on the one server that lets a
     # request name its own policy (node, in test mode). Everywhere else the
@@ -128,11 +148,11 @@ test_server() {
         curl -s --max-time 10 -X POST "$URL/doc/$DOC/sync" \
             -H "Content-Type: application/json" \
             -H 'X-Syncer-Options: {"fwwKeys":"createdAt"}' \
-            -d '{"rows": [{"id": 1, "createdAt": 9000, "updatedAt": 9000, "v": "VETOED"}]}' \
+            -d "{\"$KA\": [{\"id\": 1, \"createdAt\": 9000, \"updatedAt\": 9000, \"v\": \"ka-VETOED\"}]}" \
             >/dev/null 2>&1 || true
         FWW=$(curl -s --max-time 10 "$URL/doc/$DOC" 2>/dev/null || echo "FAIL")
         echo "Explicit FWW: $FWW"
-        check_absent "$NAME: explicit fwwKeys still rejects a later createdAt" "$FWW" 'VETOED'
+        check_absent "$NAME: explicit fwwKeys still rejects a later createdAt" "$FWW" 'ka-VETOED'
     fi
 
     echo "--- $NAME done ---"

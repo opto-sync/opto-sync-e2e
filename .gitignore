@@ -23,3 +23,7 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+
+# Zed pack output
+.zed/
+.zed-pack/

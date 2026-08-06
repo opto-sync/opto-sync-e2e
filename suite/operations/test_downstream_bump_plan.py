@@ -23,24 +23,29 @@ class DownstreamBumpPlanTests(unittest.TestCase):
         value["releaseSet"]["status"] = "published"
         for name, checksum in zip(("syncer", "clients", "e2e"), ("1" * 64, "2" * 64, "3" * 64), strict=True):
             value["certification"]["artifactChecksums"][name] = checksum
+            canonical = next(
+                artifact
+                for artifact in value["certification"]["artifactFiles"]
+                if artifact["source"] == name and artifact["canonical"]
+            )
+            canonical["sha256"] = checksum
         package_by_repo = {package["repository"]: package for package in value["packages"].values()}
         for run in value["certification"]["requiredRuns"]:
             run["conclusion"] = "success"
-            run["headSha"] = package_by_repo[run["repository"]]["sha"]
+            run["testedSha"] = package_by_repo[run["repository"]]["sha"]
         value["rollback"].update(
             {
                 "owner": "opto-sync release manager",
-                "procedure": "Revert downstream bump PRs as paired gitlink units.",
+                "procedure": "release/ROLLBACK.md",
             }
         )
         return value
 
-    def test_candidate_is_complete_but_not_dispatchable(self):
+    def test_candidate_is_evidence_complete_but_not_dispatchable(self):
         plan = MODULE.build_plan(RELEASE, MANIFEST)
         self.assertFalse(plan["dispatchAllowed"])
         self.assertEqual(len(plan["consumers"]), 2)
-        self.assertTrue(any("status" in blocker for blocker in plan["blockers"]))
-        self.assertTrue(any("placeholder" in blocker for blocker in plan["blockers"]))
+        self.assertEqual(plan["blockers"], ["release status is 'candidate', not 'published'"])
         for consumer in plan["consumers"]:
             self.assertEqual([item["kind"] for item in consumer["updates"]], ["gitlink", "gitlink"])
             self.assertEqual(
@@ -54,6 +59,22 @@ class DownstreamBumpPlanTests(unittest.TestCase):
         plan = MODULE.build_plan(self.published_release(), MANIFEST)
         self.assertTrue(plan["dispatchAllowed"])
         self.assertEqual(plan["blockers"], [])
+
+    def test_coordinated_controller_head_cannot_replace_the_tested_source_sha(self):
+        value = self.published_release()
+        run = value["certification"]["requiredRuns"][0]
+        self.assertNotEqual(run["headSha"], run["testedSha"])
+        run["testedSha"] = "f" * 40
+        plan = MODULE.build_plan(value, MANIFEST)
+        self.assertFalse(plan["dispatchAllowed"])
+        self.assertTrue(any("did not test the package SHA" in blocker for blocker in plan["blockers"]))
+
+    def test_coordinated_evidence_requires_an_immutable_artifact_digest(self):
+        value = self.published_release()
+        value["certification"]["requiredRuns"][1]["evidenceArtifactDigest"] = "sha256:bad"
+        plan = MODULE.build_plan(value, MANIFEST)
+        self.assertFalse(plan["dispatchAllowed"])
+        self.assertTrue(any("artifact digest" in blocker for blocker in plan["blockers"]))
 
     def test_one_sided_and_duplicate_consumers_fail(self):
         one_sided = copy.deepcopy(MANIFEST)

@@ -1,0 +1,99 @@
+{
+  "schemaVersion": 1,
+  "ownerIssue": "DEN-1591",
+  "parentIssue": "DEN-309",
+  "releaseSetId": "opto-sync-2026-07-31-suite-certified-candidate",
+  "reportSchemaVersion": 1,
+  "registrySource": "https://registry.zpkg.tech",
+  "stages": [
+    {
+      "name": "core_publication",
+      "reportKey": "corePublication",
+      "kind": "publication",
+      "manifestPackage": "syncer",
+      "verifiedField": "publicationVerified",
+      "packages": [
+        {
+          "org": "opto-sync",
+          "name": "syncer",
+          "artifactFilename": "opto-sync-syncer-0.2.1.tar.gz"
+        },
+        {
+          "org": "opto-sync",
+          "name": "syncer-c",
+          "artifactFilename": "opto-sync-syncer-c-0.2.1.tar.gz"
+        },
+        {
+          "org": "opto-sync",
+          "name": "syncer-wasm",
+          "artifactFilename": "opto-sync-syncer-wasm-0.2.1.tar.gz"
+        }
+      ]
+    },
+    {
+      "name": "clients_publication",
+      "reportKey": "clientsPublication",
+      "kind": "publication",
+      "manifestPackage": "clients",
+      "verifiedField": "publicationVerified",
+      "packages": [
+        {
+          "org": "opto-sync",
+          "name": "opto-sync-clients",
+          "artifactFilename": "opto-sync-opto-sync-clients-0.2.0.tar.gz"
+        }
+      ]
+    },
+    {
+      "name": "e2e_publication",
+      "reportKey": "e2ePublication",
+      "kind": "publication",
+      "manifestPackage": "e2e",
+      "verifiedField": "publicationVerified",
+      "packages": [
+        {
+          "org": "opto-sync",
+          "name": "opto-sync-e2e",
+          "artifactFilename": "opto-sync-opto-sync-e2e-0.1.0.tar.gz"
+        }
+      ]
+    },
+    {
+      "name": "wrapper_certification",
+      "reportKey": "wrapperCertification",
+      "kind": "certification",
+      "verifiedField": "certificationVerified"
+    }
+  ],
+  "wrapperFleet": {
+    "wrappers": 17,
+    "e2e": 15
+  },
+  "states": [
+    {
+      "verifiedStageCount": 0,
+      "state": "await_core_publication_verification",
+      "allowedActions": ["verify_core_publication"]
+    },
+    {
+      "verifiedStageCount": 1,
+      "state": "core_publication_verified",
+      "allowedActions": ["publish_clients", "verify_clients_publication"]
+    },
+    {
+      "verifiedStageCount": 2,
+      "state": "clients_publication_verified",
+      "allowedActions": ["publish_e2e", "verify_e2e_publication"]
+    },
+    {
+      "verifiedStageCount": 3,
+      "state": "e2e_publication_verified",
+      "allowedActions": ["generate_wrapper_locks", "verify_wrapper_certification"]
+    },
+    {
+      "verifiedStageCount": 4,
+      "state": "wrapper_certification_verified",
+      "allowedActions": ["merge_product_pull_requests"]
+    }
+  ]
+}

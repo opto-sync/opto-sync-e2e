@@ -1,0 +1,82 @@
+schema_version = 1
+procedure_version = 1
+repository = "opto-sync/opto-sync-e2e"
+
+[policy]
+claim_classes = ["typechecked-specification", "randomized-exploration", "bounded-exhaustive-verification", "implementation-replay", "differential-replay", "unbounded-proof"]
+required_evidence = ["method", "bounds", "assumptions", "trace-hash", "repository-revisions", "image-and-tool-versions"]
+counterexample = "Retain original and normalized traces, logs, expected/actual canonical states, topology, and revisions; minimize and classify before adding a regression."
+change_trigger = "Review this inventory with protocol, client, server, auth, recovery, convergence, compaction, or trace-adapter changes."
+
+[[machine]]
+id = "protocol-v1-fault-recovery"
+risk = "critical"
+status = "planned"
+backend = "quint-itf-system-replay"
+owner = "opto-sync-protocol"
+source_paths = ["suite/protocol/run.mjs", "suite/protocol/load.mjs", "suite/conformance"]
+safety = [
+  "immutable client mutation identity maps to one durable outcome",
+  "committed response loss and retry do not double-apply an effect",
+  "permanent rejection advances the durable protocol outcome without executing the effect",
+  "acknowledgement names the exact sent batch",
+  "pull checkpoint and ledger watermark never regress",
+]
+liveness = ["with an available server/database and recurring retry, pending work eventually commits, rejects, or reaches an explicit bounded failure"]
+faults = ["response lost after commit", "request lost before commit", "duplicate retry", "concurrent writers", "server restart", "database recovery"]
+bounds = ["finite mutation IDs", "bounded clients", "bounded concurrent writers", "finite checkpoint and compaction window"]
+review_triggers = ["push", "acknowledgement", "rejection", "duplicate", "checkpoint", "load schedule", "database recovery"]
+
+[[machine]]
+id = "authentication-and-tenant-isolation"
+risk = "critical"
+status = "planned"
+backend = "trace-replay+adversarial-e2e"
+owner = "opto-sync-security"
+source_paths = ["suite/protocol/auth.mjs", "suite/protocol/operations.mjs"]
+safety = [
+  "a principal accesses only its bound tenant and allowed client IDs",
+  "pull pages and snapshots do not cross tenants",
+  "token rotation invalidates the intended credential without weakening identity binding",
+  "metrics and audit behavior do not expose unbounded or sensitive cardinality",
+]
+liveness = ["an authorized principal under configured limits can complete the protocol operation"]
+faults = ["missing token", "wrong client binding", "rotated token", "cross-tenant checkpoint", "rate limit", "oversized request"]
+bounds = ["two tenants", "two principals", "three client IDs", "bounded quota and rate windows"]
+review_triggers = ["auth mode", "claim mapping", "tenant filter", "client binding", "quota", "audit", "metrics"]
+
+[[machine]]
+id = "cross-runtime-convergence"
+risk = "high"
+status = "planned"
+backend = "differential-system-replay"
+owner = "opto-sync-conformance"
+source_paths = ["suite/cross-server", "suite/clients", "suite/conformance"]
+safety = [
+  "all applicable runtimes apply the same documented merge policy",
+  "noncontending mutations converge independent of permitted apply order",
+  "tombstones and keyed-array freshness produce the same semantic document",
+  "host numeric limitations are explicit and never disguised as engine agreement",
+]
+liveness = ["for a bounded terminating mutation sequence, every healthy runtime returns a canonical final observation"]
+faults = ["different apply order", "stale keyed element", "tombstone", "unique-index collision", "integer beyond JavaScript precision", "client offline replay"]
+bounds = ["tracked cross-server corpus", "finite mutation sequence", "configured Node, Rust, Dart, Sagitta, and client runtimes"]
+review_triggers = ["merge policy", "runtime adapter", "canonical comparison", "numeric representation", "client reconcile", "server matrix"]
+
+[[machine]]
+id = "compaction-reset-and-snapshot"
+risk = "critical"
+status = "planned"
+backend = "quint-itf-system-replay"
+owner = "opto-sync-recovery"
+source_paths = ["suite/protocol/run.mjs", "suite/clients"]
+safety = [
+  "reset installation is atomic from the client observable boundary",
+  "pending local mutations survive reset and crash schedules",
+  "snapshot checkpoint is consistent with included records",
+  "a crash during replacement cannot publish a mixed old/new state",
+]
+liveness = ["with an available snapshot endpoint and eventual restart, a reset-required client eventually installs a consistent snapshot and resumes"]
+faults = ["crash during reset", "snapshot response loss", "pending mutation during compaction", "server restart", "client reopen"]
+bounds = ["two snapshots", "two pending mutations", "three reset phases", "bounded checkpoint domain"]
+review_triggers = ["compaction", "RESET_REQUIRED", "snapshot", "client replacement", "pending rebase", "restart"]

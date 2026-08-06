@@ -4,14 +4,14 @@ on:
   pull_request:
     paths:
       - 'scripts/canary-incident.py'
-      - 'test/operations/test_canary_incident.py'
+      - 'suite/operations/test_canary_incident.py'
       - 'docs/CANARY_INCIDENT_ROUTING.md'
       - '.github/workflows/canary-incident-contract.yml'
   push:
     branches: [main]
     paths:
       - 'scripts/canary-incident.py'
-      - 'test/operations/test_canary_incident.py'
+      - 'suite/operations/test_canary_incident.py'
       - 'docs/CANARY_INCIDENT_ROUTING.md'
       - '.github/workflows/canary-incident-contract.yml'
   workflow_dispatch:
@@ -32,7 +32,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Test normalization, deduplication, recovery, and missed schedules
-        run: python3 -m unittest discover -s test/operations -p 'test_canary_incident.py' -v
+        run: python3 -m unittest discover -s suite/operations -p 'test_canary_incident.py' -v
       - name: Exercise the credential-free CLI surface
         shell: bash
         run: |

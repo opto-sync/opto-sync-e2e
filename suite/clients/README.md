@@ -19,7 +19,7 @@ The server must already be running. These suites never start, stop, reset or
 otherwise touch the stack.
 
 ```sh
-cd opto-sync-e2e/test/clients
+cd opto-sync-e2e/suite/clients
 ./run_all.sh                 # all four languages + three-client convergence
 ./run_all.sh ts              # one language only (ts | dart | rust | gleam)
 ./run_all.sh --no-converge   # scenarios 1-6 only
@@ -207,7 +207,7 @@ considering for the crate, but nothing was changed to accommodate it.
 ## Layout
 
 ```
-test/clients/
+suite/clients/
   run_all.sh                    orchestrator; non-zero on any failure
   fixtures/
     scenarios.json              scenarios 1-6, shared by all three languages

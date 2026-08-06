@@ -24,6 +24,11 @@ import {
 } from "./protocol.js";
 import { createPostgresJsonbMutationHandler } from "./protocol-handlers.js";
 import { createProtocolOperations } from "./operations.js";
+import {
+  SyncChangeHub,
+  attachWebSocketTransport,
+  startTcpTransport,
+} from "./sync-transports.js";
 
 const DocumentPayloadSchema = z
   .object({
@@ -541,7 +546,12 @@ if (TEST_MODE) {
   });
 }
 
-installSyncProtocol(
+// Fan-out hub for the realtime transports: after any push commits changes —
+// over HTTP, WebSocket, or TCP — every OTHER connected socket receives the
+// `changed` pull hint.
+const syncHub = new SyncChangeHub();
+
+const syncRuntime = installSyncProtocol(
   app,
   pool,
   (baseJson, incomingJson) =>
@@ -550,6 +560,8 @@ installSyncProtocol(
   protocolOperations,
   {
     mutationHandlers: protocolMutationHandlers,
+    onPushCommitted: (checkpoint, origin) =>
+      syncHub.broadcast(Number(checkpoint), origin),
   },
 );
 
@@ -732,9 +744,23 @@ async function init() {
   await seed();
   console.log(`[node-server] Seeded ${SEED_DOCS.length} documents`);
 
-  app.listen(PORT, () => {
+  const httpServer = app.listen(PORT, () => {
     console.log(`[node-server] Listening on http://0.0.0.0:${PORT}`);
   });
+
+  // Realtime transports share the exact HTTP push/pull/snapshot handlers.
+  // WebSocket upgrades ride the same HTTP port at /sync/ws (the browser
+  // realtime path); the TCP NDJSON listener is for native/server-side
+  // clients only and starts solely when SYNCER_TCP_PORT is set.
+  attachWebSocketTransport(httpServer, syncRuntime, syncHub);
+  const tcpPortRaw = process.env.SYNCER_TCP_PORT;
+  if (tcpPortRaw !== undefined && tcpPortRaw !== "") {
+    const tcpPort = parseInt(tcpPortRaw, 10);
+    if (!Number.isInteger(tcpPort) || tcpPort < 1 || tcpPort > 65535) {
+      throw new Error("SYNCER_TCP_PORT must be a TCP port from 1 through 65535");
+    }
+    startTcpTransport(tcpPort, syncRuntime, syncHub);
+  }
 }
 
 init().catch((err) => {

@@ -8,6 +8,7 @@ on:
       - 'LICENSE'
       - 'docker-compose*.yml'
       - 'test/**'
+      - 'scripts/check-zed-package.py'
       - '.github/workflows/zed-package.yml'
   push:
     branches: [main]
@@ -17,6 +18,7 @@ on:
       - 'LICENSE'
       - 'docker-compose*.yml'
       - 'test/**'
+      - 'scripts/check-zed-package.py'
       - '.github/workflows/zed-package.yml'
   workflow_dispatch:
 
@@ -36,6 +38,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           path: package
+          persist-credentials: false
 
       - name: Checkout pinned Zed CLI
         uses: actions/checkout@v4
@@ -43,6 +46,7 @@ jobs:
           repository: zed-pkg/zed-cli
           ref: c636fb8f6b08695c6b4fe94e2481f4d57270b2d7
           path: zed-cli
+          persist-credentials: false
 
       - name: Checkout pinned Zed interfaces
         uses: actions/checkout@v4
@@ -50,33 +54,49 @@ jobs:
           repository: zed-pkg/zed-interfaces
           ref: 415e871b1fb3dd97744c134351408a3224805dfb
           path: zed-interfaces
+          persist-credentials: false
 
       - name: Build pinned Zed CLI
         run: cargo build --locked --manifest-path zed-cli/Cargo.toml --bin zed
 
-      - name: Validate compose and package structure
+      - name: Validate source package and Compose graph
         working-directory: package
         run: |
           set -euo pipefail
-          test -f LICENSE
+          python3 scripts/check-zed-package.py
           test -f .env || cp .env.example .env
           docker compose config --quiet
-          test -f test/run_e2e.sh
-          test -f test/clients/run_all.sh
-          test -f test/protocol/run.mjs
-          test -f test/cross-server/run.mjs
+          docker compose -f docker-compose.yml -f docker-compose.supabase.yml config --quiet
 
-      - name: Pack, inspect, and dry-run publish
-        working-directory: package
+      - name: Pack, inspect, execute, and dry-run publish
+        shell: bash
         run: |
           set -euo pipefail
+          cd package
           ../zed-cli/target/debug/zed pack
 
-          shopt -s nullglob
-          archives=(.zed/pack/*.tar.gz)
-          test "${#archives[@]}" -eq 1
-          tar -tzf "${archives[0]}" | grep -Fx 'pkg/LICENSE'
-          ! tar -tzf "${archives[0]}" | grep -Fx 'pkg/.env'
+          artifact=.zed/pack/opto-sync-opto-sync-e2e-0.1.0.tar.gz
+          listing="${RUNNER_TEMP}/opto-sync-e2e-files.txt"
+          smoke_root="${RUNNER_TEMP}/opto-sync-e2e-smoke"
+          tar -tzf "${artifact}" | tee "${listing}"
+
+          grep -Fx 'pkg/.zpkg.toml' "${listing}"
+          grep -Fx 'pkg/LICENSE' "${listing}"
+          grep -Fx 'pkg/docker-compose.yml' "${listing}"
+          grep -Fx 'pkg/docker-compose.supabase.yml' "${listing}"
+          grep -Fx 'pkg/suite/run_e2e.sh' "${listing}"
+          grep -Fx 'pkg/suite/clients/run_all.sh' "${listing}"
+          ! grep -Fx 'pkg/.env' "${listing}"
+          ! grep -E '(^|/)(node_modules|target|\.dart_tool|_build|\.zed)(/|$)' "${listing}"
+          ! grep -E '\.log$' "${listing}"
+
+          mkdir -p "${smoke_root}"
+          tar -xzf "${artifact}" -C "${smoke_root}"
+          python3 scripts/check-zed-package.py "${smoke_root}/pkg"
+          cp "${smoke_root}/pkg/.env.example" "${smoke_root}/pkg/.env"
+          (cd "${smoke_root}/pkg" && docker compose config --quiet)
+          ZED_PKG_TEST_TARGET="${smoke_root}/pkg" sh -c \
+            'test -f "$ZED_PKG_TEST_TARGET/LICENSE" && test -f "$ZED_PKG_TEST_TARGET/docker-compose.yml" && test -f "$ZED_PKG_TEST_TARGET/suite/run_e2e.sh" && test -f "$ZED_PKG_TEST_TARGET/suite/clients/run_all.sh"'
 
           ../zed-cli/target/debug/zed publish \
             --dry-run \

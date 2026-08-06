@@ -6,6 +6,7 @@ import { z } from "zod";
 import {
   createProtocolAuthenticator,
   readBearerToken,
+  type AuthenticationResult,
   type ProtocolIdentity,
 } from "./auth.js";
 import {
@@ -119,6 +120,75 @@ export type SyncProtocolOptions = {
    * reference handler and cannot be replaced.
    */
   mutationHandlers?: Readonly<Record<string, ProtocolMutationHandler>>;
+  /**
+   * Invoked after a push transaction COMMITs having advanced the protocol
+   * checkpoint. Realtime transports broadcast a pull hint from here. `origin`
+   * is the opaque connection token from the triggering call's context so the
+   * pusher's own connection can be excluded. Best-effort: a throwing listener
+   * cannot fail the push.
+   */
+  onPushCommitted?: (checkpoint: bigint, origin: unknown) => void;
+};
+
+/** Transport-independent request envelope for the protocol core handlers. */
+export type ProtocolCallContext = {
+  requestId: string;
+  identity: ProtocolIdentity;
+  /**
+   * Bytes actually received for the push body. HTTP passes the raw body
+   * length; frame transports pass the frame length. Falls back to the
+   * re-serialized body size when absent.
+   */
+  rawBodyBytes?: number;
+  /** Test-mode failpoint (HTTP header parity); ignored outside test mode. */
+  failpoint?: string;
+  /** Opaque connection token excluded from its own change broadcast. */
+  origin?: unknown;
+};
+
+/** Transport-independent response: an HTTP status plus the JSON body. */
+export type ProtocolCallResult = {
+  status: number;
+  body: Record<string, unknown>;
+  /**
+   * The after-commit-response-loss failpoint committed but demands that the
+   * transport send nothing (HTTP destroys the socket, frames stay silent).
+   */
+  responseLoss?: boolean;
+};
+
+/** Connection credentials presented by a non-HTTP transport. */
+export type TransportAuthInput = {
+  /** Bearer token carried as `?token=` (WebSocket) or a `token` field (TCP). */
+  token?: string | null;
+  /** Test-mode identity overrides, mirroring the x-syncer-test-* headers. */
+  testTenantId?: string | null;
+  testSubject?: string | null;
+  testClientId?: string | null;
+};
+
+/**
+ * The shared protocol engine behind every transport. HTTP routes, the
+ * WebSocket endpoint, and the TCP listener all dispatch into these same
+ * functions — no transport re-implements push/pull/snapshot semantics.
+ */
+export type SyncProtocolRuntime = {
+  readonly testMode: boolean;
+  newRequestId(): string;
+  /** Mirrors the HTTP authentication middleware for frame transports. */
+  authenticate(input: TransportAuthInput): Promise<AuthenticationResult>;
+  /** Same limiter and key shape as the HTTP middleware. */
+  consumeRateLimit(
+    identity: ProtocolIdentity,
+    route: "push" | "pull" | "snapshot",
+  ): { allowed: boolean; retryAfterSeconds: number };
+  push(context: ProtocolCallContext, body: unknown): Promise<ProtocolCallResult>;
+  pull(
+    context: ProtocolCallContext,
+    checkpoint: unknown,
+    limit: unknown,
+  ): Promise<ProtocolCallResult>;
+  snapshot(context: ProtocolCallContext): Promise<ProtocolCallResult>;
 };
 type AdminAuth = { tokenHash?: Buffer; error?: string };
 
@@ -1153,7 +1223,7 @@ export function installSyncProtocol(
   testMode: boolean,
   operations: ProtocolOperations,
   options: SyncProtocolOptions = {},
-): void {
+): SyncProtocolRuntime {
   const auth = testMode ? null : createProtocolAuthenticator();
   const adminAuth = loadAdminAuth();
   const { config, limiter, metrics } = operations;
@@ -1356,11 +1426,14 @@ export function installSyncProtocol(
     );
   });
 
-  app.post("/v1/sync/push", async (request, response) => {
-    const requestId = response.locals.syncRequestId as string;
+  const pushCore = async (
+    context: ProtocolCallContext,
+    rawBody: unknown,
+  ): Promise<ProtocolCallResult> => {
+    const body = rawBody as any;
+    const requestId = context.requestId;
     const rawBodyBytes =
-      (request as express.Request & { rawBodyBytes?: number }).rawBodyBytes ??
-      Buffer.byteLength(JSON.stringify(request.body ?? null));
+      context.rawBodyBytes ?? Buffer.byteLength(JSON.stringify(body ?? null));
     if (rawBodyBytes > config.maxPushBytes) {
       metrics.increment("opto_sync_protocol_quota_rejections_total", {
         quota: "push_bytes",
@@ -1371,15 +1444,18 @@ export function installSyncProtocol(
         bodyBytes: rawBodyBytes,
         limitBytes: config.maxPushBytes,
       });
-      return response.status(413).json({
-        protocolVersion: PROTOCOL_VERSION,
-        error: "PUSH_TOO_LARGE",
-        limitBytes: config.maxPushBytes,
-      });
+      return {
+        status: 413,
+        body: {
+          protocolVersion: PROTOCOL_VERSION,
+          error: "PUSH_TOO_LARGE",
+          limitBytes: config.maxPushBytes,
+        },
+      };
     }
     if (
-      Array.isArray(request.body?.mutations) &&
-      request.body.mutations.length > config.maxPushMutations
+      Array.isArray(body?.mutations) &&
+      body.mutations.length > config.maxPushMutations
     ) {
       metrics.increment("opto_sync_protocol_quota_rejections_total", {
         quota: "push_mutations",
@@ -1387,17 +1463,20 @@ export function installSyncProtocol(
       auditEvent("protocol.push_rejected", {
         requestId,
         code: "PUSH_MUTATION_LIMIT",
-        mutationCount: request.body.mutations.length,
+        mutationCount: body.mutations.length,
         limit: config.maxPushMutations,
       });
-      return response.status(413).json({
-        protocolVersion: PROTOCOL_VERSION,
-        error: "PUSH_MUTATION_LIMIT",
-        limit: config.maxPushMutations,
-      });
+      return {
+        status: 413,
+        body: {
+          protocolVersion: PROTOCOL_VERSION,
+          error: "PUSH_MUTATION_LIMIT",
+          limit: config.maxPushMutations,
+        },
+      };
     }
-    if (Array.isArray(request.body?.mutations)) {
-      const oversizedIndex = request.body.mutations.findIndex(
+    if (Array.isArray(body?.mutations)) {
+      const oversizedIndex = body.mutations.findIndex(
         (mutation: unknown) =>
           Buffer.byteLength(stableJson(mutation)) > config.maxMutationBytes,
       );
@@ -1411,26 +1490,32 @@ export function installSyncProtocol(
           mutationIndex: oversizedIndex,
           limitBytes: config.maxMutationBytes,
         });
-        return response.status(413).json({
-          protocolVersion: PROTOCOL_VERSION,
-          error: "MUTATION_TOO_LARGE",
-          mutationIndex: oversizedIndex,
-          limitBytes: config.maxMutationBytes,
-        });
+        return {
+          status: 413,
+          body: {
+            protocolVersion: PROTOCOL_VERSION,
+            error: "MUTATION_TOO_LARGE",
+            mutationIndex: oversizedIndex,
+            limitBytes: config.maxMutationBytes,
+          },
+        };
       }
     }
-    const parsed = PushSchema.safeParse(request.body);
+    const parsed = PushSchema.safeParse(body);
     if (!parsed.success) {
       metrics.increment("opto_sync_protocol_push_rejections_total", {
         code: "INVALID_PUSH",
       });
-      return response.status(400).json({
-        protocolVersion: PROTOCOL_VERSION,
-        error: "INVALID_PUSH",
-        details: parsed.error.format(),
-      });
+      return {
+        status: 400,
+        body: {
+          protocolVersion: PROTOCOL_VERSION,
+          error: "INVALID_PUSH",
+          details: parsed.error.format(),
+        },
+      };
     }
-    const identity = response.locals.syncIdentity as ProtocolIdentity;
+    const identity = context.identity;
     if (
       identity.clientIds !== null &&
       !identity.clientIds.has(parsed.data.clientId)
@@ -1442,14 +1527,17 @@ export function installSyncProtocol(
         ),
         clientHash: privacyHash(parsed.data.clientId),
       });
-      return response.status(403).json({
-        protocolVersion: PROTOCOL_VERSION,
-        error: "CLIENT_ID_FORBIDDEN",
-        message: "the authenticated identity is not bound to this clientId",
-      });
+      return {
+        status: 403,
+        body: {
+          protocolVersion: PROTOCOL_VERSION,
+          error: "CLIENT_ID_FORBIDDEN",
+          message: "the authenticated identity is not bound to this clientId",
+        },
+      };
     }
 
-    const failpoint = testMode ? request.get("x-syncer-failpoint") : undefined;
+    const failpoint = testMode ? context.failpoint : undefined;
     if (
       failpoint !== undefined &&
       ![
@@ -1459,10 +1547,13 @@ export function installSyncProtocol(
         "after-commit-response-loss",
       ].includes(failpoint)
     ) {
-      return response.status(400).json({
-        protocolVersion: PROTOCOL_VERSION,
-        error: "INVALID_FAILPOINT",
-      });
+      return {
+        status: 400,
+        body: {
+          protocolVersion: PROTOCOL_VERSION,
+          error: "INVALID_FAILPOINT",
+        },
+      };
     }
     const injectFailure = (stage: string) => {
       if (failpoint === stage) {
@@ -1480,6 +1571,7 @@ export function installSyncProtocol(
            FROM syncer_protocol_state WHERE singleton = TRUE FOR UPDATE`,
       );
       let checkpoint = BigInt(protocolState.rows[0].last_seq);
+      const initialCheckpoint = checkpoint;
       await connection.query(
         `INSERT INTO syncer_protocol_clients(tenant_id, client_id, subject)
          VALUES ($1, $2, $3) ON CONFLICT (tenant_id, client_id) DO NOTHING`,
@@ -1613,13 +1705,22 @@ export function installSyncProtocol(
       injectFailure("before-commit");
       await connection.query("COMMIT");
 
+      // The transaction is durable; let realtime transports hint other
+      // clients to pull. Best-effort by design — a hint is never data.
+      if (checkpoint > initialCheckpoint) {
+        try {
+          options.onPushCommitted?.(checkpoint, context.origin);
+        } catch (error) {
+          console.error("[opto-sync] onPushCommitted listener failed:", error);
+        }
+      }
+
       // Model the hardest retry window: the durable transaction committed but
       // the process or network disappeared before the client received an
       // acknowledgement. The next identical request must be answered entirely
       // from the immutable mutation ledger.
       if (failpoint === "after-commit-response-loss") {
-        response.socket?.destroy();
-        return;
+        return { status: 200, body: {}, responseLoss: true };
       }
 
       const outcomes = results.reduce<Record<string, number>>((counts, result) => {
@@ -1644,13 +1745,16 @@ export function installSyncProtocol(
         outcomes,
         checkpoint: checkpoint.toString(),
       });
-      return response.json({
-        protocolVersion: PROTOCOL_VERSION,
-        clientId: parsed.data.clientId,
-        lastMutationId: lastMutationId.toString(),
-        checkpoint: checkpoint.toString(),
-        results,
-      });
+      return {
+        status: 200,
+        body: {
+          protocolVersion: PROTOCOL_VERSION,
+          clientId: parsed.data.clientId,
+          lastMutationId: lastMutationId.toString(),
+          checkpoint: checkpoint.toString(),
+          results,
+        },
+      };
     } catch (error) {
       await rollbackQuietly(connection);
       const failure = publicProtocolFailure(error, "PUSH_FAILED");
@@ -1666,23 +1770,48 @@ export function installSyncProtocol(
         mutationCount: parsed.data.mutations.length,
         code: failure.code,
       });
-      return response.status(failure.status).json({
-        protocolVersion: PROTOCOL_VERSION,
-        error: failure.code,
-        message: failure.message,
-        ...(failure.detail === undefined ? {} : { detail: failure.detail }),
-      });
+      return {
+        status: failure.status,
+        body: {
+          protocolVersion: PROTOCOL_VERSION,
+          error: failure.code,
+          message: failure.message,
+          ...(failure.detail === undefined ? {} : { detail: failure.detail }),
+        },
+      };
     } finally {
       connection.release();
     }
+  };
+
+  app.post("/v1/sync/push", async (request, response) => {
+    const result = await pushCore(
+      {
+        requestId: response.locals.syncRequestId as string,
+        identity: response.locals.syncIdentity as ProtocolIdentity,
+        rawBodyBytes: (request as express.Request & { rawBodyBytes?: number })
+          .rawBodyBytes,
+        failpoint: request.get("x-syncer-failpoint"),
+      },
+      request.body,
+    );
+    if (result.responseLoss) {
+      response.socket?.destroy();
+      return;
+    }
+    return response.status(result.status).json(result.body);
   });
 
-  app.get("/v1/sync/pull", async (request, response) => {
+  const pullCore = async (
+    context: ProtocolCallContext,
+    checkpointInput: unknown,
+    limitInput: unknown,
+  ): Promise<ProtocolCallResult> => {
     let connection: pg.PoolClient | undefined;
     try {
-      const identity = response.locals.syncIdentity as ProtocolIdentity;
-      const checkpoint = parseCheckpoint(request.query.checkpoint, "checkpoint");
-      const limitRaw = Number(request.query.limit ?? 100);
+      const identity = context.identity;
+      const checkpoint = parseCheckpoint(checkpointInput, "checkpoint");
+      const limitRaw = Number(limitInput ?? 100);
       if (!Number.isInteger(limitRaw) || limitRaw < 1 || limitRaw > 1000) {
         throw protocolError(400, "INVALID_LIMIT", "limit must be an integer from 1 to 1000");
       }
@@ -1698,13 +1827,16 @@ export function installSyncProtocol(
       }
       if (checkpoint + 1n < minimum) {
         await connection.query("COMMIT");
-        return response.status(409).json({
-          protocolVersion: PROTOCOL_VERSION,
-          error: "RESET_REQUIRED",
-          resetRequired: true,
-          minimumCheckpoint: (minimum - 1n).toString(),
-          snapshotUrl: "/v1/sync/snapshot",
-        });
+        return {
+          status: 409,
+          body: {
+            protocolVersion: PROTOCOL_VERSION,
+            error: "RESET_REQUIRED",
+            resetRequired: true,
+            minimumCheckpoint: (minimum - 1n).toString(),
+            snapshotUrl: "/v1/sync/snapshot",
+          },
+        };
       }
 
       const changes = await connection.query(
@@ -1728,44 +1860,64 @@ export function installSyncProtocol(
           ? BigInt(page[page.length - 1].seq)
           : last;
       await connection.query("COMMIT");
-      return response.json({
-        protocolVersion: PROTOCOL_VERSION,
-        checkpoint: next.toString(),
-        hasMore,
-        changes: page.map((row) => ({
+      return {
+        status: 200,
+        body: {
+          protocolVersion: PROTOCOL_VERSION,
+          checkpoint: next.toString(),
+          hasMore,
+          changes: page.map((row) => ({
           checkpoint: String(row.seq),
           table: row.table_name,
           recordId: row.record_id,
           operation: row.operation,
           record: row.record,
           revision: String(row.revision),
-          ...(row.client_id == null
-            ? {}
-            : {
-                source: {
-                  clientId: row.client_id,
-                  mutationId: String(row.mutation_id),
-                },
-              }),
-          committedAt: row.committed_at,
-        })),
-      });
+            ...(row.client_id == null
+              ? {}
+              : {
+                  source: {
+                    clientId: row.client_id,
+                    mutationId: String(row.mutation_id),
+                  },
+                }),
+            committedAt: row.committed_at,
+          })),
+        },
+      };
     } catch (error) {
       if (connection) await rollbackQuietly(connection);
       const failure = publicProtocolFailure(error, "PULL_FAILED");
-      return response.status(failure.status).json({
-        protocolVersion: PROTOCOL_VERSION,
-        error: failure.code,
-        message: failure.message,
-      });
+      return {
+        status: failure.status,
+        body: {
+          protocolVersion: PROTOCOL_VERSION,
+          error: failure.code,
+          message: failure.message,
+        },
+      };
     } finally {
       connection?.release();
     }
+  };
+
+  app.get("/v1/sync/pull", async (request, response) => {
+    const result = await pullCore(
+      {
+        requestId: response.locals.syncRequestId as string,
+        identity: response.locals.syncIdentity as ProtocolIdentity,
+      },
+      request.query.checkpoint,
+      request.query.limit,
+    );
+    return response.status(result.status).json(result.body);
   });
 
-  app.get("/v1/sync/snapshot", async (_request, response) => {
-    const identity = response.locals.syncIdentity as ProtocolIdentity;
-    const requestId = response.locals.syncRequestId as string;
+  const snapshotCore = async (
+    context: ProtocolCallContext,
+  ): Promise<ProtocolCallResult> => {
+    const identity = context.identity;
+    const requestId = context.requestId;
     const connection = await pool.connect();
     try {
       await connection.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
@@ -1800,14 +1952,17 @@ export function installSyncProtocol(
           maxRecords: config.maxSnapshotRecords,
           maxBytes: config.maxSnapshotBytes,
         });
-        return response.status(413).json({
-          protocolVersion: PROTOCOL_VERSION,
-          error: "SNAPSHOT_QUOTA_EXCEEDED",
-          recordCount: recordCount.toString(),
-          dataBytes: dataBytes.toString(),
-          maxRecords: config.maxSnapshotRecords,
-          maxBytes: config.maxSnapshotBytes,
-        });
+        return {
+          status: 413,
+          body: {
+            protocolVersion: PROTOCOL_VERSION,
+            error: "SNAPSHOT_QUOTA_EXCEEDED",
+            recordCount: recordCount.toString(),
+            dataBytes: dataBytes.toString(),
+            maxRecords: config.maxSnapshotRecords,
+            maxBytes: config.maxSnapshotBytes,
+          },
+        };
       }
       const records = await connection.query(
         `SELECT table_name, record_id, record, revision
@@ -1823,16 +1978,19 @@ export function installSyncProtocol(
         {},
         records.rows.length,
       );
-      return response.json({
-        protocolVersion: PROTOCOL_VERSION,
-        checkpoint: String(state.rows[0].last_seq),
-        records: records.rows.map((row) => ({
-          table: row.table_name,
-          recordId: row.record_id,
-          record: row.record,
-          revision: String(row.revision),
-        })),
-      });
+      return {
+        status: 200,
+        body: {
+          protocolVersion: PROTOCOL_VERSION,
+          checkpoint: String(state.rows[0].last_seq),
+          records: records.rows.map((row) => ({
+            table: row.table_name,
+            recordId: row.record_id,
+            record: row.record,
+            revision: String(row.revision),
+          })),
+        },
+      };
     } catch (error) {
       await rollbackQuietly(connection);
       metrics.increment("opto_sync_protocol_snapshot_failures_total");
@@ -1843,14 +2001,25 @@ export function installSyncProtocol(
         ),
         code: "SNAPSHOT_FAILED",
       });
-      return response.status(500).json({
-        protocolVersion: PROTOCOL_VERSION,
-        error: "SNAPSHOT_FAILED",
-        message: publicProtocolFailure(error, "SNAPSHOT_FAILED").message,
-      });
+      return {
+        status: 500,
+        body: {
+          protocolVersion: PROTOCOL_VERSION,
+          error: "SNAPSHOT_FAILED",
+          message: publicProtocolFailure(error, "SNAPSHOT_FAILED").message,
+        },
+      };
     } finally {
       connection.release();
     }
+  };
+
+  app.get("/v1/sync/snapshot", async (_request, response) => {
+    const result = await snapshotCore({
+      requestId: response.locals.syncRequestId as string,
+      identity: response.locals.syncIdentity as ProtocolIdentity,
+    });
+    return response.status(result.status).json(result.body);
   });
 
   /**
@@ -1997,4 +2166,50 @@ export function installSyncProtocol(
       connection.release();
     }
   });
+
+  // The same engine, exposed to non-HTTP transports (WebSocket, TCP). The
+  // Express routes above and every frame transport dispatch into the same
+  // pushCore/pullCore/snapshotCore closures — no duplicated business logic.
+  return {
+    testMode,
+    newRequestId: operations.newRequestId,
+    async authenticate(input) {
+      if (testMode) {
+        const tenantId = input.testTenantId ?? "e2e";
+        const subject = input.testSubject ?? "e2e";
+        const clientId = input.testClientId ?? undefined;
+        if (
+          !ScopeId.safeParse(tenantId).success ||
+          !ScopeId.safeParse(subject).success ||
+          (clientId !== undefined && !ClientId.safeParse(clientId).success)
+        ) {
+          return { status: "denied" };
+        }
+        return {
+          status: "authenticated",
+          identity: {
+            subject,
+            tenantId,
+            clientIds: clientId === undefined ? null : new Set([clientId]),
+          },
+        };
+      }
+      const token = input.token ?? null;
+      if (token === null) return { status: "denied" };
+      // Reuse the exact HTTP verifier; the transport only re-frames how the
+      // bearer credential arrived (query parameter or frame field).
+      return auth!.authenticateAuthorization(`Bearer ${token}`);
+    },
+    consumeRateLimit(identity, route) {
+      const principalHash = privacyHash(
+        `${identity.tenantId}\u0000${identity.subject}`,
+      );
+      return limiter.consume(
+        `${testMode ? "test" : "tenant"}:${principalHash}:${route}`,
+      );
+    },
+    push: pushCore,
+    pull: pullCore,
+    snapshot: snapshotCore,
+  };
 }
