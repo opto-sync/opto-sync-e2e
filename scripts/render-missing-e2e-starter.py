@@ -29,7 +29,6 @@ SPEC.loader.exec_module(LIBRARY)
 BootstrapError = LIBRARY.BootstrapError
 DEFAULT_MANIFEST = LIBRARY.DEFAULT_MANIFEST
 load_manifest = LIBRARY.load_manifest
-select_wrapper = LIBRARY.select_wrapper
 profile_for = LIBRARY.profile_for
 write_tree = LIBRARY.write_tree
 canonical_json = LIBRARY.canonical_json
@@ -95,6 +94,39 @@ def workflow_with_final_pins(profile: dict) -> str:
     return rendered
 
 
+def select_wrapper(manifest: dict, repository: str) -> dict:
+    if not LIBRARY.SAFE_REPOSITORY.fullmatch(repository):
+        raise BootstrapError("repository must use safe owner/name syntax")
+    if repository not in PROVISIONED_BASELINES:
+        raise BootstrapError(f"repository is not one reviewed DEN-1469 baseline: {repository}")
+    matches = [
+        wrapper
+        for wrapper in manifest.get("wrappers", [])
+        if isinstance(wrapper, dict)
+        and isinstance(wrapper.get("e2e"), dict)
+        and wrapper["e2e"].get("repository") == repository
+    ]
+    if len(matches) != 1:
+        raise BootstrapError(f"repository is not one reviewed fleet identity: {repository}")
+    wrapper = matches[0]
+    e2e = wrapper["e2e"]
+    if e2e.get("status") != "existing":
+        raise BootstrapError(f"reviewed baseline is no longer an existing repository: {repository}")
+    for field, expected in PROVISIONED_BASELINES[repository].items():
+        if e2e.get(field) != expected:
+            raise BootstrapError(
+                f"{repository}: {field} differs from the reviewed DEN-1469 baseline"
+            )
+    if "blocker" in e2e:
+        raise BootstrapError(f"{repository}: stale provisioning blocker remains")
+    branch = wrapper.get("branch")
+    if not isinstance(branch, str) or not LIBRARY.SAFE_BRANCH.fullmatch(branch):
+        raise BootstrapError("wrapper branch is not a reviewed agent/den-* ref")
+    if any(token in branch.lower() for token in ("latest", "refs/heads/main")):
+        raise BootstrapError("wrapper branch is mutable")
+    return wrapper
+
+
 def validate_generated_files(files: dict[str, bytes]) -> None:
     required = {
         ".gitignore",
@@ -130,13 +162,13 @@ def validate_generated_files(files: dict[str, bytes]) -> None:
             raise BootstrapError(f"generated file {path} contains a mutable ref")
 
     profile = json.loads(files["opto-sync-adoption.json"])
-    if profile["e2eRepository"] not in {
-        "akrion-sim/akrion-sim-e2e",
-        "benefactor-cc/benefactor-e2e",
-    }:
+    if profile["e2eRepository"] not in PROVISIONED_BASELINES:
         raise BootstrapError("generator emitted an unapproved repository")
     if profile["wrapperRef"] in {"main", "latest", "refs/heads/main"}:
         raise BootstrapError("generated profile contains a mutable wrapper ref")
+    receipt = json.loads(files["bootstrap-receipt.json"])
+    if receipt.get("bootstrapIssue") != "DEN-1469":
+        raise BootstrapError("generated receipt lost DEN-1469 provenance")
 
     workflow_text = files[".github/workflows/opto-sync-adoption.yml"].decode("utf-8")
     pins = load_package_plane_pins()
@@ -172,10 +204,10 @@ def main() -> int:
         files = build_files(args.manifest, args.repository)
         write_tree(files, args.out)
     except (BootstrapError, OSError) as exc:
-        print(f"missing-e2e-starter: {exc}", file=sys.stderr)
+        print(f"provisioned-e2e-baseline: {exc}", file=sys.stderr)
         return 1
     print(
-        f"rendered canonical starter tree for {args.repository}: "
+        f"rendered canonical provisioned baseline for {args.repository}: "
         f"files={len(files)}, output={args.out}"
     )
     return 0
