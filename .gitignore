@@ -27,3 +27,7 @@ Thumbs.db
 # Zed pack output
 .zed/
 .zed-pack/
+tmp
+temp
+tmp/worktrees
+temp/worktrees
