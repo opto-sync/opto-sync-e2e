@@ -83,6 +83,8 @@ jobs:
             id: conformance
           - name: protocol v1 (idempotency + ordered checkpoints)
             id: protocol
+          - name: transport parity (HTTP + WebSocket + TCP)
+            id: websocket-tcp
           - name: protocol auth (subject/client + tenant isolation)
             id: auth
           - name: protocol JWT auth (Supabase JWKS + signed claims)
@@ -165,7 +167,8 @@ jobs:
           matrix.id == 'auth' ||
           matrix.id == 'jwt-auth' ||
           matrix.id == 'operations' ||
-          matrix.id == 'recovery'
+          matrix.id == 'recovery' ||
+          matrix.id == 'websocket-tcp'
         working-directory: opto-sync-e2e
         run: docker compose build node
 
@@ -189,6 +192,13 @@ jobs:
         run: |
           docker compose --profile protocol \
             up --build --exit-code-from protocol
+
+      - name: transport — HTTP, WebSocket, and raw TCP parity
+        if: matrix.id == 'websocket-tcp'
+        working-directory: opto-sync-e2e
+        run: |
+          docker compose --profile wstest \
+            up --build --exit-code-from ws-protocol
 
       - name: protocol auth — production-mode adversarial isolation
         if: matrix.id == 'auth'
