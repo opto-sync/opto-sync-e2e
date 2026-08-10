@@ -1,0 +1,197 @@
+name: reusable real web application e2e
+
+on:
+  workflow_call:
+    inputs:
+      app_page:
+        description: Optional page to open after build; auto-detected when empty
+        required: false
+        default: ''
+        type: string
+      skip_repository_commands:
+        description: Skip package install, repository checks, tests, and build
+        required: false
+        default: false
+        type: boolean
+      sibling_repository_1:
+        description: Optional public sibling repository needed by path dependencies
+        required: false
+        default: ''
+        type: string
+      sibling_ref_1:
+        description: Immutable commit for sibling repository 1
+        required: false
+        default: ''
+        type: string
+      sibling_path_1:
+        description: Checkout path for sibling repository 1, adjacent to app
+        required: false
+        default: ''
+        type: string
+      sibling_repository_2:
+        description: Optional second public sibling repository
+        required: false
+        default: ''
+        type: string
+      sibling_ref_2:
+        description: Immutable commit for sibling repository 2
+        required: false
+        default: ''
+        type: string
+      sibling_path_2:
+        description: Checkout path for sibling repository 2, adjacent to app
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: real-web-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PLAYWRIGHT_VERSION: 1.56.0
+
+jobs:
+  browser-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout caller application
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          path: app
+          persist-credentials: false
+      - name: Checkout exact reusable test implementation
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .opto-real-web
+          persist-credentials: false
+      - name: Validate optional sibling checkout contract
+        if: ${{ inputs.sibling_repository_1 != '' || inputs.sibling_repository_2 != '' }}
+        shell: bash
+        env:
+          REPO1: ${{ inputs.sibling_repository_1 }}
+          REF1: ${{ inputs.sibling_ref_1 }}
+          PATH1: ${{ inputs.sibling_path_1 }}
+          REPO2: ${{ inputs.sibling_repository_2 }}
+          REF2: ${{ inputs.sibling_ref_2 }}
+          PATH2: ${{ inputs.sibling_path_2 }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os, pathlib, re
+          for index in ('1', '2'):
+              repo = os.environ[f'REPO{index}']
+              ref = os.environ[f'REF{index}']
+              path = os.environ[f'PATH{index}']
+              if not repo:
+                  assert not ref and not path
+                  continue
+              assert re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', repo)
+              assert re.fullmatch(r'[0-9a-f]{40}', ref), 'sibling ref must be a full commit SHA'
+              pure = pathlib.PurePosixPath(path)
+              assert path and not pure.is_absolute() and '..' not in pure.parts
+              assert path not in {'app', '.opto-real-web'}
+          PY
+      - name: Checkout pinned sibling repository 1
+        if: ${{ inputs.sibling_repository_1 != '' }}
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ inputs.sibling_repository_1 }}
+          ref: ${{ inputs.sibling_ref_1 }}
+          path: ${{ inputs.sibling_path_1 }}
+          persist-credentials: false
+      - name: Checkout pinned sibling repository 2
+        if: ${{ inputs.sibling_repository_2 != '' }}
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ inputs.sibling_repository_2 }}
+          ref: ${{ inputs.sibling_ref_2 }}
+          path: ${{ inputs.sibling_path_2 }}
+          persist-credentials: false
+      - name: Install pinned Node runtime
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22.16.0'
+      - name: Run repository checks and production build
+        if: ${{ !inputs.skip_repository_commands }}
+        working-directory: app
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f package.json ]]; then
+            if [[ -f package-lock.json ]]; then
+              npm ci
+            else
+              npm install --no-audit --no-fund
+            fi
+            npm run check --if-present
+            npm test --if-present
+            npm run build --if-present
+          fi
+      - name: Locate browser shell
+        id: shell
+        shell: bash
+        env:
+          REQUESTED_PAGE: ${{ inputs.app_page }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import os, pathlib
+          requested = os.environ.get('REQUESTED_PAGE', '').strip()
+          candidates = [pathlib.Path('app/dist'), pathlib.Path('app/build'), pathlib.Path('app/out'), pathlib.Path('app/public'), pathlib.Path('app')]
+          pages = [requested] if requested else ['index.html', 'popup.html', 'options.html', 'sidepanel.html']
+          for root in candidates:
+              if not root.is_dir():
+                  continue
+              for page in pages:
+                  if page and (root / page).is_file():
+                      mode = 'extension' if (root / 'manifest.json').is_file() else 'http'
+                      print('root=' + str(root.resolve()))
+                      print('page=' + page)
+                      print('mode=' + mode)
+                      raise SystemExit(0)
+          raise SystemExit('no browser application shell found after build')
+          PY
+      - name: Install pinned Chromium driver
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/opto-browser"
+          cd "$RUNNER_TEMP/opto-browser"
+          npm init -y >/dev/null
+          npm install --no-save --ignore-scripts "playwright@$PLAYWRIGHT_VERSION"
+          npx playwright install --with-deps chromium
+      - name: Exercise rendered shell, IndexedDB durability, reload, and offline cache
+        shell: bash
+        env:
+          PLAYWRIGHT_MODULE: ${{ runner.temp }}/opto-browser/node_modules/playwright
+          SCENARIO: ${{ github.workspace }}/.opto-real-web/tests/real-web-app.e2e.cjs
+        run: |
+          set -euo pipefail
+          node --check "$SCENARIO"
+          if [[ "${{ steps.shell.outputs.mode }}" == extension ]]; then
+            APP_MODE=extension \
+              APP_ROOT="${{ steps.shell.outputs.root }}" \
+              APP_PAGE="${{ steps.shell.outputs.page }}" \
+              node "$SCENARIO"
+          else
+            python3 -m http.server 4173 \
+              --bind 127.0.0.1 \
+              --directory "${{ steps.shell.outputs.root }}" \
+              >"$RUNNER_TEMP/opto-http.log" 2>&1 &
+            server_pid=$!
+            trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+            for attempt in $(seq 1 30); do
+              curl -fsS "http://127.0.0.1:4173/${{ steps.shell.outputs.page }}" >/dev/null && break
+              sleep 1
+            done
+            APP_MODE=http \
+              APP_URL="http://127.0.0.1:4173/${{ steps.shell.outputs.page }}" \
+              node "$SCENARIO"
+          fi

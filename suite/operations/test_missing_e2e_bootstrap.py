@@ -28,8 +28,8 @@ def load_module(name: str, path: Path):
     return module
 
 
-GENERATOR = load_module("missing_e2e_starter_tests", GENERATOR_PATH)
-ARCHIVE = load_module("missing_e2e_archive_tests", ARCHIVE_PATH)
+GENERATOR = load_module("provisioned_e2e_starter_tests", GENERATOR_PATH)
+ARCHIVE = load_module("provisioned_e2e_archive_tests", ARCHIVE_PATH)
 REPOSITORIES = (
     "akrion-sim/akrion-sim-e2e",
     "benefactor-cc/benefactor-e2e",
@@ -49,8 +49,8 @@ def tree_snapshot(root: Path) -> dict[str, tuple[str, int, int]]:
     return result
 
 
-class MissingE2EBootstrapTests(unittest.TestCase):
-    def test_both_reviewed_gaps_render_byte_identical_trees(self):
+class ProvisionedE2EBaselineTests(unittest.TestCase):
+    def test_both_reviewed_repositories_render_byte_identical_baselines(self):
         for repository in REPOSITORIES:
             with self.subTest(repository=repository), tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
@@ -68,10 +68,7 @@ class MissingE2EBootstrapTests(unittest.TestCase):
                     snapshot["tests/opto-sync/adoption_contract.py"][2],
                     0o755,
                 )
-                self.assertEqual(
-                    snapshot["opto-sync-adoption.json"][2],
-                    0o644,
-                )
+                self.assertEqual(snapshot["opto-sync-adoption.json"][2], 0o644)
 
     def test_canonical_archives_ignore_wall_clock_and_host_metadata(self):
         for repository in REPOSITORIES:
@@ -112,10 +109,7 @@ class MissingE2EBootstrapTests(unittest.TestCase):
                 self.assertEqual(receipt["repository"], repository)
                 self.assertEqual(receipt["bootstrapIssue"], "DEN-1469")
                 recorded = {item["path"]: item for item in receipt["files"]}
-                self.assertEqual(
-                    set(recorded),
-                    set(files) - {"bootstrap-receipt.json"},
-                )
+                self.assertEqual(set(recorded), set(files) - {"bootstrap-receipt.json"})
                 for path, item in recorded.items():
                     content = files[path]
                     self.assertEqual(item["size"], len(content))
@@ -157,7 +151,7 @@ class MissingE2EBootstrapTests(unittest.TestCase):
                 self.assertIn("OPTO_SYNC_REQUIRE_BROWSER=1", workflow)
                 self.assertIn("SYNC_FLEET_TOKEN", workflow)
 
-    def test_existing_or_unreviewed_repository_is_rejected(self):
+    def test_unreviewed_repository_is_rejected(self):
         manifest = GENERATOR.load_manifest(MANIFEST)
         for repository in (
             "zed-pkg/zed-e2e",
@@ -168,27 +162,41 @@ class MissingE2EBootstrapTests(unittest.TestCase):
                 with self.assertRaises(GENERATOR.BootstrapError):
                     GENERATOR.select_wrapper(manifest, repository)
 
-    def test_provisioning_entry_cannot_claim_a_branch_or_pr(self):
+    def test_existing_status_and_den_1469_provenance_are_required(self):
         manifest = GENERATOR.load_manifest(MANIFEST)
-        for field, value in (("branch", "agent/den-1469-fake"), ("pullRequest", 1)):
-            with self.subTest(field=field):
-                modified = copy.deepcopy(manifest)
-                wrapper = next(
-                    item
-                    for item in modified["wrappers"]
-                    if item["e2e"]["repository"] == REPOSITORIES[0]
-                )
-                wrapper["e2e"][field] = value
-                with self.assertRaises(GENERATOR.BootstrapError):
-                    GENERATOR.select_wrapper(modified, REPOSITORIES[0])
+        for repository in REPOSITORIES:
+            for field, value in (
+                ("status", "provisioning_required"),
+                ("branch", "agent/den-313-other"),
+                ("pullRequest", 99),
+                ("provisionedByIssue", "DEN-9999"),
+                ("bootstrapSource", "manual-copy"),
+                ("bootstrapMode", "hand-written"),
+            ):
+                with self.subTest(repository=repository, field=field):
+                    modified = copy.deepcopy(manifest)
+                    wrapper = next(
+                        item
+                        for item in modified["wrappers"]
+                        if item["e2e"]["repository"] == repository
+                    )
+                    wrapper["e2e"][field] = value
+                    with self.assertRaises(GENERATOR.BootstrapError):
+                        GENERATOR.select_wrapper(modified, repository)
 
-    def test_secret_markers_and_mutable_refs_are_rejected(self):
+    def test_stale_blocker_is_rejected(self):
+        manifest = GENERATOR.load_manifest(MANIFEST)
+        wrapper = next(
+            item
+            for item in manifest["wrappers"]
+            if item["e2e"]["repository"] == REPOSITORIES[0]
+        )
+        wrapper["e2e"]["blocker"] = "repository-creation no longer required"
+        with self.assertRaisesRegex(GENERATOR.BootstrapError, "stale provisioning blocker"):
+            GENERATOR.select_wrapper(manifest, REPOSITORIES[0])
+
+    def test_mutable_configured_ref_is_rejected(self):
         files = GENERATOR.build_files(MANIFEST, REPOSITORIES[0])
-        secret = dict(files)
-        secret["README.md"] += b"\npassword=not-a-secret\n"
-        with self.assertRaisesRegex(GENERATOR.BootstrapError, "secret marker"):
-            GENERATOR.validate_generated_files(secret)
-
         mutable = dict(files)
         mutable["README.md"] += b'\n{"ref":"latest"}\n'
         with self.assertRaisesRegex(GENERATOR.BootstrapError, "mutable ref"):

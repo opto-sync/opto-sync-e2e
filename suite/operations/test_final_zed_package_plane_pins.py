@@ -65,12 +65,12 @@ class FixtureClient:
 
 
 class FinalZedPackagePlanePinTests(unittest.TestCase):
-    def test_contract_produces_exact_17_wrapper_and_15_e2e_targets(self):
+    def test_contract_produces_exact_17_wrapper_and_17_e2e_targets(self):
         targets = MODULE.validate_contract(copy.deepcopy(CONTRACT), copy.deepcopy(FLEET))
-        self.assertEqual(len(targets), 32)
+        self.assertEqual(len(targets), 34)
         self.assertEqual(sum(item["kind"] == "wrapper" for item in targets), 17)
-        self.assertEqual(sum(item["kind"] == "e2e" for item in targets), 15)
-        self.assertEqual(len({(item["repository"], item["path"]) for item in targets}), 32)
+        self.assertEqual(sum(item["kind"] == "e2e" for item in targets), 17)
+        self.assertEqual(len({(item["repository"], item["path"]) for item in targets}), 34)
         wave_a = [item for item in targets if item["kind"] == "e2e" and item["wave"] == "A"]
         self.assertTrue(wave_a)
         self.assertTrue(
@@ -134,12 +134,12 @@ class FinalZedPackagePlanePinTests(unittest.TestCase):
         with self.assertRaisesRegex(MODULE.PinAuditError, "unsupported E2E status"):
             MODULE.validate_contract(CONTRACT, bad_status)
 
-    def test_complete_mocked_live_audit_passes_32_targets(self):
+    def test_complete_mocked_live_audit_passes_34_targets(self):
         targets = MODULE.validate_contract(CONTRACT, FLEET)
         report = MODULE.audit(CONTRACT, targets, FixtureClient(targets))
         self.assertEqual(
             report["summary"],
-            {"targets": 32, "passed": 32, "failed": 0},
+            {"targets": 34, "passed": 34, "failed": 0},
         )
         self.assertTrue(report["readOnly"])
         self.assertTrue(all(entry["passed"] for entry in report["entries"]))

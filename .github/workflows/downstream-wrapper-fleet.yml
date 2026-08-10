@@ -26,7 +26,7 @@ concurrency:
 
 jobs:
   contract:
-    name: Validate 17 wrappers and 17 E2E identities
+    name: Validate 17 wrappers and 17 existing E2E repositories
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -61,11 +61,15 @@ jobs:
               "$RUNNER_TEMP/fleet-b/downstream-wrapper-fleet.md"
           cp "$RUNNER_TEMP/fleet-a"/* dashboard/
           grep -F 'Wrappers: **17**' dashboard/downstream-wrapper-fleet.md
-          grep -F 'Existing E2E repositories: **15**' dashboard/downstream-wrapper-fleet.md
-          grep -F 'Repositories requiring provisioning: **2**' dashboard/downstream-wrapper-fleet.md
+          grep -F 'Existing E2E repositories: **17**' dashboard/downstream-wrapper-fleet.md
+          grep -F 'Repositories requiring provisioning: **0**' dashboard/downstream-wrapper-fleet.md
+          grep -F 'Deterministic provisioned baselines: **2**' dashboard/downstream-wrapper-fleet.md
           grep -F 'zed-pkg/zed-sync#4' dashboard/downstream-wrapper-fleet.md
-          grep -F 'akrion-sim/akrion-sim-e2e' dashboard/downstream-wrapper-fleet.md
-          grep -F 'benefactor-cc/benefactor-e2e' dashboard/downstream-wrapper-fleet.md
+          grep -F 'akrion-sim/akrion-sim-e2e#2' dashboard/downstream-wrapper-fleet.md
+          grep -F 'benefactor-cc/benefactor-e2e#2' dashboard/downstream-wrapper-fleet.md
+          grep -F 'agent/den-313-opto-sync-e2e' dashboard/downstream-wrapper-fleet.md
+          grep -F 'provisioned by DEN-1469 from opto-sync/opto-sync-e2e#25' \
+            dashboard/downstream-wrapper-fleet.md
 
       - name: Upload deterministic review dashboard
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

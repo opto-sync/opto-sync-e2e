@@ -61,11 +61,13 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Checkout opto-sync-e2e
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
       - name: Verify immutable refs and secret-safe workflow text
-        run: python3 scripts/check-ci-contract.py
+        run: |
+          python3 scripts/check-ci-contract.py
+          python3 scripts/test_downstream_workflow_supply_chain.py
 
   suite:
     name: e2e ${{ matrix.name }}
@@ -81,6 +83,8 @@ jobs:
             id: conformance
           - name: protocol v1 (idempotency + ordered checkpoints)
             id: protocol
+          - name: transport parity (HTTP + WebSocket + TCP)
+            id: websocket-tcp
           - name: protocol auth (subject/client + tenant isolation)
             id: auth
           - name: protocol JWT auth (Supabase JWKS + signed claims)
@@ -97,13 +101,13 @@ jobs:
             id: supabase
     steps:
       - name: Checkout opto-sync-e2e
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           path: opto-sync-e2e
           persist-credentials: false
 
       - name: Checkout syncer.c (pinned sibling used by every image)
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: opto-sync/syncer.c
           ref: ${{ github.event.inputs.syncer_ref || env.SYNCER_C_REF }}
@@ -111,7 +115,7 @@ jobs:
           persist-credentials: false
 
       - name: Checkout opto-sync-clients and its pinned core
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: opto-sync/opto-sync-clients
           ref: ${{ github.event.inputs.clients_ref || env.CLIENTS_REF }}
@@ -163,7 +167,8 @@ jobs:
           matrix.id == 'auth' ||
           matrix.id == 'jwt-auth' ||
           matrix.id == 'operations' ||
-          matrix.id == 'recovery'
+          matrix.id == 'recovery' ||
+          matrix.id == 'websocket-tcp'
         working-directory: opto-sync-e2e
         run: docker compose build node
 
@@ -187,6 +192,13 @@ jobs:
         run: |
           docker compose --profile protocol \
             up --build --exit-code-from protocol
+
+      - name: transport — HTTP, WebSocket, and raw TCP parity
+        if: matrix.id == 'websocket-tcp'
+        working-directory: opto-sync-e2e
+        run: |
+          docker compose --profile wstest \
+            up --build --exit-code-from ws-protocol
 
       - name: protocol auth — production-mode adversarial isolation
         if: matrix.id == 'auth'
@@ -256,7 +268,7 @@ jobs:
 
       - name: Upload compose logs
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: compose-logs-${{ matrix.id }}
           path: |
