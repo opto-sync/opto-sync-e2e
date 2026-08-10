@@ -64,6 +64,7 @@ EXPECTED_RULES = {
 }
 FINAL_ZED_CLI = "a850dbcc799aeaccf1093741ab58439a049c14c9"
 FINAL_ZED_INTERFACES = "c2e049006453c26ca8ca291783f681fce75cb01f"
+ZED_REGISTRY_SOURCE = "https://registry.zpkg.tech"
 
 
 class ChainError(ValueError):
@@ -148,6 +149,18 @@ def validate_package(package: Any, label: str) -> dict[str, Any]:
 
 
 def validate_contract(value: dict[str, Any]) -> dict[str, Any]:
+    expected_keys = {
+        "schemaVersion",
+        "ownerIssue",
+        "architectureIssue",
+        "packagePlane",
+        "stages",
+        "derivedStateOrder",
+        "allowedActionsByState",
+        "rules",
+    }
+    if set(value) != expected_keys:
+        fail("contract contains missing or unknown top-level keys")
     if value.get("schemaVersion") != 1:
         fail("contract schemaVersion must be 1")
     owner_issue = require_issue(value.get("ownerIssue"), "ownerIssue")
@@ -316,6 +329,17 @@ def expected_lock_projection(stage: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
+def expected_core_lock_detail(stage: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        {
+            "file": f"{stage['packages'][index]['name']}.zpkg.lock",
+            **package,
+            "source": ZED_REGISTRY_SOURCE,
+        }
+        for index, package in enumerate(expected_lock_projection(stage))
+    ]
+
+
 def validate_lock_projection(
     actual: Any,
     stage: dict[str, Any],
@@ -381,11 +405,11 @@ def validate_native_core_report(
         ]
         if len(matching) != 1:
             fail("verified core report lacks one passed three_frozen_locks check")
-        validate_lock_projection(
-            matching[0].get("detail"),
-            stage,
-            "core report three_frozen_locks.detail",
-        )
+        if matching[0].get("detail") != expected_core_lock_detail(stage):
+            fail(
+                "core report three_frozen_locks.detail differs from "
+                "the expected package locks"
+            )
     else:
         if summary.get("failed", 0) < 1:
             fail("unverified core report must contain at least one failed check")

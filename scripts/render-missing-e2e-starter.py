@@ -35,6 +35,22 @@ canonical_json = LIBRARY.canonical_json
 sha256_bytes = LIBRARY.sha256_bytes
 sha256_file = LIBRARY.sha256_file
 TEMPLATE_WORKFLOW = LIBRARY.workflow
+PROVISIONED_BASELINES = {
+    "akrion-sim/akrion-sim-e2e": {
+        "branch": "agent/den-313-opto-sync-e2e",
+        "pullRequest": 2,
+        "provisionedByIssue": "DEN-1469",
+        "bootstrapSource": "opto-sync/opto-sync-e2e#25",
+        "bootstrapMode": "deterministic-starter",
+    },
+    "benefactor-cc/benefactor-e2e": {
+        "branch": "agent/den-313-opto-sync-e2e",
+        "pullRequest": 2,
+        "provisionedByIssue": "DEN-1469",
+        "bootstrapSource": "opto-sync/opto-sync-e2e#25",
+        "bootstrapMode": "deterministic-starter",
+    },
+}
 
 JSON_MUTABLE_REF = re.compile(
     r'"(?:wrapperRef|branch|ref|defaultBranch)"\s*:\s*"(?:main|latest|refs/heads/main)"',
@@ -182,13 +198,16 @@ def validate_generated_files(files: dict[str, bytes]) -> None:
 
 def build_files(manifest_path: Path, repository: str) -> dict[str, bytes]:
     original_validator = LIBRARY.validate_generated_files
+    original_selector = LIBRARY.select_wrapper
     original_workflow = LIBRARY.workflow
     LIBRARY.validate_generated_files = validate_generated_files
+    LIBRARY.select_wrapper = select_wrapper
     LIBRARY.workflow = workflow_with_final_pins
     try:
         files = LIBRARY.build_files(manifest_path, repository)
     finally:
         LIBRARY.validate_generated_files = original_validator
+        LIBRARY.select_wrapper = original_selector
         LIBRARY.workflow = original_workflow
     validate_generated_files(files)
     return files
