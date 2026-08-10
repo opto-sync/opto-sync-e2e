@@ -1,0 +1,120 @@
+name: reusable downstream opto-sync wrapper resilience
+
+on:
+  workflow_call:
+    inputs:
+      manifest_path:
+        description: Zed manifest in the caller repository
+        required: false
+        default: .zpkg.toml
+        type: string
+      lock_path:
+        description: Zed lockfile in the caller repository
+        required: false
+        default: .zpkg.lock
+        type: string
+      profile_path:
+        description: Product wrapper profile in the caller repository
+        required: false
+        default: opto-sync-adapter.json
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: downstream-wrapper-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Validate wrapper resilience and immutable dependency boundaries
+        shell: bash
+        env:
+          MANIFEST_PATH: ${{ inputs.manifest_path }}
+          LOCK_PATH: ${{ inputs.lock_path }}
+          PROFILE_PATH: ${{ inputs.profile_path }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import pathlib
+          import re
+          import tomllib
+
+          def safe_path(value: str) -> pathlib.Path:
+              path = pathlib.PurePosixPath(value)
+              assert value and not path.is_absolute() and '..' not in path.parts
+              return pathlib.Path(value)
+
+          manifest = tomllib.loads(safe_path(os.environ['MANIFEST_PATH']).read_text())
+          lock = tomllib.loads(safe_path(os.environ['LOCK_PATH']).read_text())
+          profile = json.loads(safe_path(os.environ['PROFILE_PATH']).read_text())
+
+          dependency = 'opto-sync/opto-sync-clients'
+          assert manifest['dependencies'][dependency] == '^0.2.0'
+          assert manifest['install']['dir'] == 'zed_modules'
+          assert profile['repository'] == os.environ['GITHUB_REPOSITORY']
+          assert profile['dependency'] == {
+              'package': dependency,
+              'range': '^0.2.0',
+              'installRoot': 'zed_modules/opto-sync/opto-sync-clients',
+          }
+
+          known = {
+              'rust': ('opto-sync-client', 'clients/rust'),
+              'typescript': ('@opto-sync/client', 'clients/ts'),
+              'dart': ('opto_sync_client', 'clients/dart'),
+              'gleam': ('opto_sync_client', 'clients/gleam'),
+          }
+          assert profile['nativeAdapters']
+          for language, adapter in profile['nativeAdapters'].items():
+              package, suffix = known[language]
+              path = pathlib.PurePosixPath(adapter['path'])
+              assert adapter['package'] == package
+              assert not path.is_absolute() and '..' not in path.parts
+              assert adapter['path'].startswith('zed_modules/opto-sync/opto-sync-clients/')
+              assert adapter['path'].endswith(suffix)
+
+          persistence = profile['persistence']
+          assert 'indexeddb' in persistence['web']
+          assert {'postgres', 'supabase'} <= set(persistence['backend'])
+          local = set(persistence.get('mobile', [])) | set(persistence.get('desktop', []))
+          assert local & {'sqlite', 'drift'}
+
+          retained = profile['wrapperRetains']
+          delegated = profile['delegatesToOptoSync']
+          assert retained and delegated and set(retained).isdisjoint(delegated)
+          delegated_text = ' '.join(delegated).lower()
+          for forbidden in ('access token', 'refresh token', 'api key', 'credential material'):
+              assert forbidden not in delegated_text
+
+          for invariant in (
+              'renderLocalView', 'realtimeIsWakeHint', 'serverCursorIsAuthoritative',
+              'mutableGitRefsForbidden', 'removeBespokeCoreOnlyAfterParity',
+          ):
+              assert profile['invariants'][invariant] is True
+
+          packages = lock.get('package', [])
+          if profile['releaseState'] == 'blocked-until-certified-package-published':
+              assert lock.get('version') == 1 and packages == []
+          else:
+              package = next(
+                  p for p in packages
+                  if p.get('org') == 'opto-sync' and p.get('name') == 'opto-sync-clients'
+              )
+              assert re.fullmatch(r'[0-9a-f]{64}', package['sha256'])
+              assert re.fullmatch(r'[0-9a-f]{40}', package['vcs_commit'])
+              assert package['size'] > 0 and package['format'] and package['vcs_tag'] and package['source']
+
+          serialized = json.dumps(profile).lower()
+          for mutable in ('refs/heads/main', '"ref": "main"', '"ref": "latest"'):
+              assert mutable not in serialized
+          PY

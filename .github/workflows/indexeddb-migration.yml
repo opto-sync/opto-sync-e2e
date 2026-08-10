@@ -37,13 +37,13 @@ jobs:
     timeout-minutes: 35
     steps:
       - name: Checkout compatibility fixtures
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           path: opto-sync-e2e
           persist-credentials: false
 
       - name: Checkout the certified browser client and nested core
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: opto-sync/opto-sync-clients
           ref: ${{ env.OPTO_SYNC_CLIENTS_SHA }}
@@ -60,7 +60,7 @@ jobs:
           test "$(git -C opto-sync-clients rev-parse HEAD:syncer.c)" = "$SYNCER_C_SHA"
           test "$(git -C opto-sync-clients/syncer.c rev-parse HEAD)" = "$SYNCER_C_SHA"
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
           cache: npm
@@ -90,7 +90,7 @@ jobs:
 
       - name: Upload synthetic logical diagnostics on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: indexeddb-migration-diagnostics
           path: ${{ runner.temp }}/indexeddb-migration-diagnostics.json

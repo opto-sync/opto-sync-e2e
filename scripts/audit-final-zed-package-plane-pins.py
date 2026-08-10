@@ -140,32 +140,31 @@ def validate_contract(contract: dict[str, Any], fleet: dict[str, Any]) -> list[d
         targets.append(target)
         if not isinstance(e2e, dict):
             fail(f"fleet.wrappers[{index}].e2e must be an object")
-        if e2e.get("status") == "existing":
-            e2e_repository = e2e.get("repository")
-            e2e_branch = e2e.get("branch")
-            if not isinstance(e2e_repository, str) or not isinstance(e2e_branch, str):
-                fail(f"fleet.wrappers[{index}] has invalid E2E identity")
-            path = (
-                ".github/workflows/opto-sync-adoption.yml"
-                if wave == "A"
-                else ".github/workflows/opto-sync-wrapper-e2e.yml"
-            )
-            target = {
-                "kind": "e2e",
-                "repository": e2e_repository,
-                "branch": e2e_branch,
-                "path": path,
-                "wave": wave,
-            }
-            key = (e2e_repository, path)
-            if key in seen:
-                fail(f"duplicate target: {e2e_repository}:{path}")
-            seen.add(key)
-            targets.append(target)
-        elif e2e.get("status") != "provisioning_required":
+        if e2e.get("status") != "existing":
             fail(f"fleet.wrappers[{index}] has unsupported E2E status")
-    if len(targets) != 32:
-        fail(f"expected 32 existing workflow targets, found {len(targets)}")
+        e2e_repository = e2e.get("repository")
+        e2e_branch = e2e.get("branch")
+        if not isinstance(e2e_repository, str) or not isinstance(e2e_branch, str):
+            fail(f"fleet.wrappers[{index}] has invalid E2E identity")
+        path = (
+            ".github/workflows/opto-sync-adoption.yml"
+            if wave == "A"
+            else ".github/workflows/opto-sync-wrapper-e2e.yml"
+        )
+        target = {
+            "kind": "e2e",
+            "repository": e2e_repository,
+            "branch": e2e_branch,
+            "path": path,
+            "wave": wave,
+        }
+        key = (e2e_repository, path)
+        if key in seen:
+            fail(f"duplicate target: {e2e_repository}:{path}")
+        seen.add(key)
+        targets.append(target)
+    if len(targets) != 34:
+        fail(f"expected 34 existing workflow targets, found {len(targets)}")
     return sorted(targets, key=lambda item: (item["kind"], item["repository"].lower()))
 
 
@@ -309,7 +308,7 @@ def main() -> int:
                     "targets": len(targets),
                     "wrappers": sum(item["kind"] == "wrapper" for item in targets),
                     "e2e": sum(item["kind"] == "e2e" for item in targets),
-                    "provisioningRequired": 2,
+                    "provisioningRequired": 0,
                 },
                 "targets": targets,
             }

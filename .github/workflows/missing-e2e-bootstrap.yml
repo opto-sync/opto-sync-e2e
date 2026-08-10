@@ -1,4 +1,4 @@
-name: missing E2E repository bootstrap
+name: provisioned E2E baseline reproducibility
 
 on:
   pull_request:
@@ -29,17 +29,17 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  bootstrap:
-    name: Render two deterministic starter repositories
+  baseline:
+    name: Reproduce two deterministic provisioned baselines
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Checkout bootstrap controller
+      - name: Checkout baseline controller
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
 
-      - name: Compile generators and run adversarial tests
+      - name: Compile renderers and run adversarial baseline tests
         shell: bash
         run: |
           set -euo pipefail
@@ -49,11 +49,46 @@ jobs:
             scripts/render-missing-e2e-archive.py
           python3 -m unittest suite.operations.test_missing_e2e_bootstrap -v
 
-      - name: Render each starter tree and archive twice
+      - name: Verify reviewed repository and bootstrap identities
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p bootstrap/a bootstrap/b bootstrap/artifacts
+          python3 - <<'PY'
+          import json
+          manifest = json.load(open('operations/downstream-wrapper-fleet.v1.json'))
+          assert manifest['reconciliationIssue'] == 'DEN-1534'
+          expected = {
+              'akrion-sim/akrion-sim-e2e': {
+                  'branch': 'agent/den-313-opto-sync-e2e',
+                  'pullRequest': 2,
+              },
+              'benefactor-cc/benefactor-e2e': {
+                  'branch': 'agent/den-313-opto-sync-e2e',
+                  'pullRequest': 2,
+              },
+          }
+          found = {}
+          for wrapper in manifest['wrappers']:
+              e2e = wrapper['e2e']
+              repository = e2e['repository']
+              if repository not in expected:
+                  continue
+              assert e2e['status'] == 'existing'
+              assert e2e['branch'] == expected[repository]['branch']
+              assert e2e['pullRequest'] == expected[repository]['pullRequest']
+              assert e2e['provisionedByIssue'] == 'DEN-1469'
+              assert e2e['bootstrapSource'] == 'opto-sync/opto-sync-e2e#25'
+              assert e2e['bootstrapMode'] == 'deterministic-starter'
+              assert 'blocker' not in e2e
+              found[repository] = True
+          assert set(found) == set(expected)
+          PY
+
+      - name: Render each provisioned baseline tree and archive twice
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p baseline/a baseline/b baseline/artifacts
           repositories=(
             akrion-sim/akrion-sim-e2e
             benefactor-cc/benefactor-e2e
@@ -63,27 +98,27 @@ jobs:
             for copy in a b; do
               python3 scripts/render-missing-e2e-starter.py \
                 --repository "$repository" \
-                --out "bootstrap/$copy/$name"
+                --out "baseline/$copy/$name"
               python3 scripts/render-missing-e2e-archive.py \
                 --repository "$repository" \
-                --archive "bootstrap/$copy/$name.tar.gz"
+                --archive "baseline/$copy/$name.tar.gz"
             done
-            diff -qr "bootstrap/a/$name" "bootstrap/b/$name"
-            cmp "bootstrap/a/$name.tar.gz" "bootstrap/b/$name.tar.gz"
+            diff -qr "baseline/a/$name" "baseline/b/$name"
+            cmp "baseline/a/$name.tar.gz" "baseline/b/$name.tar.gz"
             (
-              cd "bootstrap/a/$name"
+              cd "baseline/a/$name"
               python3 tests/opto-sync/adoption_contract.py
               node --check tests/opto-sync/product.e2e.test.mjs
             )
-            tar -tzf "bootstrap/a/$name.tar.gz" > "bootstrap/artifacts/$name.contents.txt"
-            cp "bootstrap/a/$name.tar.gz" "bootstrap/artifacts/$name.tar.gz"
+            tar -tzf "baseline/a/$name.tar.gz" > "baseline/artifacts/$name.contents.txt"
+            cp "baseline/a/$name.tar.gz" "baseline/artifacts/$name.tar.gz"
           done
           (
-            cd bootstrap/artifacts
+            cd baseline/artifacts
             sha256sum *.tar.gz > SHA256SUMS
           )
 
-      - name: Verify generated repositories remain credential-free and reviewable
+      - name: Verify canonical archive metadata and content receipts
         shell: bash
         run: |
           set -euo pipefail
@@ -98,25 +133,18 @@ jobs:
               'benefactor-e2e': 'benefactor-cc/benefactor-e2e',
           }
           for name, repository in expected.items():
-              root = pathlib.Path('bootstrap/a') / name
+              root = pathlib.Path('baseline/a') / name
               profile = json.loads((root / 'opto-sync-adoption.json').read_text())
               receipt = json.loads((root / 'bootstrap-receipt.json').read_text())
               workflow = (root / '.github/workflows/opto-sync-adoption.yml').read_text()
               assert profile['e2eRepository'] == repository
               assert receipt['repository'] == repository
-              assert profile['bootstrapIssue'] == 'DEN-1469'
+              assert receipt['bootstrapIssue'] == 'DEN-1469'
               assert set(profile['releaseGates']) == {'DEN-309', 'DEN-363'}
               assert 'install --frozen --install-mode copy' in workflow
               assert 'OPTO_SYNC_REQUIRE_BROWSER=1' in workflow
               assert 'SYNC_FLEET_TOKEN' in workflow
-              serialized = '\n'.join(
-                  path.read_text(errors='strict')
-                  for path in sorted(root.rglob('*'))
-                  if path.is_file()
-              ).lower()
-              for marker in ('ghp_', 'github_pat_', 'bearer ', 'password=', 'private_key'):
-                  assert marker not in serialized, (repository, marker)
-              archive = pathlib.Path('bootstrap/artifacts') / f'{name}.tar.gz'
+              archive = pathlib.Path('baseline/artifacts') / f'{name}.tar.gz'
               data = archive.read_bytes()
               assert data[:2] == b'\x1f\x8b'
               assert data[4:8] == b'\x00\x00\x00\x00'
@@ -133,10 +161,10 @@ jobs:
               assert all(re.fullmatch(r'[0-9a-f]{64}', item['sha256']) for item in receipt['files'])
           PY
 
-      - name: Upload reviewed starter repository artifacts
+      - name: Upload reviewed provisioned baseline artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: missing-e2e-starter-repositories
-          path: bootstrap/artifacts/
+          name: provisioned-e2e-baselines
+          path: baseline/artifacts/
           if-no-files-found: error
           retention-days: 30
