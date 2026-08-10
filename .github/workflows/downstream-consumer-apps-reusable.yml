@@ -1,0 +1,246 @@
+name: reusable downstream consumer apps
+
+on:
+  workflow_call:
+    inputs:
+      profile_path:
+        description: Consumer application profile in the caller repository
+        required: false
+        default: opto-sync-consumers.json
+        type: string
+      live_e2e:
+        description: Checkout and test the exact real application commits
+        required: false
+        default: false
+        type: boolean
+    secrets:
+      SYNC_FLEET_TOKEN:
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: downstream-consumers-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.profile.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - id: profile
+        name: Validate immutable real-app mapping
+        shell: bash
+        env:
+          PROFILE_PATH: ${{ inputs.profile_path }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, pathlib, re
+
+          path = pathlib.Path(os.environ['PROFILE_PATH'])
+          profile = json.loads(path.read_text())
+          assert profile['schemaVersion'] == 1
+          assert profile['syncRepository'] == os.environ['GITHUB_REPOSITORY']
+          assert profile['dependency'] == {
+              'package': 'opto-sync/opto-sync-clients',
+              'range': '^0.2.0',
+          }
+          assert profile['persistence']['web'] and profile['persistence']['backend']
+          assert profile['securityExclusions']
+          apps = profile['applications']
+          assert apps and any(app['kind'] in ('rust-web', 'node-web') for app in apps)
+          seen_repositories = set()
+          for app in apps:
+              assert app['repository'] not in seen_repositories
+              seen_repositories.add(app['repository'])
+              assert re.fullmatch(r'[0-9a-f]{40}', app['ref'])
+              assert app['kind'] in ('rust-web', 'node-web', 'flutter')
+              app.setdefault('workingDirectory', '.')
+              app.setdefault('dependencies', [])
+              app.setdefault('dependencyOverrides', {})
+              for field in ('manifest', 'workingDirectory'):
+                  value = app[field]
+                  candidate = pathlib.PurePosixPath(value)
+                  assert value and not candidate.is_absolute() and '..' not in candidate.parts
+              assert app['testCommand'] and app['buildCommand']
+              if app['kind'] == 'rust-web':
+                  assert app['manifest'].endswith('Cargo.toml')
+                  assert 'cargo test' in app['testCommand']
+                  assert 'cargo build' in app['buildCommand']
+              elif app['kind'] == 'node-web':
+                  assert app['manifest'].endswith('package.json')
+                  assert any(token in app['testCommand'] for token in ('npm ', 'pnpm ', 'yarn '))
+              else:
+                  assert app['manifest'].endswith('pubspec.yaml')
+                  assert 'flutter test' in app['testCommand']
+                  assert 'flutter build' in app['buildCommand']
+
+              dependency_paths = set()
+              for dependency in app['dependencies']:
+                  assert re.fullmatch(r'[0-9a-f]{40}', dependency['ref'])
+                  assert dependency['repository'] != app['repository']
+                  destination = pathlib.PurePosixPath(dependency['path'])
+                  assert not destination.is_absolute() and '..' not in destination.parts
+                  assert dependency['path'] not in ('', '.', 'app')
+                  assert dependency['path'] not in dependency_paths
+                  dependency_paths.add(dependency['path'])
+                  if dependency.get('manifest'):
+                      manifest = pathlib.PurePosixPath(dependency['manifest'])
+                      assert not manifest.is_absolute() and '..' not in manifest.parts
+
+              for package, override_path in app['dependencyOverrides'].items():
+                  assert re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', package)
+                  override = pathlib.PurePosixPath(override_path)
+                  assert not override.is_absolute() and '..' in override.parts
+                  assert override_path.startswith('../')
+
+          serialized = json.dumps(profile).lower()
+          for mutable in ('refs/heads/main', '"ref": "main"', '"ref": "latest"'):
+              assert mutable not in serialized
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('matrix=' + json.dumps({'app': apps}, separators=(',', ':')) + '\n')
+          PY
+
+  live-apps:
+    needs: contract
+    if: ${{ inputs.live_e2e }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.contract.outputs.matrix) }}
+    steps:
+      - name: Require private fleet read credentials
+        env:
+          TOKEN: ${{ secrets.SYNC_FLEET_TOKEN }}
+        run: test -n "$TOKEN"
+      - name: Checkout exact real application commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: ${{ matrix.app.repository }}
+          ref: ${{ matrix.app.ref }}
+          path: app
+          token: ${{ secrets.SYNC_FLEET_TOKEN }}
+          persist-credentials: false
+      - name: Fetch exact private path dependencies
+        shell: bash
+        env:
+          SYNC_FLEET_TOKEN: ${{ secrets.SYNC_FLEET_TOKEN }}
+          DEPENDENCIES_JSON: ${{ toJSON(matrix.app.dependencies) }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64, json, os, pathlib, subprocess
+
+          dependencies = json.loads(os.environ.get('DEPENDENCIES_JSON') or '[]')
+          token = os.environ['SYNC_FLEET_TOKEN']
+          auth = base64.b64encode(f'x-access-token:{token}'.encode()).decode()
+          header = f'AUTHORIZATION: basic {auth}'
+          root = pathlib.Path(os.environ['GITHUB_WORKSPACE'])
+          for dependency in dependencies:
+              destination = root / dependency['path']
+              if destination.exists():
+                  raise RuntimeError(f'dependency destination already exists: {destination}')
+              destination.mkdir(parents=True)
+              subprocess.run(['git', '-C', str(destination), 'init', '--quiet'], check=True)
+              subprocess.run(
+                  [
+                      'git', '-C', str(destination), 'remote', 'add', 'origin',
+                      f"https://github.com/{dependency['repository']}.git",
+                  ],
+                  check=True,
+              )
+              subprocess.run(
+                  [
+                      'git', '-c', f'http.https://github.com/.extraheader={header}',
+                      '-C', str(destination), 'fetch', '--depth=1', 'origin', dependency['ref'],
+                  ],
+                  check=True,
+              )
+              subprocess.run(
+                  ['git', '-C', str(destination), 'checkout', '--detach', 'FETCH_HEAD'],
+                  check=True,
+              )
+              actual = subprocess.check_output(
+                  ['git', '-C', str(destination), 'rev-parse', 'HEAD'],
+                  text=True,
+              ).strip()
+              if actual != dependency['ref']:
+                  raise RuntimeError(f"unexpected dependency commit for {dependency['repository']}: {actual}")
+              if dependency.get('manifest') and not (destination / dependency['manifest']).is_file():
+                  raise RuntimeError(f"missing dependency manifest: {destination / dependency['manifest']}")
+              subprocess.run(
+                  ['git', '-C', str(destination), 'remote', 'set-url', 'origin', 'disabled://credentials-removed'],
+                  check=True,
+              )
+          PY
+      - name: Materialize dependency overrides without credentials
+        if: ${{ matrix.app.kind == 'flutter' }}
+        working-directory: app
+        shell: bash
+        env:
+          OVERRIDES_JSON: ${{ toJSON(matrix.app.dependencyOverrides) }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, pathlib
+          overrides = json.loads(os.environ.get('OVERRIDES_JSON') or '{}')
+          if not overrides:
+              raise SystemExit(0)
+          lines = ['dependency_overrides:']
+          for package in sorted(overrides):
+              lines.extend([f'  {package}:', f"    path: {overrides[package]}"])
+          pathlib.Path('pubspec_overrides.yaml').write_text('\n'.join(lines) + '\n')
+          PY
+      - name: Install Flutter for real Flutter applications
+        if: ${{ matrix.app.kind == 'flutter' }}
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          channel: stable
+          cache: false
+      - name: Verify exact manifests and remove repository credentials
+        shell: bash
+        env:
+          MANIFEST: ${{ matrix.app.manifest }}
+          WORKING_DIRECTORY: ${{ matrix.app.workingDirectory }}
+          EXPECTED_REF: ${{ matrix.app.ref }}
+          DEPENDENCIES_JSON: ${{ toJSON(matrix.app.dependencies) }}
+        run: |
+          set -euo pipefail
+          test -f "app/$MANIFEST"
+          test -d "app/$WORKING_DIRECTORY"
+          test "$(git -C app rev-parse HEAD)" = "$EXPECTED_REF"
+          git -C app remote set-url origin disabled://credentials-removed
+          test -z "$(git -C app config --local --get-regexp 'extraheader|sshCommand' || true)"
+          python3 - <<'PY'
+          import json, os, pathlib, subprocess
+          root = pathlib.Path(os.environ['GITHUB_WORKSPACE'])
+          for dependency in json.loads(os.environ.get('DEPENDENCIES_JSON') or '[]'):
+              destination = root / dependency['path']
+              config = subprocess.run(
+                  ['git', '-C', str(destination), 'config', '--local', '--get-regexp', 'extraheader|sshCommand'],
+                  text=True,
+                  capture_output=True,
+              )
+              if config.stdout.strip():
+                  raise RuntimeError(f'credential-bearing git config remains in {destination}')
+          PY
+      - name: Run the real application test command
+        working-directory: app/${{ matrix.app.workingDirectory }}
+        shell: bash
+        env:
+          TEST_COMMAND: ${{ matrix.app.testCommand }}
+        run: bash -euo pipefail -c "$TEST_COMMAND"
+      - name: Build the real application
+        working-directory: app/${{ matrix.app.workingDirectory }}
+        shell: bash
+        env:
+          BUILD_COMMAND: ${{ matrix.app.buildCommand }}
+        run: bash -euo pipefail -c "$BUILD_COMMAND"

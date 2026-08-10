@@ -7,9 +7,17 @@
 **/.npm/
 servers/node/dist/
 
+# Python bytecode
+**/__pycache__/
+*.py[cod]
+
 # Dart
 **/.dart_tool/
 **/pubspec.lock
+
+# Python test caches
+**/__pycache__/
+*.pyc
 
 # Environment files (keep .env.example if present)
 .env

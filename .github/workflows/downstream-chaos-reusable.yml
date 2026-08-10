@@ -1,0 +1,252 @@
+name: reusable downstream opto-sync chaos
+
+on:
+  workflow_call:
+    inputs:
+      profile_path:
+        description: Product profile in the caller repository
+        required: false
+        default: tests/opto-sync-wrapper/profile.json
+        type: string
+      product_test_path:
+        description: Product-specific Opto-Sync E2E test in the caller repository
+        required: false
+        default: tests/opto-sync-wrapper/product.e2e.test.mjs
+        type: string
+      live_e2e:
+        description: Run frozen package, native, real-browser, and downstream chaos tests
+        required: false
+        default: false
+        type: boolean
+      wrapper_ref:
+        description: Optional wrapper branch, tag, or immutable commit override
+        required: false
+        default: ''
+        type: string
+    secrets:
+      SYNC_FLEET_TOKEN:
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: downstream-opto-chaos-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  OPTO_SYNC_CLIENT_SHA: e92b9ea2f8957da199af22ba14884431a03cecf5
+  ZED_CLI_SHA: c636fb8f6b08695c6b4fe94e2481f4d57270b2d7
+  ZED_INTERFACES_SHA: dc0e0a0620b9462817950b552d3d334a184b1cb1
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      sync_repository: ${{ steps.profile.outputs.sync_repository }}
+      sync_ref: ${{ steps.profile.outputs.sync_ref }}
+    steps:
+      - name: Checkout caller repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Checkout the exact reusable-workflow implementation
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .opto-chaos
+          persist-credentials: false
+      - name: Enforce immutable downstream workflow dependencies
+        run: >-
+          python3 .opto-chaos/scripts/check_downstream_workflow_supply_chain.py
+          --root .
+      - id: profile
+        name: Validate caller profile and shared chaos coverage
+        shell: bash
+        env:
+          PROFILE_PATH: ${{ inputs.profile_path }}
+          PRODUCT_TEST_PATH: ${{ inputs.product_test_path }}
+          CHAOS_TEST_PATH: .opto-chaos/tests/downstream-chaos.e2e.test.mjs
+        run: |
+          set -euo pipefail
+          node --check "$CHAOS_TEST_PATH"
+          node --check "$PRODUCT_TEST_PATH"
+          python3 - <<'PY'
+          import json, os, pathlib
+          profile_path = pathlib.Path(os.environ['PROFILE_PATH'])
+          suite_path = pathlib.Path(os.environ['CHAOS_TEST_PATH'])
+          profile = json.loads(profile_path.read_text())
+          suite = suite_path.read_text()
+          assert profile['repository'] == os.environ['GITHUB_REPOSITORY']
+          assert profile['syncRepository'] and profile['syncRef']
+          assert profile['collections'] and profile['domainGuards']
+          required = (
+              'protocolPushRequest(', 'recordPushFailure(', 'clientId(',
+              'pullCheckpoint(', 'localView(', 'QueueQuotaError',
+              'queueDelete(', 'installSnapshot(', 'pendingMutations(',
+              'reconcileIncoming(', 'indexedDB.deleteDatabase(',
+          )
+          assert all(token in suite for token in required)
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f"sync_repository={profile['syncRepository']}\n")
+              output.write(f"sync_ref={profile['syncRef']}\n")
+          PY
+
+  source-chaos-and-service-worker:
+    needs: contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      PROFILE_PATH: ${{ inputs.profile_path }}
+      PRODUCT_TEST_PATH: ${{ inputs.product_test_path }}
+      CHAOS_TEST_PATH: .opto-chaos/tests/downstream-chaos.e2e.test.mjs
+    steps:
+      - name: Checkout caller repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          path: downstream
+          persist-credentials: false
+      - name: Checkout the exact reusable-workflow implementation
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .opto-chaos
+          persist-credentials: false
+      - name: Checkout the exact hardened opto-sync clients source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: opto-sync/opto-sync-clients
+          ref: ${{ env.OPTO_SYNC_CLIENT_SHA }}
+          path: opto-sync-clients
+          persist-credentials: false
+          submodules: recursive
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22.16.0'
+          cache: npm
+          cache-dependency-path: |
+            opto-sync-clients/syncer.c/bindings/typescript/package-lock.json
+            opto-sync-clients/clients/ts/package-lock.json
+      - name: Build the immutable native and browser SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd opto-sync-clients/syncer.c/bindings/typescript && npm ci)
+          (cd opto-sync-clients/clients/ts && npm ci && npm run build)
+      - name: Run crash, replay, quota, and convergence E2E
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp "$CHAOS_TEST_PATH" \
+            opto-sync-clients/clients/ts/test/downstream-chaos.e2e.test.mjs
+          cp "downstream/$PRODUCT_TEST_PATH" \
+            opto-sync-clients/clients/ts/test/downstream-product.e2e.test.mjs
+          cd opto-sync-clients/clients/ts
+          OPTO_SYNC_PROFILE="$GITHUB_WORKSPACE/downstream/$PROFILE_PATH" \
+            node --test \
+              test/downstream-chaos.e2e.test.mjs \
+              test/downstream-product.e2e.test.mjs
+      - name: Run real Chrome two-tab Service Worker termination and restart E2E
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd opto-sync-clients/clients/ts
+          npx playwright install --with-deps chromium
+          OPTO_SYNC_REQUIRE_BROWSER=1 npm run test:service-worker-browser
+
+  live-chaos:
+    needs: contract
+    if: ${{ inputs.live_e2e }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      SYNC_FLEET_TOKEN: ${{ secrets.SYNC_FLEET_TOKEN }}
+      PROFILE_PATH: ${{ inputs.profile_path }}
+      PRODUCT_TEST_PATH: ${{ inputs.product_test_path }}
+      CHAOS_TEST_PATH: .opto-chaos/tests/downstream-chaos.e2e.test.mjs
+    steps:
+      - name: Checkout caller repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Checkout the exact reusable-workflow implementation
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .opto-chaos
+          persist-credentials: false
+      - name: Require private fleet read credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SYNC_FLEET_TOKEN" || {
+            echo 'SYNC_FLEET_TOKEN is required for cross-repository certification' >&2
+            exit 1
+          }
+      - name: Resolve wrapper ref
+        id: wrapper
+        shell: bash
+        env:
+          REQUESTED_REF: ${{ inputs.wrapper_ref }}
+          PROFILE_REF: ${{ needs.contract.outputs.sync_ref }}
+        run: |
+          set -euo pipefail
+          ref="${REQUESTED_REF:-$PROFILE_REF}"
+          test -n "$ref"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ needs.contract.outputs.sync_repository }}
+          ref: ${{ steps.wrapper.outputs.ref }}
+          path: wrapper
+          token: ${{ secrets.SYNC_FLEET_TOKEN }}
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: zed-pkg/zed-cli
+          ref: ${{ env.ZED_CLI_SHA }}
+          path: .tools/zed-cli
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: zed-pkg/zed-interfaces
+          ref: ${{ env.ZED_INTERFACES_SHA }}
+          path: .tools/zed-interfaces
+          persist-credentials: false
+      - name: Build pinned Zed CLI
+        run: cargo build --locked --release --manifest-path .tools/zed-cli/Cargo.toml --bin zed
+      - name: Frozen-install and run native, browser, and downstream chaos tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          zed="$GITHUB_WORKSPACE/.tools/zed-cli/target/release/zed"
+          (cd wrapper && "$zed" install --frozen --install-mode copy)
+          python3 - <<'PY'
+          import pathlib, re, tomllib
+          lock = tomllib.loads(pathlib.Path('wrapper/.zpkg.lock').read_text())
+          package = next(
+              p for p in lock.get('package', [])
+              if p.get('org') == 'opto-sync' and p.get('name') == 'opto-sync-clients'
+          )
+          assert re.fullmatch(r'[0-9a-f]{64}', package['sha256'])
+          assert package['size'] > 0 and package['format'] and package['vcs_tag'] and package['source']
+          assert re.fullmatch(r'[0-9a-f]{40}', package['vcs_commit'])
+          PY
+          client="$GITHUB_WORKSPACE/wrapper/zed_modules/opto-sync/opto-sync-clients/clients/ts"
+          cd "$client"
+          npm ci
+          npm run build
+          npm run test:node
+          npx playwright install --with-deps chromium
+          OPTO_SYNC_REQUIRE_BROWSER=1 npm run test:browser
+          OPTO_SYNC_REQUIRE_BROWSER=1 npm run test:service-worker-browser
+          cp "$GITHUB_WORKSPACE/$CHAOS_TEST_PATH" test/downstream-chaos.e2e.test.mjs
+          cp "$GITHUB_WORKSPACE/$PRODUCT_TEST_PATH" test/downstream-product.e2e.test.mjs
+          OPTO_SYNC_PROFILE="$GITHUB_WORKSPACE/$PROFILE_PATH" \
+            node --test \
+              test/downstream-chaos.e2e.test.mjs \
+              test/downstream-product.e2e.test.mjs

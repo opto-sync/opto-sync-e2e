@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Validate and render the complete downstream Opto-Sync wrapper fleet.
 
-This is an inventory and planning contract.  It never calls GitHub, mutates a
+This is an inventory and planning contract. It never calls GitHub, mutates a
 consumer repository, treats a draft PR as merged, or claims that live frozen
 installation has passed.
 """
@@ -35,9 +35,21 @@ EXPECTED_E2E_SUFFIX_BY_WAVE = {
     "B": "opto-sync-e2e",
     "C": "opto-sync-e2e",
 }
-EXPECTED_PROVISIONING_GAPS = {
-    "akrion-sim/akrion-sim-e2e",
-    "benefactor-cc/benefactor-e2e",
+PROVISIONED_E2E = {
+    "akrion-sim/akrion-sim-e2e": {
+        "branch": "agent/den-313-opto-sync-e2e",
+        "pullRequest": 2,
+        "provisionedByIssue": "DEN-1469",
+        "bootstrapSource": "opto-sync/opto-sync-e2e#25",
+        "bootstrapMode": "deterministic-starter",
+    },
+    "benefactor-cc/benefactor-e2e": {
+        "branch": "agent/den-313-opto-sync-e2e",
+        "pullRequest": 2,
+        "provisionedByIssue": "DEN-1469",
+        "bootstrapSource": "opto-sync/opto-sync-e2e#25",
+        "bootstrapMode": "deterministic-starter",
+    },
 }
 SUPPORTED_LANGUAGES = {"c", "rust", "typescript", "dart", "gleam", "sql"}
 SUPPORTED_PERSISTENCE = {"indexeddb", "sqlite", "postgres", "supabase"}
@@ -112,10 +124,23 @@ def require_unique_strings(value: Any, label: str, *, minimum: int = 1) -> list[
     return normalized
 
 
+def validate_provisioned_baseline(repository: str, e2e: dict[str, Any]) -> None:
+    expected = PROVISIONED_E2E[repository]
+    for field, value in expected.items():
+        if e2e.get(field) != value:
+            fail(f"{repository}: {field} differs from reviewed DEN-1469 baseline")
+    forbidden = {"blocker"}
+    unexpected = forbidden & set(e2e)
+    if unexpected:
+        fail(f"{repository}: provisioned entry contains stale blocker metadata")
+
+
 def validate_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
     if manifest.get("schemaVersion") != 1:
         fail("schemaVersion must be 1")
     require_issue(manifest.get("ownerIssue"), "ownerIssue")
+    if manifest.get("reconciliationIssue") != "DEN-1534":
+        fail("reconciliationIssue must be DEN-1534")
     if manifest.get("parentIssue") != "DEN-313":
         fail("parentIssue must be DEN-313")
     if manifest.get("dependency") != EXPECTED_DEPENDENCY:
@@ -137,7 +162,7 @@ def validate_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
     wrapper_prs: set[tuple[str, int]] = set()
     e2e_repositories: set[str] = set()
     e2e_prs: set[tuple[str, int]] = set()
-    provisioning_gaps: set[str] = set()
+    provisioned_baselines: set[str] = set()
     wave_counts: Counter[str] = Counter()
     existing_e2e = 0
 
@@ -209,47 +234,46 @@ def validate_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
         e2e = wrapper.get("e2e")
         if not isinstance(e2e, dict):
             fail(f"{label}.e2e must be an object")
-        e2e_status = require_text(e2e.get("status"), f"{label}.e2e.status")
+        if e2e.get("status") != "existing":
+            fail(f"{repository}: every reviewed E2E repository must now exist")
+        existing_e2e += 1
         e2e_repository = require_repository(e2e.get("repository"), f"{label}.e2e.repository")
         if e2e_repository in e2e_repositories:
             fail(f"duplicate E2E repository: {e2e_repository}")
         e2e_repositories.add(e2e_repository)
+        e2e_branch = require_branch(e2e.get("branch"), f"{label}.e2e.branch")
+        e2e_pr = require_positive_int(e2e.get("pullRequest"), f"{label}.e2e.pullRequest")
+        if (e2e_repository, e2e_pr) in e2e_prs:
+            fail(f"duplicate E2E pull request: {e2e_repository}#{e2e_pr}")
+        e2e_prs.add((e2e_repository, e2e_pr))
+        if "blocker" in e2e:
+            fail(f"{e2e_repository}: existing E2E entry cannot contain a provisioning blocker")
 
-        if e2e_status == "existing":
-            existing_e2e += 1
-            e2e_branch = require_branch(e2e.get("branch"), f"{label}.e2e.branch")
+        if e2e_repository in PROVISIONED_E2E:
+            validate_provisioned_baseline(e2e_repository, e2e)
+            provisioned_baselines.add(e2e_repository)
+        else:
             if not e2e_branch.startswith(f"agent/{issue.lower()}-"):
                 fail(f"{e2e_repository}: E2E branch does not identify {issue}")
             if not e2e_branch.endswith(EXPECTED_E2E_SUFFIX_BY_WAVE[wave]):
                 fail(f"{e2e_repository}: unexpected E2E branch suffix")
-            e2e_pr = require_positive_int(e2e.get("pullRequest"), f"{label}.e2e.pullRequest")
-            if (e2e_repository, e2e_pr) in e2e_prs:
-                fail(f"duplicate E2E pull request: {e2e_repository}#{e2e_pr}")
-            e2e_prs.add((e2e_repository, e2e_pr))
-            if "blocker" in e2e:
-                fail(f"{e2e_repository}: existing E2E entry cannot contain a provisioning blocker")
-        elif e2e_status == "provisioning_required":
-            provisioning_gaps.add(e2e_repository)
-            if e2e.get("branch") is not None or e2e.get("pullRequest") is not None:
-                fail(f"{e2e_repository}: uncreated repository cannot claim a branch or PR")
-            blocker = require_text(e2e.get("blocker"), f"{label}.e2e.blocker")
-            if len(blocker) < 60 or "repository-creation" not in blocker:
-                fail(f"{e2e_repository}: provisioning blocker must explain the creation boundary")
-        else:
-            fail(f"{e2e_repository}: unsupported E2E status {e2e_status!r}")
+            for field in ("provisionedByIssue", "bootstrapSource", "bootstrapMode"):
+                if field in e2e:
+                    fail(f"{e2e_repository}: unexpected provisioned-baseline field {field}")
 
     if dict(wave_counts) != EXPECTED_WAVE_COUNTS:
         fail(f"wave counts differ: {dict(wave_counts)}")
-    if existing_e2e != 15:
-        fail(f"expected 15 existing E2E repositories, found {existing_e2e}")
-    if provisioning_gaps != EXPECTED_PROVISIONING_GAPS:
-        fail(f"provisioning gaps differ: {sorted(provisioning_gaps)}")
+    if existing_e2e != 17:
+        fail(f"expected 17 existing E2E repositories, found {existing_e2e}")
+    if provisioned_baselines != set(PROVISIONED_E2E):
+        fail(f"provisioned baselines differ: {sorted(provisioned_baselines)}")
     if len(e2e_repositories) != 17:
         fail("every wrapper must map to one unique E2E repository identity")
 
     return {
         "schemaVersion": 1,
         "ownerIssue": manifest["ownerIssue"],
+        "reconciliationIssue": manifest["reconciliationIssue"],
         "parentIssue": manifest["parentIssue"],
         "dependency": manifest["dependency"],
         "releaseGates": sorted(release_gates),
@@ -257,10 +281,12 @@ def validate_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
         "summary": {
             "wrappers": len(wrappers),
             "existingE2e": existing_e2e,
-            "provisioningRequired": len(provisioning_gaps),
+            "provisioningRequired": 0,
+            "provisionedBaselines": len(provisioned_baselines),
             "waves": dict(sorted(wave_counts.items())),
         },
-        "provisioningGaps": sorted(provisioning_gaps),
+        "provisioningGaps": [],
+        "provisionedBaselines": sorted(provisioned_baselines),
         "wrappers": sorted(
             (
                 {
@@ -271,7 +297,10 @@ def validate_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
                     "linearIssue": wrapper["linearIssue"],
                     "e2eRepository": wrapper["e2e"]["repository"],
                     "e2eStatus": wrapper["e2e"]["status"],
-                    "e2ePullRequest": wrapper["e2e"].get("pullRequest"),
+                    "e2ePullRequest": wrapper["e2e"]["pullRequest"],
+                    "e2eBranch": wrapper["e2e"]["branch"],
+                    "provisionedByIssue": wrapper["e2e"].get("provisionedByIssue"),
+                    "bootstrapSource": wrapper["e2e"].get("bootstrapSource"),
                     "legacyParityRequired": wrapper["legacyParityRequired"],
                     "bootstrapIndependent": wrapper["bootstrapIndependent"],
                     "languages": sorted(wrapper["languages"]),
@@ -289,31 +318,32 @@ def render_markdown(summary: dict[str, Any]) -> str:
     lines = [
         "# Opto-Sync downstream wrapper fleet",
         "",
-        f"Owner: `{summary['ownerIssue']}` · Parent: `{summary['parentIssue']}`",
+        f"Owner: `{summary['ownerIssue']}` · Reconciliation: `{summary['reconciliationIssue']}` · Parent: `{summary['parentIssue']}`",
         "",
         f"Dependency: `{summary['dependency']['package']}@{summary['dependency']['range']}`",
         "",
-        "| Wave | Wrapper PR | E2E | Languages | Persistence | Special gate |",
-        "| --- | --- | --- | --- | --- | --- |",
+        "| Wave | Wrapper PR | E2E PR | E2E branch | Languages | Persistence | Special gate |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
     ]
     for wrapper in summary["wrappers"]:
-        e2e = (
-            f"`{wrapper['e2eRepository']}#{wrapper['e2ePullRequest']}`"
-            if wrapper["e2eStatus"] == "existing"
-            else f"`{wrapper['e2eRepository']}` — provisioning required"
-        )
         special: list[str] = []
         if wrapper["bootstrapIndependent"]:
             special.append("bootstrap independence")
         if wrapper["legacyParityRequired"]:
             special.append("legacy parity")
+        if wrapper["provisionedByIssue"]:
+            special.append(
+                f"provisioned by {wrapper['provisionedByIssue']} from {wrapper['bootstrapSource']}"
+            )
         special.extend(wrapper["additionalScenarios"])
         lines.append(
-            "| {wave} | `{repository}#{pr}` | {e2e} | {languages} | {persistence} | {special} |".format(
+            "| {wave} | `{repository}#{pr}` | `{e2e_repository}#{e2e_pr}` | `{e2e_branch}` | {languages} | {persistence} | {special} |".format(
                 wave=wrapper["wave"],
                 repository=wrapper["repository"],
                 pr=wrapper["pullRequest"],
-                e2e=e2e,
+                e2e_repository=wrapper["e2eRepository"],
+                e2e_pr=wrapper["e2ePullRequest"],
+                e2e_branch=wrapper["e2eBranch"],
                 languages=", ".join(wrapper["languages"]),
                 persistence=", ".join(wrapper["persistence"]),
                 special=", ".join(special),
@@ -327,6 +357,7 @@ def render_markdown(summary: dict[str, Any]) -> str:
             f"- Wrappers: **{summary['summary']['wrappers']}**",
             f"- Existing E2E repositories: **{summary['summary']['existingE2e']}**",
             f"- Repositories requiring provisioning: **{summary['summary']['provisioningRequired']}**",
+            f"- Deterministic provisioned baselines: **{summary['summary']['provisionedBaselines']}**",
             f"- Release gates: {', '.join(f'`{gate}`' for gate in summary['releaseGates'])}",
             "",
             "Inventory status is not live-install evidence. Each product PR still needs its committed frozen lock and product E2E run before merge.",

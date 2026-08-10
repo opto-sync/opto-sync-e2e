@@ -1,0 +1,142 @@
+{
+  "schemaVersion": 1,
+  "ownerIssue": "DEN-309",
+  "architectureIssue": "DEN-313",
+  "packagePlane": {
+    "zedCliSha": "a850dbcc799aeaccf1093741ab58439a049c14c9",
+    "zedInterfacesSha": "c2e049006453c26ca8ca291783f681fce75cb01f"
+  },
+  "stages": [
+    {
+      "id": "core",
+      "prerequisite": null,
+      "outcomeIssue": "DEN-1584",
+      "repository": "opto-sync/syncer.c",
+      "sourceSha": "8d2b275a89062403666f4bdf196d246a07c84484",
+      "treeSha": "8935c7ce94657a68ad22829f3dcbd299fafddb93",
+      "tag": "v0.2.1",
+      "version": "0.2.1",
+      "packages": [
+        {
+          "name": "syncer",
+          "sha256": "444d57c04f80a910e418dec02ebaab1032f4e72fcaf43c1ed1c15d08d7aa163b",
+          "size": 554540,
+          "format": "tar.gz"
+        },
+        {
+          "name": "syncer-c",
+          "sha256": "9a65dc901c89e95175b03263efa61cd6d990e42b05bb34a8ec847cab6dcb9b3d",
+          "size": 138264,
+          "format": "tar.gz"
+        },
+        {
+          "name": "syncer-wasm",
+          "sha256": "ae458615cc05635d58cb400a4e187186b7685c73cd81e1fef42bbb9a64226f03",
+          "size": 142226,
+          "format": "tar.gz"
+        }
+      ],
+      "requiredEvidence": {
+        "checks": 4,
+        "locks": 3,
+        "state": "published_verified"
+      }
+    },
+    {
+      "id": "clients",
+      "prerequisite": "core",
+      "outcomeIssue": "DEN-309",
+      "repository": "opto-sync/opto-sync-clients",
+      "sourceSha": "38f0fcc6a471455a0a20aec5f7fa63d3f70d5f89",
+      "treeSha": "c89cc0e08ab156bcdf9487a7c2f0515d6c88c865",
+      "tag": "v0.2.0",
+      "version": "0.2.0",
+      "embeddedCoreSha": "8d2b275a89062403666f4bdf196d246a07c84484",
+      "packages": [
+        {
+          "name": "opto-sync-clients",
+          "sha256": "0719690cbadec372ec1dad95ca91b1cb6ec8ec9d2a8caf1e9551e3396fcaba14",
+          "size": 858022,
+          "format": "tar.gz"
+        }
+      ],
+      "requiredEvidence": {
+        "checks": 4,
+        "locks": 1,
+        "state": "published_verified"
+      }
+    },
+    {
+      "id": "e2e",
+      "prerequisite": "clients",
+      "outcomeIssue": "DEN-363",
+      "repository": "opto-sync/opto-sync-e2e",
+      "sourceSha": "562e3f62645252ed79328b7ac30ce404ceb5fc92",
+      "treeSha": "3ef8320a00b3b382ea8b5153e6615eff6f0efc5a",
+      "tag": "v0.1.0",
+      "version": "0.1.0",
+      "pinnedCoreSha": "8d2b275a89062403666f4bdf196d246a07c84484",
+      "pinnedClientsSha": "38f0fcc6a471455a0a20aec5f7fa63d3f70d5f89",
+      "packages": [
+        {
+          "name": "opto-sync-e2e",
+          "sha256": "f88f128a221ce7cbcc08c521393cf9ada7bf6315b009e704617dd1a636ee1180",
+          "size": 308386,
+          "format": "tar.gz"
+        }
+      ],
+      "requiredEvidence": {
+        "checks": 4,
+        "locks": 1,
+        "state": "published_verified"
+      }
+    },
+    {
+      "id": "wrappers",
+      "prerequisite": "e2e",
+      "outcomeIssue": "DEN-313",
+      "requiredEvidence": {
+        "state": "live_certified",
+        "wrappers": 17,
+        "e2eRepositories": 17,
+        "realLocks": 17,
+        "liveCertifications": 17,
+        "failed": 0
+      }
+    }
+  ],
+  "derivedStateOrder": [
+    "await_core_publication_verification",
+    "core_verified",
+    "clients_verified",
+    "e2e_verified",
+    "fleet_live_certified"
+  ],
+  "allowedActionsByState": {
+    "await_core_publication_verification": [
+      "run_core_publication_outcome_audit"
+    ],
+    "core_verified": [
+      "activate_clients_publication"
+    ],
+    "clients_verified": [
+      "activate_e2e_publication"
+    ],
+    "e2e_verified": [
+      "generate_wrapper_real_locks",
+      "run_wrapper_live_certification"
+    ],
+    "fleet_live_certified": [
+      "request_semantic_product_merges"
+    ]
+  },
+  "rules": {
+    "activationMergeIsNotEvidence": true,
+    "reportsCannotSkipPrerequisites": true,
+    "falseVerificationBlocks": true,
+    "packageIdentitiesMustMatch": true,
+    "packagePlanePinsMustMatch": true,
+    "allowedActionsAreDerived": true,
+    "validatorIsReadOnly": true
+  }
+}

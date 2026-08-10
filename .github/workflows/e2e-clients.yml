@@ -42,13 +42,13 @@ jobs:
     timeout-minutes: 45
     steps:
       - name: Checkout opto-sync-e2e
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           path: opto-sync-e2e
           persist-credentials: false
 
       - name: Checkout syncer.c (pinned sibling used by the server)
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: opto-sync/syncer.c
           ref: ${{ github.event.inputs.syncer_ref || env.SYNCER_C_REF }}
@@ -56,7 +56,7 @@ jobs:
           persist-credentials: false
 
       - name: Checkout opto-sync-clients and its pinned core
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: opto-sync/opto-sync-clients
           ref: ${{ github.event.inputs.clients_ref || env.CLIENTS_REF }}
@@ -77,18 +77,18 @@ jobs:
           test -f opto-sync-clients/syncer.c/core/include/syncer.h
           git -C opto-sync-clients submodule status --cached syncer.c
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
           cache: npm
           cache-dependency-path: opto-sync-clients/clients/ts/package-lock.json
 
-      - uses: dart-lang/setup-dart@v1
+      - uses: dart-lang/setup-dart@65eb853c7ba17dde3be364c3d2858773e7144260 # v1
         with:
           sdk: stable
 
       - name: Install pinned OTP and Elixir
-        uses: erlef/setup-beam@v1
+        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
         with:
           otp-version: '27.3'
           elixir-version: '1.18.4'
@@ -106,7 +106,7 @@ jobs:
           sudo tar -xzf gleam-v1.16.0-x86_64-unknown-linux-musl.tar.gz -C /usr/local/bin gleam
 
       - name: Cache cargo registry (downloads only, never target/)
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.cargo/registry/index
@@ -211,7 +211,7 @@ jobs:
 
       - name: Upload compose logs
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: compose-logs-client-in-the-loop
           path: |
