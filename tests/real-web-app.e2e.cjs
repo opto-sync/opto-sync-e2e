@@ -12,6 +12,7 @@ const mode = process.env.APP_MODE || 'http';
 const requestedUrl = process.env.APP_URL || 'http://127.0.0.1:4173/';
 const appRoot = path.resolve(process.env.APP_ROOT || '.');
 const appPage = process.env.APP_PAGE || 'index.html';
+const expectOfflineShell = process.env.EXPECT_OFFLINE_SHELL === 'true';
 
 async function openApplication() {
   if (mode !== 'extension') {
@@ -117,12 +118,21 @@ async function openApplication() {
     if (!('serviceWorker' in navigator)) return [];
     return (await navigator.serviceWorker.getRegistrations()).map((entry) => entry.scope);
   });
-  if (extension || registrations.length > 0) {
+  if (extension || expectOfflineShell) {
+    if (!extension) {
+      assert.ok(
+        registrations.length > 0,
+        'expect_offline_shell requires the application to register a service worker',
+      );
+    }
     await page.waitForTimeout(750);
     await context.setOffline(true);
-    await page.reload({waitUntil: 'domcontentloaded', timeout: 20_000});
-    assert.equal(await page.locator('body').count(), 1, 'application did not restore an offline shell');
-    await context.setOffline(false);
+    try {
+      await page.reload({waitUntil: 'domcontentloaded', timeout: 20_000});
+      assert.equal(await page.locator('body').count(), 1, 'application did not restore an offline shell');
+    } finally {
+      await context.setOffline(false);
+    }
   }
 
   await page.evaluate(async (name) => new Promise((resolve) => {
@@ -145,7 +155,7 @@ async function openApplication() {
     title: shell.title,
     serviceWorkers: registrations.length,
     indexedDbRoundTrip: true,
-    offlineReload: extension || registrations.length > 0,
+    offlineReload: extension || expectOfflineShell,
   }, null, 2) + '\n');
 })().catch((error) => {
   console.error(error);
