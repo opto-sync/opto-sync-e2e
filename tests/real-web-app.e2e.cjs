@@ -13,6 +13,7 @@ const requestedUrl = process.env.APP_URL || 'http://127.0.0.1:4173/';
 const appRoot = path.resolve(process.env.APP_ROOT || '.');
 const appPage = process.env.APP_PAGE || 'index.html';
 const expectOfflineShell = process.env.EXPECT_OFFLINE_SHELL === 'true';
+const mockApiOrigin = (process.env.MOCK_API_ORIGIN || '').trim();
 
 async function openApplication() {
   if (mode !== 'extension') {
@@ -62,6 +63,22 @@ async function openApplication() {
   const target = await openApplication();
   const {browser, context, page, appUrl, extension} = target;
   try {
+    if (mockApiOrigin) {
+      const parsedMockOrigin = new URL(mockApiOrigin);
+      assert.equal(parsedMockOrigin.protocol, 'https:', 'mock_api_origin must use HTTPS');
+      assert.equal(parsedMockOrigin.origin, mockApiOrigin, 'mock_api_origin must be an exact origin');
+      await page.route(`${mockApiOrigin}/**`, (route) => route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        headers: {
+          'access-control-allow-origin': new URL(appUrl).origin,
+          'access-control-allow-credentials': 'true',
+          'cache-control': 'no-store',
+        },
+        body: '{}',
+      }));
+    }
+
     const consoleErrors = [];
     const pageErrors = [];
 
