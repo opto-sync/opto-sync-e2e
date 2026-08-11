@@ -18,6 +18,11 @@ on:
         required: false
         default: false
         type: boolean
+      mock_api_origin:
+        description: Optional HTTPS origin to fulfill with empty JSON during the isolated browser run
+        required: false
+        default: ''
+        type: string
       sibling_repository_1:
         description: Optional public sibling repository needed by path dependencies
         required: false
@@ -176,6 +181,7 @@ jobs:
         shell: bash
         env:
           EXPECT_OFFLINE_SHELL: ${{ inputs.expect_offline_shell }}
+          MOCK_API_ORIGIN: ${{ inputs.mock_api_origin }}
           PLAYWRIGHT_MODULE: ${{ runner.temp }}/opto-browser/node_modules/playwright
           SCENARIO: ${{ github.workspace }}/.opto-real-web/tests/real-web-app.e2e.cjs
         run: |
