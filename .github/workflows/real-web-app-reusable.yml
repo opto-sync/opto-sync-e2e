@@ -13,6 +13,11 @@ on:
         required: false
         default: false
         type: boolean
+      expect_offline_shell:
+        description: Require a registered service worker and a successful offline reload
+        required: false
+        default: false
+        type: boolean
       sibling_repository_1:
         description: Optional public sibling repository needed by path dependencies
         required: false
@@ -167,9 +172,10 @@ jobs:
           npm init -y >/dev/null
           npm install --no-save --ignore-scripts "playwright@$PLAYWRIGHT_VERSION"
           npx playwright install --with-deps chromium
-      - name: Exercise rendered shell, IndexedDB durability, reload, and offline cache
+      - name: Exercise rendered shell, IndexedDB durability, reload, and declared offline capability
         shell: bash
         env:
+          EXPECT_OFFLINE_SHELL: ${{ inputs.expect_offline_shell }}
           PLAYWRIGHT_MODULE: ${{ runner.temp }}/opto-browser/node_modules/playwright
           SCENARIO: ${{ github.workspace }}/.opto-real-web/tests/real-web-app.e2e.cjs
         run: |
