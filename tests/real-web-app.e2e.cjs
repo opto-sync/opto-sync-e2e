@@ -61,102 +61,105 @@ async function openApplication() {
 (async () => {
   const target = await openApplication();
   const {browser, context, page, appUrl, extension} = target;
-  const consoleErrors = [];
-  const pageErrors = [];
+  try {
+    const consoleErrors = [];
+    const pageErrors = [];
 
-  page.on('console', (message) => {
-    if (message.type() === 'error') consoleErrors.push(message.text());
-  });
-  page.on('pageerror', (error) => pageErrors.push(String(error)));
+    page.on('console', (message) => {
+      if (message.type() === 'error') consoleErrors.push(message.text());
+    });
+    page.on('pageerror', (error) => pageErrors.push(String(error)));
 
-  const response = await page.goto(appUrl, {waitUntil: 'domcontentloaded', timeout: 45_000});
-  if (!extension) {
-    assert.ok(response, `no navigation response for ${appUrl}`);
-    assert.ok(response.status() < 400, `unexpected HTTP ${response.status()} for ${appUrl}`);
-  }
-  await page.waitForLoadState('networkidle', {timeout: 15_000}).catch(() => {});
+    const response = await page.goto(appUrl, {waitUntil: 'domcontentloaded', timeout: 45_000});
+    if (!extension) {
+      assert.ok(response, `no navigation response for ${appUrl}`);
+      assert.ok(response.status() < 400, `unexpected HTTP ${response.status()} for ${appUrl}`);
+    }
+    await page.waitForLoadState('networkidle', {timeout: 15_000}).catch(() => {});
 
-  const shell = await page.evaluate(() => ({
-    title: document.title,
-    text: document.body?.innerText?.trim() ?? '',
-    htmlLength: document.documentElement.outerHTML.length,
-  }));
-  assert.ok(shell.htmlLength > 80, 'application shell is unexpectedly empty');
-  assert.ok(shell.title.length > 0 || shell.text.length > 0, 'application has neither a title nor visible text');
+    const shell = await page.evaluate(() => ({
+      title: document.title,
+      text: document.body?.innerText?.trim() ?? '',
+      htmlLength: document.documentElement.outerHTML.length,
+    }));
+    assert.ok(shell.htmlLength > 80, 'application shell is unexpectedly empty');
+    assert.ok(shell.title.length > 0 || shell.text.length > 0, 'application has neither a title nor visible text');
 
-  const databaseName = `opto-real-app-${Date.now()}`;
-  await page.evaluate(async (name) => {
-    await new Promise((resolve, reject) => {
-      const open = indexedDB.open(name, 1);
-      open.onupgradeneeded = () => open.result.createObjectStore('records');
+    const databaseName = `opto-real-app-${Date.now()}`;
+    await page.evaluate(async (name) => {
+      await new Promise((resolve, reject) => {
+        const open = indexedDB.open(name, 1);
+        open.onupgradeneeded = () => open.result.createObjectStore('records');
+        open.onerror = () => reject(open.error);
+        open.onsuccess = () => {
+          const database = open.result;
+          const transaction = database.transaction('records', 'readwrite');
+          transaction.objectStore('records').put({id: 'roundtrip', value: 'persisted-before-reload'}, 'roundtrip');
+          transaction.oncomplete = () => { database.close(); resolve(); };
+          transaction.onerror = () => reject(transaction.error);
+        };
+      });
+    }, databaseName);
+
+    await page.reload({waitUntil: 'domcontentloaded'});
+    const persisted = await page.evaluate(async (name) => new Promise((resolve, reject) => {
+      const open = indexedDB.open(name);
       open.onerror = () => reject(open.error);
       open.onsuccess = () => {
         const database = open.result;
-        const transaction = database.transaction('records', 'readwrite');
-        transaction.objectStore('records').put({id: 'roundtrip', value: 'persisted-before-reload'}, 'roundtrip');
-        transaction.oncomplete = () => { database.close(); resolve(); };
-        transaction.onerror = () => reject(transaction.error);
+        const transaction = database.transaction('records', 'readonly');
+        const get = transaction.objectStore('records').get('roundtrip');
+        get.onsuccess = () => { database.close(); resolve(get.result); };
+        get.onerror = () => reject(get.error);
       };
+    }), databaseName);
+    assert.equal(persisted.value, 'persisted-before-reload');
+
+    const registrations = await page.evaluate(async () => {
+      if (!('serviceWorker' in navigator)) return [];
+      return (await navigator.serviceWorker.getRegistrations()).map((entry) => entry.scope);
     });
-  }, databaseName);
-
-  await page.reload({waitUntil: 'domcontentloaded'});
-  const persisted = await page.evaluate(async (name) => new Promise((resolve, reject) => {
-    const open = indexedDB.open(name);
-    open.onerror = () => reject(open.error);
-    open.onsuccess = () => {
-      const database = open.result;
-      const transaction = database.transaction('records', 'readonly');
-      const get = transaction.objectStore('records').get('roundtrip');
-      get.onsuccess = () => { database.close(); resolve(get.result); };
-      get.onerror = () => reject(get.error);
-    };
-  }), databaseName);
-  assert.equal(persisted.value, 'persisted-before-reload');
-
-  const registrations = await page.evaluate(async () => {
-    if (!('serviceWorker' in navigator)) return [];
-    return (await navigator.serviceWorker.getRegistrations()).map((entry) => entry.scope);
-  });
-  if (extension || expectOfflineShell) {
-    if (!extension) {
-      assert.ok(
-        registrations.length > 0,
-        'expect_offline_shell requires the application to register a service worker',
-      );
+    if (extension || expectOfflineShell) {
+      if (!extension) {
+        assert.ok(
+          registrations.length > 0,
+          'expect_offline_shell requires the application to register a service worker',
+        );
+      }
+      await page.waitForTimeout(750);
+      await context.setOffline(true);
+      try {
+        await page.reload({waitUntil: 'domcontentloaded', timeout: 20_000});
+        assert.equal(await page.locator('body').count(), 1, 'application did not restore an offline shell');
+      } finally {
+        await context.setOffline(false);
+      }
     }
-    await page.waitForTimeout(750);
-    await context.setOffline(true);
-    try {
-      await page.reload({waitUntil: 'domcontentloaded', timeout: 20_000});
-      assert.equal(await page.locator('body').count(), 1, 'application did not restore an offline shell');
-    } finally {
-      await context.setOffline(false);
-    }
+
+    await page.evaluate(async (name) => new Promise((resolve) => {
+      const request = indexedDB.deleteDatabase(name);
+      request.onsuccess = request.onerror = request.onblocked = () => resolve();
+    }), databaseName);
+
+    const actionableConsoleErrors = consoleErrors.filter(
+      (message) => !/favicon\.ico|Failed to load resource.*404|source map/i.test(message),
+    );
+    assert.deepEqual(pageErrors, [], `uncaught page errors:\n${pageErrors.join('\n')}`);
+    assert.deepEqual(actionableConsoleErrors, [], `console errors:\n${actionableConsoleErrors.join('\n')}`);
+
+    process.stdout.write(JSON.stringify({
+      appUrl,
+      mode,
+      title: shell.title,
+      serviceWorkers: registrations.length,
+      indexedDbRoundTrip: true,
+      offlineReload: extension || expectOfflineShell,
+    }, null, 2) + '\n');
+  } finally {
+    await context.close().catch(() => {});
+    if (browser) await browser.close().catch(() => {});
+    if (target.userDataDir) fs.rmSync(target.userDataDir, {recursive: true, force: true});
   }
-
-  await page.evaluate(async (name) => new Promise((resolve) => {
-    const request = indexedDB.deleteDatabase(name);
-    request.onsuccess = request.onerror = request.onblocked = () => resolve();
-  }), databaseName);
-
-  const actionableConsoleErrors = consoleErrors.filter(
-    (message) => !/favicon\.ico|Failed to load resource.*404|source map/i.test(message),
-  );
-  assert.deepEqual(pageErrors, [], `uncaught page errors:\n${pageErrors.join('\n')}`);
-  assert.deepEqual(actionableConsoleErrors, [], `console errors:\n${actionableConsoleErrors.join('\n')}`);
-
-  await context.close();
-  if (browser) await browser.close();
-  if (target.userDataDir) fs.rmSync(target.userDataDir, {recursive: true, force: true});
-  process.stdout.write(JSON.stringify({
-    appUrl,
-    mode,
-    title: shell.title,
-    serviceWorkers: registrations.length,
-    indexedDbRoundTrip: true,
-    offlineReload: extension || expectOfflineShell,
-  }, null, 2) + '\n');
 })().catch((error) => {
   console.error(error);
   process.exitCode = 1;
