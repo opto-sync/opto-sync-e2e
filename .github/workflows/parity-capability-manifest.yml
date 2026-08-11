@@ -1,0 +1,46 @@
+name: Parity capability manifest
+
+on:
+  pull_request:
+    paths:
+      - 'compatibility/engine-store-transport.v1.json'
+      - 'scripts/check-engine-store-transport.py'
+      - '.github/workflows/parity-capability-manifest.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'compatibility/engine-store-transport.v1.json'
+      - 'scripts/check-engine-store-transport.py'
+      - '.github/workflows/parity-capability-manifest.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: parity-capability-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fail-closed-matrix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Validate explicit engine/store/transport matrix
+        run: python3 scripts/check-engine-store-transport.py
+      - name: Prove promotion remains closed while required cells are unverified
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          data = json.loads(Path('compatibility/engine-store-transport.v1.json').read_text())
+          pending = [r for r in data['matrix'] if r['state'] == 'required_unverified']
+          if not pending:
+              raise SystemExit('expected at least one required_unverified cell until the full DEN-821 matrix is certified')
+          print(f'release gate correctly remains closed: {len(pending)} required cells are unverified')
+          PY
