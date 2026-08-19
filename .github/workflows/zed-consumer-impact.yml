@@ -1,0 +1,249 @@
+name: Zed declared consumer impact
+
+on:
+  pull_request:
+    paths:
+      - 'operations/downstream-wrapper-fleet.v1.json'
+      - 'operations/opto-sync-consumer-classification.v1.json'
+      - 'scripts/zed_consumer_graph.py'
+      - 'suite/fixtures/zed-consumer-graph/**'
+      - 'suite/operations/test_zed_consumer_graph.py'
+      - '.github/workflows/zed-consumer-impact.yml'
+      - 'docs/zed-consumer-impact.md'
+  push:
+    branches:
+      - main
+    paths:
+      - 'operations/downstream-wrapper-fleet.v1.json'
+      - 'operations/opto-sync-consumer-classification.v1.json'
+      - 'scripts/zed_consumer_graph.py'
+      - 'suite/fixtures/zed-consumer-graph/**'
+      - 'suite/operations/test_zed_consumer_graph.py'
+      - '.github/workflows/zed-consumer-impact.yml'
+      - 'docs/zed-consumer-impact.md'
+  schedule:
+    - cron: '17 8 * * *'
+  workflow_dispatch:
+  repository_dispatch:
+    types:
+      - zed-dependency-graph-updated
+      - opto-sync-release-candidate
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  deterministic-contract:
+    name: Deterministic declared-graph inversion contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout impact controller
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Compile and run adversarial contract tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile \
+            scripts/zed_consumer_graph.py \
+            suite/operations/test_zed_consumer_graph.py
+          python3 -m unittest suite.operations.test_zed_consumer_graph -v
+
+      - name: Validate the production classification policy against all 17 wrappers
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import importlib.util
+          import sys
+          from pathlib import Path
+
+          script = Path('scripts/zed_consumer_graph.py')
+          spec = importlib.util.spec_from_file_location('zed_consumer_graph', script)
+          assert spec and spec.loader
+          module = importlib.util.module_from_spec(spec)
+          sys.modules[spec.name] = module
+          spec.loader.exec_module(module)
+          root, curated = module.load_curated_fleet(
+              Path('operations/downstream-wrapper-fleet.v1.json')
+          )
+          default, entries = module.load_classifications(
+              Path('operations/opto-sync-consumer-classification.v1.json'),
+              expected_root=root,
+              curated=curated,
+          )
+          assert len(curated) == 17, len(curated)
+          assert default == 'candidate'
+          assert entries['sonus-auris/sonus-auris-sync'].value == 'exact-pin'
+          assert entries['voxletra/voxletra-sync'].value == 'exact-pin'
+          assert entries['zed-pkg/zed-sync'].value == 'adapted-concept'
+          PY
+
+      - name: Render the fixture impact graph twice
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/impact-a" "$RUNNER_TEMP/impact-b" impact-fixture
+          for target in "$RUNNER_TEMP/impact-a" "$RUNNER_TEMP/impact-b"; do
+            python3 scripts/zed_consumer_graph.py \
+              --snapshot suite/fixtures/zed-consumer-graph/inventory.json \
+              --curated-fleet suite/fixtures/zed-consumer-graph/curated-fleet.json \
+              --classification-policy suite/fixtures/zed-consumer-graph/classification.json \
+              --output "$target/opto-sync-consumer-impact.json" \
+              --dot-output "$target/opto-sync-consumer-impact.dot" \
+              --mermaid-output "$target/opto-sync-consumer-impact.mmd"
+          done
+          cmp "$RUNNER_TEMP/impact-a/opto-sync-consumer-impact.json" \
+              "$RUNNER_TEMP/impact-b/opto-sync-consumer-impact.json"
+          cmp "$RUNNER_TEMP/impact-a/opto-sync-consumer-impact.dot" \
+              "$RUNNER_TEMP/impact-b/opto-sync-consumer-impact.dot"
+          cmp "$RUNNER_TEMP/impact-a/opto-sync-consumer-impact.mmd" \
+              "$RUNNER_TEMP/impact-b/opto-sync-consumer-impact.mmd"
+          cp "$RUNNER_TEMP/impact-a"/* impact-fixture/
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          report = json.loads(Path('impact-fixture/opto-sync-consumer-impact.json').read_text())
+          assert report['semantics']['graphView'] == 'declared'
+          assert report['semantics']['resolution'] == 'unresolved-requirements'
+          assert report['summary'] == {
+              'allDiscoveredConsumers': 6,
+              'curatedConsumers': 3,
+              'curatedOnly': 1,
+              'cycleComponents': 1,
+              'directConsumers': 4,
+              'graphOnly': 4,
+              'transitiveConsumers': 2,
+              'unclassified': 4,
+          }
+          PY
+
+      - name: Upload deterministic fixture evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: opto-sync-zed-consumer-impact-fixture
+          path: impact-fixture/
+          if-no-files-found: error
+          retention-days: 14
+
+  live-authorized-inventory:
+    name: Enumerate all authorized visible Zed package versions
+    if: >-
+      (github.event_name == 'schedule' ||
+       github.event_name == 'workflow_dispatch' ||
+       github.event_name == 'repository_dispatch') &&
+      vars.ZED_REGISTRY_URL != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ZED_REGISTRY_URL: ${{ vars.ZED_REGISTRY_URL }}
+      ZED_REGISTRY_TOKEN: ${{ secrets.ZED_REGISTRY_TOKEN }}
+    steps:
+      - name: Checkout impact controller
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Validate registry configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$ZED_REGISTRY_URL" in
+            https://*|http://localhost:*|http://127.0.0.1:*) ;;
+            *) echo 'ZED_REGISTRY_URL must use HTTPS except for an explicit local canary' >&2; exit 1 ;;
+          esac
+
+      - name: Build reverse consumer impact from every visible package version
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p impact-live
+          python3 scripts/zed_consumer_graph.py \
+            --registry-url "$ZED_REGISTRY_URL" \
+            --token-env ZED_REGISTRY_TOKEN \
+            --version-policy all-visible \
+            --root opto-sync/opto-sync-clients \
+            --curated-fleet operations/downstream-wrapper-fleet.v1.json \
+            --classification-policy operations/opto-sync-consumer-classification.v1.json \
+            --output impact-live/opto-sync-consumer-impact.json \
+            --dot-output impact-live/opto-sync-consumer-impact.dot \
+            --mermaid-output impact-live/opto-sync-consumer-impact.mmd \
+            --fail-on graph-only,unclassified,missing-graphs
+
+      - name: Publish live impact summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          from pathlib import Path
+
+          report = json.loads(Path('impact-live/opto-sync-consumer-impact.json').read_text())
+          summary = report['summary']
+          inventory = report['inventory']
+          print('## Opto-Sync Zed consumer impact')
+          print()
+          print('| Metric | Count |')
+          print('|---|---:|')
+          for label, key in (
+              ('Visible packages', 'packageListTotal'),
+              ('Package versions inspected', 'versionsAttempted'),
+              ('Declared graphs loaded', 'graphsLoaded'),
+              ('Declared edges', 'declaredEdgeCount'),
+          ):
+              print(f'| {label} | {inventory[key]} |')
+          for label, key in (
+              ('Direct consumers', 'directConsumers'),
+              ('Transitive consumers', 'transitiveConsumers'),
+              ('Graph-only gaps', 'graphOnly'),
+              ('Curated-only rollout entries', 'curatedOnly'),
+          ):
+              print(f'| {label} | {summary[key]} |')
+          print()
+          print(f"Inventory digest: `{inventory['inventoryDigest']}`")
+          print()
+          print('This is declared, unresolved dependency coverage over the caller-authorized visible inventory; it is not a resolved lock graph.')
+          PY
+
+      - name: Upload authorized live impact evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: opto-sync-zed-consumer-impact-live
+          path: impact-live/
+          if-no-files-found: error
+          retention-days: 30
+
+  live-configuration-evidence:
+    name: Report missing live registry configuration
+    if: >-
+      (github.event_name == 'schedule' ||
+       github.event_name == 'workflow_dispatch' ||
+       github.event_name == 'repository_dispatch') &&
+      vars.ZED_REGISTRY_URL == ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Record explicit configuration gap
+        shell: bash
+        env:
+          REQUIRE_LIVE: ${{ vars.OPTO_SYNC_REQUIRE_LIVE_ZED_GRAPH }}
+        run: |
+          set -euo pipefail
+          {
+            echo '## Opto-Sync Zed consumer impact'
+            echo
+            echo 'Live graph enumeration did not run because the repository variable `ZED_REGISTRY_URL` is not configured.'
+            echo 'The deterministic API-contract fixture still ran; no claim of live or total authorized coverage is made.'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$REQUIRE_LIVE" = 'true' ]; then
+            echo 'OPTO_SYNC_REQUIRE_LIVE_ZED_GRAPH=true, so missing live configuration is fatal.' >&2
+            exit 1
+          fi
