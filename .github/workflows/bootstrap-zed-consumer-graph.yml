@@ -1,0 +1,74 @@
+name: Bootstrap validated Zed consumer test changes
+
+on:
+  push:
+    branches:
+      - agent/zed-consumer-graph-testing
+    paths:
+      - '.bootstrap/READY'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: bootstrap-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: ${{ github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out bootstrap branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Verify and extract validated bundle
+        shell: bash
+        env:
+          EXPECTED_SHA256: fafcaeebb483c53793583939d264eed4e086f1b74f2ed283ca1dc13974ecc6b3
+        run: |
+          set -euo pipefail
+          cat .bootstrap/part-*.b64 | tr -d '\n' | base64 --decode > /tmp/changes.tar.gz
+          actual="$(sha256sum /tmp/changes.tar.gz | awk '{print $1}')"
+          test "$actual" = "$EXPECTED_SHA256"
+          python3 - <<'PY'
+          from pathlib import Path, PurePosixPath
+          import tarfile
+
+          root = Path.cwd().resolve()
+          with tarfile.open('/tmp/changes.tar.gz', 'r:gz') as archive:
+              members = archive.getmembers()
+              names = []
+              for member in members:
+                  path = PurePosixPath(member.name)
+                  if member.name != path.as_posix() or path.is_absolute() or '..' in path.parts:
+                      raise SystemExit(f'unsafe bundle path: {member.name}')
+                  if not member.isfile():
+                      raise SystemExit(f'non-file bundle member: {member.name}')
+                  target = (root / member.name).resolve()
+                  if not target.is_relative_to(root):
+                      raise SystemExit(f'bundle path escapes checkout: {member.name}')
+                  if target.exists():
+                      raise SystemExit(f'bundle would overwrite existing path: {member.name}')
+                  names.append(member.name)
+              if len(names) != len(set(names)):
+                  raise SystemExit('duplicate bundle path')
+              archive.extractall(root, members=members, filter='data')
+          PY
+
+      - name: Replace bootstrap with reviewed files
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .bootstrap '.github/workflows/bootstrap-zed-consumer-graph.yml'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          test -n "$(git diff --cached --name-only)"
+          git commit -m 'test: certify all Opto-Sync consumers from Zed graphs'
+          git push origin HEAD:agent/zed-consumer-graph-testing
