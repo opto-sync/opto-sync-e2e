@@ -2,12 +2,12 @@
 
 `opto-sync/opto-sync-clients` is a package boundary, so a source-only test matrix is incomplete unless it also knows which packages declare it and which product suites exercise those consumers.
 
-The impact controller in `scripts/zed_consumer_graph.py` performs a caller-scoped census:
+The impact controller in `scripts/zed_consumer_graph.py` performs a bounded registry census:
 
-1. Enumerate the complete package list visible to the supplied Zed credentials.
-2. Select every visible version for the nightly census (`all-visible`) or only the newest visible version for a bounded canary.
-3. Fetch the immutable `view=declared` graph for each selected package version.
-4. Validate the Zed schema, graph-digest format, `X-Zpkg-Graph-Digest`, strong `ETag`, and `Vary: Accept` transport contract.
+1. Enumerate the current registry package index. The current `/v1/packages` route is registry-wide rather than a caller-scoped visibility snapshot.
+2. Select every indexed version for the nightly census (`all-visible`) or only the newest indexed version for a bounded canary.
+3. Fetch the immutable `view=declared` graph for each selected package version under the supplied caller credentials.
+4. Validate the Zed schema, single-registry identity, graph digest, authoritative marker, exact `Content-Length`, strong `ETag`, cache policy, and `Vary` transport contract.
 5. Invert direct declaration edges and compute cycle-safe direct and transitive consumers of `opto-sync/opto-sync-clients`.
 6. Reconcile discovery with `operations/downstream-wrapper-fleet.v1.json`, which says how each known wrapper is tested.
 7. Apply the conservative taxonomy in `operations/opto-sync-consumer-classification.v1.json`: `exact-pin`, `package-release`, `adapted-concept`, or `candidate`.
@@ -19,9 +19,11 @@ The Zed v1 declared graph contains unresolved requirements. It is not an exact l
 - `graph-only`: a package declares Opto-Sync but has no curated execution mapping; scheduled strict runs fail.
 - `curated-only`: a rollout entry is not visible in the current declared-graph inventory; this remains evidence, but is not automatically a failure because unpublished/private/migration candidates can be legitimate.
 - `unclassified`: a graph-discovered package lacks reviewed adoption classification; scheduled strict runs fail.
-- `missingGraphs`: a selected visible package version has no declared graph; strict live collection fails rather than silently shrinking coverage.
+- `missingGraphs`: a selected indexed package version has no declared graph; strict live collection fails rather than silently shrinking coverage.
 
-Private packages are visible only when the supplied token authorizes them. Every report labels this limitation and includes an inventory digest over the exact visible package/version edge set.
+The package index and graph authorization boundaries are different. The current package-list route enumerates the registry index, while protected graph reads require caller authorization and deliberately return the same no-store `404` for inaccessible, unknown, or absent graphs. A missing graph is therefore recorded as `not-found-or-inaccessible`; strict runs fail rather than guessing which condition occurred.
+
+Every report labels this limitation and includes an inventory digest that binds the registry identity, inventory scope, stable advertised total, selected versions, graph counts, missing-graph evidence, and exact declared edges. Pagination verifies a stable total but the current API does not expose a registry checkpoint for this declared-graph census, so the report does not claim an atomic global snapshot.
 
 ## Repository configuration
 
@@ -31,7 +33,7 @@ The scheduled live job reads:
 - optional secret `ZED_REGISTRY_TOKEN`;
 - optional repository variable `OPTO_SYNC_REQUIRE_LIVE_ZED_GRAPH=true` to make missing live configuration fatal.
 
-No credential is accepted on the command line, written to an artifact, or included in the inventory digest.
+No credential is accepted on the command line, written to an artifact, or included in the inventory digest. Registry URLs reject userinfo, non-loopback plaintext HTTP, queries, fragments, and redirects. Bearer credentials therefore cannot be forwarded to a redirect target. Response bodies, package counts, version counts, edge counts, and request timeouts are bounded and fail closed.
 
 ## Local deterministic contract
 
@@ -46,4 +48,8 @@ python3 scripts/zed_consumer_graph.py \
   --mermaid-output /tmp/opto-sync-consumer-impact.mmd
 ```
 
-The JSON, DOT, and Mermaid outputs are deterministic and contain no collection timestamp. Workflow-run metadata supplies the temporal context without changing the graph identity.
+The JSON, DOT, and Mermaid outputs are deterministic and contain no collection timestamp. Workflow-run metadata supplies the temporal context without changing the graph identity. The default safety ceilings are 16 MiB per response, 50,000 packages, 250,000 selected versions, 100,000 declared edges, and 300 seconds per request; explicit CLI flags may lower or raise the count/body ceilings for a reviewed environment.
+
+## Credential binding
+
+When `ZED_REGISTRY_TOKEN` is configured, live CI also requires `ZED_REGISTRY_TOKEN_ORIGIN` to contain the exact normalized scheme, host, and optional port expected to receive that token. The launcher rejects duplicate options and path-bearing origin declarations. The underlying client rejects every redirect, so authorization is never forwarded through a redirect—even to the same origin.

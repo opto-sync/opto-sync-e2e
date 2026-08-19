@@ -3,13 +3,13 @@
 
 Zed's v1 package-version endpoint exposes direct, unresolved declaration edges.
 It does not expose a reverse-dependents endpoint and it must not be treated as a
-resolved lock graph. This tool enumerates the caller-visible package inventory,
-validates each declared graph, inverts those direct edges, and computes direct
+resolved lock graph. This tool enumerates the registry's current package index,
+fetches each graph under the caller's authorization, validates each declared graph, inverts those direct edges, and computes direct
 and transitive consumers of one package coordinate.
 
 The output deliberately separates:
 
-* discovery (which caller-visible Zed packages declare the dependency), from
+* discovery (which indexed Zed packages expose an authorized graph declaring the dependency), from
 * execution metadata (which GitHub repository and E2E repository test it), and
 * adoption classification (exact pin, package release, adapted concept, or
   candidate).
@@ -23,7 +23,9 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import ipaddress
 import json
+import math
 import os
 import re
 import sys
@@ -40,11 +42,19 @@ SNAPSHOT_SCHEMA = "opto-sync/zed-declared-inventory/v1"
 OUTPUT_SCHEMA = "opto-sync/consumer-impact/v1"
 CLASSIFICATION_VALUES = {"exact-pin", "package-release", "adapted-concept", "candidate"}
 DEPENDENCY_KINDS = {"runtime", "build", "development", "peer", "tooling"}
-COORDINATE_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+COORDINATE_COMPONENT_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+ETAG_RE = re.compile(r'^"[^"\x00-\x1f\x7f]+"$')
 VERSION_POLICY_VALUES = {"latest-visible", "all-visible"}
 FAILURE_VALUES = {"graph-only", "curated-only", "unclassified", "missing-graphs"}
 DEFAULT_TIMEOUT_SECONDS = 30.0
+MAX_TIMEOUT_SECONDS = 300.0
+DEFAULT_MAX_RESPONSE_BYTES = 16 * 1024 * 1024
+DEFAULT_MAX_PACKAGES = 50_000
+DEFAULT_MAX_VERSIONS = 250_000
+DEFAULT_MAX_EDGES = 100_000
+MAX_COORDINATE_COMPONENT_LENGTH = 128
+LIVE_INVENTORY_SCOPE = "registry-package-index-with-caller-authorized-graph-fetches"
 
 
 class ContractError(ValueError):
@@ -57,11 +67,32 @@ class PackageCoordinate:
     name: str
 
     @classmethod
+    def from_parts(
+        cls,
+        org: Any,
+        name: Any,
+        label: str = "coordinate",
+    ) -> "PackageCoordinate":
+        normalized: list[str] = []
+        for field, raw in (("org", org), ("name", name)):
+            value = require_text(raw, f"{label}.{field}")
+            if (
+                len(value) > MAX_COORDINATE_COMPONENT_LENGTH
+                or value in {".", ".."}
+                or not COORDINATE_COMPONENT_RE.fullmatch(value)
+            ):
+                raise ContractError(
+                    f"{label}.{field} must be a normalized package component: {value!r}"
+                )
+            normalized.append(value)
+        return cls(org=normalized[0], name=normalized[1])
+
+    @classmethod
     def parse(cls, value: str, label: str = "coordinate") -> "PackageCoordinate":
-        if not isinstance(value, str) or not COORDINATE_RE.fullmatch(value):
+        if not isinstance(value, str) or value.count("/") != 1:
             raise ContractError(f"{label} must use owner/name: {value!r}")
         org, name = value.split("/", 1)
-        return cls(org=org, name=name)
+        return cls.from_parts(org, name, label)
 
     @property
     def value(self) -> str:
@@ -134,6 +165,58 @@ class Classification:
     note: str | None
 
 
+class RejectRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Reject redirects so bearer credentials never cross an origin boundary."""
+
+    def redirect_request(self, request, fp, code, msg, headers, newurl):  # type: ignore[no-untyped-def]
+        return None
+
+
+def normalize_registry_url(base_url: str) -> str:
+    if not isinstance(base_url, str) or not base_url or base_url != base_url.strip():
+        raise ContractError("registry URL must be a non-empty normalized string")
+    if any(ord(character) < 0x20 or ord(character) == 0x7F for character in base_url):
+        raise ContractError("registry URL must not contain control characters")
+    try:
+        parsed = urllib.parse.urlsplit(base_url)
+        port = parsed.port
+    except ValueError as exc:
+        raise ContractError(f"registry URL has an invalid port: {exc}") from exc
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.hostname is None:
+        raise ContractError("registry URL must be an absolute http(s) URL")
+    if parsed.username is not None or parsed.password is not None:
+        raise ContractError("registry URL must not contain userinfo")
+    if parsed.query or parsed.fragment:
+        raise ContractError("registry URL must not contain a query or fragment")
+    hostname = parsed.hostname.rstrip(".").lower()
+    if not hostname:
+        raise ContractError("registry URL must contain a hostname")
+    try:
+        hostname.encode("ascii")
+    except UnicodeEncodeError as exc:
+        raise ContractError("registry URL hostname must use ASCII or punycode") from exc
+    if parsed.scheme == "http":
+        local = hostname == "localhost"
+        if not local:
+            try:
+                local = ipaddress.ip_address(hostname).is_loopback
+            except ValueError:
+                local = False
+        if not local:
+            raise ContractError("registry URL must use HTTPS unless it targets an exact loopback host")
+    host = f"[{hostname}]" if ":" in hostname else hostname
+    if port is not None:
+        host = f"{host}:{port}"
+    path = parsed.path.rstrip("/")
+    return urllib.parse.urlunsplit((parsed.scheme, host, path, "", ""))
+
+
+def require_positive_limit(value: Any, label: str) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+        raise ContractError(f"{label} must be a positive integer")
+    return value
+
+
 class RegistryClient:
     def __init__(
         self,
@@ -141,22 +224,27 @@ class RegistryClient:
         *,
         bearer_token: str | None = None,
         timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
+        max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES,
+        opener: Any | None = None,
     ) -> None:
-        parsed = urllib.parse.urlsplit(base_url)
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-            raise ContractError("registry URL must be an absolute http(s) URL")
-        if parsed.query or parsed.fragment:
-            raise ContractError("registry URL must not contain a query or fragment")
-        self.base_url = base_url.rstrip("/")
+        if not math.isfinite(timeout_seconds) or timeout_seconds <= 0 or timeout_seconds > MAX_TIMEOUT_SECONDS:
+            raise ContractError(
+                f"timeout must be finite and within (0, {MAX_TIMEOUT_SECONDS:g}] seconds"
+            )
+        self.base_url = normalize_registry_url(base_url)
         self.bearer_token = bearer_token
         self.timeout_seconds = timeout_seconds
+        self.max_response_bytes = require_positive_limit(
+            max_response_bytes, "max response bytes"
+        )
+        self._opener = opener or urllib.request.build_opener(RejectRedirectHandler())
 
     def _get_json_response(
         self,
         path: str,
         *,
         allow_not_found: bool = False,
-    ) -> tuple[Any, dict[str, str]] | None:
+    ) -> tuple[Any, dict[str, str], int] | None:
         if not path.startswith("/"):
             raise ContractError(f"registry path must be absolute: {path!r}")
         request = urllib.request.Request(
@@ -170,7 +258,12 @@ class RegistryClient:
         if self.bearer_token:
             request.add_header("Authorization", f"Bearer {self.bearer_token}")
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
+            with self._opener.open(request, timeout=self.timeout_seconds) as response:
+                final_url = response.geturl()
+                if final_url != request.full_url:
+                    raise ContractError(
+                        f"{path}: registry redirects are forbidden ({request.full_url!r} -> {final_url!r})"
+                    )
                 content_type = response.headers.get_content_type()
                 if content_type not in {
                     "application/json",
@@ -179,18 +272,39 @@ class RegistryClient:
                     raise ContractError(
                         f"{path}: expected JSON content type, received {content_type!r}"
                     )
-                payload = response.read()
+                content_length_raw = response.headers.get("Content-Length")
+                if content_length_raw is not None:
+                    try:
+                        content_length = int(content_length_raw, 10)
+                    except ValueError as exc:
+                        raise ContractError(f"{path}: invalid Content-Length") from exc
+                    if content_length < 0 or content_length > self.max_response_bytes:
+                        raise ContractError(
+                            f"{path}: response Content-Length {content_length} exceeds the "
+                            f"{self.max_response_bytes}-byte safety limit"
+                        )
+                payload = response.read(self.max_response_bytes + 1)
+                if len(payload) > self.max_response_bytes:
+                    raise ContractError(
+                        f"{path}: response exceeds the {self.max_response_bytes}-byte safety limit"
+                    )
+                if content_length_raw is not None and content_length != len(payload):
+                    raise ContractError(
+                        f"{path}: Content-Length {content_length} does not match received body length {len(payload)}"
+                    )
                 headers = {key.lower(): value for key, value in response.headers.items()}
         except urllib.error.HTTPError as exc:
             if allow_not_found and exc.code == 404:
                 return None
+            if 300 <= exc.code < 400:
+                raise ContractError(f"{path}: registry redirects are forbidden (HTTP {exc.code})") from exc
             raise ContractError(f"{path}: registry returned HTTP {exc.code}") from exc
         except urllib.error.URLError as exc:
             raise ContractError(f"{path}: registry request failed: {exc.reason}") from exc
         if not payload:
             raise ContractError(f"{path}: registry returned an empty body")
         try:
-            return json.loads(payload), headers
+            return json.loads(payload), headers, len(payload)
         except json.JSONDecodeError as exc:
             raise ContractError(f"{path}: invalid JSON: {exc}") from exc
 
@@ -202,25 +316,60 @@ class RegistryClient:
         response = self._get_json_response(path, allow_not_found=allow_not_found)
         if response is None:
             return None
-        payload, headers = response
-        validate_graph_transport(payload, headers, path)
+        payload, headers, encoded_length = response
+        validate_graph_transport(payload, headers, path, encoded_length=encoded_length)
         return payload
 
 
-def validate_graph_transport(payload: Any, headers: Mapping[str, str], label: str) -> None:
+def validate_graph_transport(
+    payload: Any,
+    headers: Mapping[str, str],
+    label: str,
+    *,
+    encoded_length: int | None = None,
+) -> None:
     graph = require_mapping(payload, f"{label} graph response")
     body_digest = require_text(graph.get("graph_digest"), f"{label}.graph_digest")
+    if not DIGEST_RE.fullmatch(body_digest):
+        raise ContractError(f"{label}: invalid graph_digest")
     header_digest = headers.get("x-zpkg-graph-digest")
     if header_digest != body_digest:
         raise ContractError(
             f"{label}: x-zpkg-graph-digest {header_digest!r} does not match body {body_digest!r}"
         )
     etag = headers.get("etag")
-    if not etag or etag.startswith("W/") or not (etag.startswith('"') and etag.endswith('"')):
+    if not etag or etag.startswith("W/") or not ETAG_RE.fullmatch(etag):
         raise ContractError(f"{label}: declared graph must carry a strong quoted ETag")
+    if headers.get("x-zpkg-graph-authoritative", "").lower() != "true":
+        raise ContractError(f"{label}: canonical JSON graph must be authoritative")
+    content_length_raw = headers.get("content-length")
+    if content_length_raw is None:
+        raise ContractError(f"{label}: declared graph must carry Content-Length")
+    try:
+        content_length = int(content_length_raw, 10)
+    except ValueError as exc:
+        raise ContractError(f"{label}: invalid Content-Length") from exc
+    if content_length < 0 or (encoded_length is not None and content_length != encoded_length):
+        raise ContractError(
+            f"{label}: Content-Length {content_length} does not match encoded body length {encoded_length}"
+        )
     vary = {item.strip().lower() for item in headers.get("vary", "").split(",") if item.strip()}
     if "accept" not in vary:
         raise ContractError(f"{label}: declared graph response must include Vary: Accept")
+    cache_control = {
+        item.strip().lower()
+        for item in headers.get("cache-control", "").split(",")
+        if item.strip()
+    }
+    if "authorization" in vary:
+        if not {"private", "no-store"}.issubset(cache_control):
+            raise ContractError(
+                f"{label}: authorization-varying graph must use Cache-Control: private, no-store"
+            )
+    elif not {"public", "immutable", "max-age=31536000"}.issubset(cache_control):
+        raise ContractError(
+            f"{label}: public graph must use immutable one-year Cache-Control"
+        )
 
 
 def require_mapping(value: Any, label: str) -> Mapping[str, Any]:
@@ -238,7 +387,10 @@ def require_list(value: Any, label: str) -> list[Any]:
 def require_text(value: Any, label: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ContractError(f"{label} must be a non-empty string")
-    return value.strip()
+    normalized = value.strip()
+    if any(ord(character) < 0x20 or ord(character) == 0x7F for character in normalized):
+        raise ContractError(f"{label} must not contain control characters")
+    return normalized
 
 
 def require_bool(value: Any, label: str) -> bool:
@@ -261,12 +413,25 @@ def require_unique_texts(value: Any, label: str) -> tuple[str, ...]:
     return tuple(sorted(normalized))
 
 
-def read_json(path: Path, label: str) -> Any:
+def read_json(
+    path: Path,
+    label: str,
+    *,
+    max_bytes: int = DEFAULT_MAX_RESPONSE_BYTES,
+) -> Any:
+    limit = require_positive_limit(max_bytes, f"{label} max bytes")
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        size = path.stat().st_size
+        if size > limit:
+            raise ContractError(f"{label} {path} exceeds the {limit}-byte safety limit")
+        payload = path.read_bytes()
     except OSError as exc:
         raise ContractError(f"cannot read {label} {path}: {exc}") from exc
-    except json.JSONDecodeError as exc:
+    if len(payload) > limit:
+        raise ContractError(f"{label} {path} exceeds the {limit}-byte safety limit")
+    try:
+        return json.loads(payload)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ContractError(f"invalid JSON in {label} {path}: {exc}") from exc
 
 
@@ -298,7 +463,26 @@ def normalize_package_page(payload: Any, label: str) -> tuple[list[Mapping[str, 
     return normalized, total
 
 
-def parse_declared_graph(payload: Any, *, expected: PackageCoordinate, version: str) -> list[DeclaredEdge]:
+def declared_graph_registry_id(
+    payload: Any,
+    *,
+    expected: PackageCoordinate,
+    version: str,
+) -> str:
+    graph = require_mapping(payload, f"declared graph {expected.value}@{version}")
+    package = require_mapping(graph.get("package"), f"{expected.value}@{version}.package")
+    return require_text(package.get("registry_id"), f"{expected.value}@{version}.package.registry_id")
+
+
+def parse_declared_graph(
+    payload: Any,
+    *,
+    expected: PackageCoordinate,
+    version: str,
+    expected_registry_id: str | None = None,
+    max_edges: int = DEFAULT_MAX_EDGES,
+) -> list[DeclaredEdge]:
+    edge_limit = require_positive_limit(max_edges, "max graph edges")
     graph = require_mapping(payload, f"declared graph {expected.value}@{version}")
     if graph.get("schema") != GRAPH_SCHEMA:
         raise ContractError(
@@ -310,30 +494,49 @@ def parse_declared_graph(payload: Any, *, expected: PackageCoordinate, version: 
     if not DIGEST_RE.fullmatch(digest):
         raise ContractError(f"{expected.value}@{version}: invalid graph_digest")
     package = require_mapping(graph.get("package"), f"{expected.value}@{version}.package")
-    package_org = require_text(package.get("org"), "package.org")
-    package_name = require_text(package.get("name"), "package.name")
+    package_coordinate = PackageCoordinate.from_parts(
+        package.get("org"),
+        package.get("name"),
+        f"{expected.value}@{version}.package",
+    )
     package_version = require_text(package.get("version"), "package.version")
     source_registry_id = require_text(package.get("registry_id"), "package.registry_id")
-    if (package_org, package_name) != (expected.org, expected.name):
+    if package_coordinate != expected:
         raise ContractError(
-            f"{expected.value}@{version}: graph root is {package_org}/{package_name}"
+            f"{expected.value}@{version}: graph root is {package_coordinate.value}"
         )
     if package_version != version:
         raise ContractError(
             f"{expected.value}: requested version {version!r}, graph reports {package_version!r}"
         )
+    if expected_registry_id is not None and source_registry_id != expected_registry_id:
+        raise ContractError(
+            f"{expected.value}@{version}: registry_id {source_registry_id!r} differs from "
+            f"inventory registry {expected_registry_id!r}"
+        )
 
     dependencies = require_list(graph.get("dependencies"), f"{expected.value}@{version}.dependencies")
+    if len(dependencies) > edge_limit:
+        raise ContractError(
+            f"{expected.value}@{version}: dependency count {len(dependencies)} exceeds "
+            f"the {edge_limit}-edge safety limit"
+        )
     edges: list[DeclaredEdge] = []
     seen: set[DeclaredEdge] = set()
     for index, raw in enumerate(dependencies):
         label = f"{expected.value}@{version}.dependencies[{index}]"
         dep = require_mapping(raw, label)
-        target = PackageCoordinate(
-            org=require_text(dep.get("org"), f"{label}.org"),
-            name=require_text(dep.get("name"), f"{label}.name"),
+        target = PackageCoordinate.from_parts(
+            dep.get("org"),
+            dep.get("name"),
+            label,
         )
         target_registry_id = require_text(dep.get("registry_id"), f"{label}.registry_id")
+        if target_registry_id != source_registry_id:
+            raise ContractError(
+                f"{label}.registry_id {target_registry_id!r} differs from graph registry "
+                f"{source_registry_id!r}"
+            )
         requirement = require_text(dep.get("requirement"), f"{label}.requirement")
         kind = require_text(dep.get("kind"), f"{label}.kind")
         if kind not in DEPENDENCY_KINDS:
@@ -366,8 +569,17 @@ def parse_declared_graph(payload: Any, *, expected: PackageCoordinate, version: 
             edges.append(edge)
     return sorted(edges)
 
-
-def load_snapshot(path: Path, *, version_policy: str) -> LoadedInventory:
+def load_snapshot(
+    path: Path,
+    *,
+    version_policy: str,
+    max_packages: int = DEFAULT_MAX_PACKAGES,
+    max_versions: int = DEFAULT_MAX_VERSIONS,
+    max_edges: int = DEFAULT_MAX_EDGES,
+) -> LoadedInventory:
+    package_limit = require_positive_limit(max_packages, "max packages")
+    version_limit = require_positive_limit(max_versions, "max versions")
+    edge_limit = require_positive_limit(max_edges, "max edges")
     root = require_mapping(read_json(path, "snapshot"), "snapshot")
     if root.get("schema") != SNAPSHOT_SCHEMA:
         raise ContractError(f"snapshot.schema must be exactly {SNAPSHOT_SCHEMA!r}")
@@ -382,18 +594,24 @@ def load_snapshot(path: Path, *, version_policy: str) -> LoadedInventory:
         require_text(registry_id_raw, "snapshot.registryId") if registry_id_raw is not None else None
     )
     packages = require_list(root.get("packages"), "snapshot.packages")
+    if len(packages) > package_limit:
+        raise ContractError(
+            f"snapshot package count {len(packages)} exceeds the {package_limit}-package safety limit"
+        )
     edges: list[DeclaredEdge] = []
     package_names: list[str] = []
     versions_attempted = 0
     graphs_loaded = 0
     missing: list[dict[str, Any]] = []
     seen_packages: set[str] = set()
+    observed_registry_id = registry_id
     for package_index, raw_package in enumerate(packages):
         label = f"snapshot.packages[{package_index}]"
         package = require_mapping(raw_package, label)
-        coordinate = PackageCoordinate(
-            org=require_text(package.get("org"), f"{label}.org"),
-            name=require_text(package.get("name"), f"{label}.name"),
+        coordinate = PackageCoordinate.from_parts(
+            package.get("org"),
+            package.get("name"),
+            label,
         )
         if coordinate.value in seen_packages:
             raise ContractError(f"snapshot contains duplicate package {coordinate.value}")
@@ -409,21 +627,44 @@ def load_snapshot(path: Path, *, version_policy: str) -> LoadedInventory:
             version_entry = require_mapping(raw_version, version_label)
             version = require_text(version_entry.get("version"), f"{version_label}.version")
             versions_attempted += 1
+            if versions_attempted > version_limit:
+                raise ContractError(
+                    f"snapshot version count exceeds the {version_limit}-version safety limit"
+                )
             if version_entry.get("graph") is None:
                 missing.append(
                     {
                         "package": coordinate.value,
                         "version": version,
                         "reason": require_text(
-                            version_entry.get("missingReason", "not-found"),
+                            version_entry.get("missingReason", "not-found-or-inaccessible"),
                             f"{version_label}.missingReason",
                         ),
                     }
                 )
                 continue
-            edges.extend(
-                parse_declared_graph(version_entry["graph"], expected=coordinate, version=version)
+            graph_registry_id = declared_graph_registry_id(
+                version_entry["graph"], expected=coordinate, version=version
             )
+            if observed_registry_id is None:
+                observed_registry_id = graph_registry_id
+            elif graph_registry_id != observed_registry_id:
+                raise ContractError(
+                    f"{coordinate.value}@{version}: registry_id {graph_registry_id!r} differs "
+                    f"from inventory registry {observed_registry_id!r}"
+                )
+            parsed_edges = parse_declared_graph(
+                version_entry["graph"],
+                expected=coordinate,
+                version=version,
+                expected_registry_id=observed_registry_id,
+                max_edges=edge_limit,
+            )
+            edges.extend(parsed_edges)
+            if len(edges) > edge_limit:
+                raise ContractError(
+                    f"snapshot edge count exceeds the {edge_limit}-edge safety limit"
+                )
             graphs_loaded += 1
     edge_set = tuple(sorted(set(edges)))
     return LoadedInventory(
@@ -434,10 +675,9 @@ def load_snapshot(path: Path, *, version_policy: str) -> LoadedInventory:
         graphs_loaded=graphs_loaded,
         missing_graphs=tuple(sorted(missing, key=lambda item: (item["package"], item["version"]))),
         inventory_scope=inventory_scope,
-        registry_id=registry_id,
+        registry_id=observed_registry_id,
         version_policy=version_policy,
     )
-
 
 def select_versions(
     client: RegistryClient,
@@ -462,7 +702,13 @@ def load_live_inventory(
     *,
     version_policy: str,
     allow_missing_graphs: bool,
+    max_packages: int = DEFAULT_MAX_PACKAGES,
+    max_versions: int = DEFAULT_MAX_VERSIONS,
+    max_edges: int = DEFAULT_MAX_EDGES,
 ) -> LoadedInventory:
+    package_limit = require_positive_limit(max_packages, "max packages")
+    version_limit = require_positive_limit(max_versions, "max versions")
+    edge_limit = require_positive_limit(max_edges, "max edges")
     limit = 200
     offset = 0
     package_summaries: dict[str, Mapping[str, Any]] = {}
@@ -470,6 +716,10 @@ def load_live_inventory(
     while True:
         payload = client.get_json(f"/v1/packages?limit={limit}&offset={offset}")
         items, total = normalize_package_page(payload, f"package page offset={offset}")
+        if total > package_limit:
+            raise ContractError(
+                f"package inventory total {total} exceeds the {package_limit}-package safety limit"
+            )
         if advertised_total is None:
             advertised_total = total
         elif total != advertised_total:
@@ -479,9 +729,10 @@ def load_live_inventory(
         if not items:
             break
         for index, item in enumerate(items):
-            coordinate = PackageCoordinate(
-                org=require_text(item.get("org"), f"page[{offset + index}].org"),
-                name=require_text(item.get("name"), f"page[{offset + index}].name"),
+            coordinate = PackageCoordinate.from_parts(
+                item.get("org"),
+                item.get("name"),
+                f"page[{offset + index}]",
             )
             if coordinate.value in package_summaries:
                 raise ContractError(f"package inventory contains duplicate {coordinate.value}")
@@ -503,6 +754,7 @@ def load_live_inventory(
     missing: list[dict[str, Any]] = []
     versions_attempted = 0
     graphs_loaded = 0
+    observed_registry_id: str | None = None
     for coordinate_value in sorted(package_summaries):
         coordinate = PackageCoordinate.parse(coordinate_value)
         versions = select_versions(
@@ -513,6 +765,10 @@ def load_live_inventory(
         )
         for version in versions:
             versions_attempted += 1
+            if versions_attempted > version_limit:
+                raise ContractError(
+                    f"package version census exceeds the {version_limit}-version safety limit"
+                )
             path = (
                 "/v1/packages/"
                 f"{urllib.parse.quote(coordinate.org, safe='')}/"
@@ -522,16 +778,42 @@ def load_live_inventory(
             payload = client.get_declared_graph(path, allow_not_found=True)
             if payload is None:
                 missing.append(
-                    {"package": coordinate.value, "version": version, "reason": "not-found"}
+                    {
+                        "package": coordinate.value,
+                        "version": version,
+                        "reason": "not-found-or-inaccessible",
+                    }
                 )
                 continue
-            edges.extend(parse_declared_graph(payload, expected=coordinate, version=version))
+            graph_registry_id = declared_graph_registry_id(
+                payload, expected=coordinate, version=version
+            )
+            if observed_registry_id is None:
+                observed_registry_id = graph_registry_id
+            elif graph_registry_id != observed_registry_id:
+                raise ContractError(
+                    f"{coordinate.value}@{version}: registry_id {graph_registry_id!r} differs "
+                    f"from inventory registry {observed_registry_id!r}"
+                )
+            parsed_edges = parse_declared_graph(
+                payload,
+                expected=coordinate,
+                version=version,
+                expected_registry_id=observed_registry_id,
+                max_edges=edge_limit,
+            )
+            edges.extend(parsed_edges)
+            if len(edges) > edge_limit:
+                raise ContractError(
+                    f"package graph census exceeds the {edge_limit}-edge safety limit"
+                )
             graphs_loaded += 1
     if missing and not allow_missing_graphs:
         sample = ", ".join(f"{item['package']}@{item['version']}" for item in missing[:5])
         raise ContractError(
-            f"{len(missing)} package versions have no declared graph; first: {sample}. "
-            "Use --allow-missing-graphs only for an explicitly non-strict migration census."
+            f"{len(missing)} package versions have no accessible declared graph; first: {sample}. "
+            "The API intentionally conflates not-found and unauthorized. Use "
+            "--allow-missing-graphs only for an explicitly non-strict migration census."
         )
     return LoadedInventory(
         edges=tuple(sorted(set(edges))),
@@ -540,11 +822,10 @@ def load_live_inventory(
         versions_attempted=versions_attempted,
         graphs_loaded=graphs_loaded,
         missing_graphs=tuple(sorted(missing, key=lambda item: (item["package"], item["version"]))),
-        inventory_scope="authorized-visible-registry",
-        registry_id=None,
+        inventory_scope=LIVE_INVENTORY_SCOPE,
+        registry_id=observed_registry_id,
         version_policy=version_policy,
     )
-
 
 def load_curated_fleet(path: Path) -> tuple[str, dict[str, CuratedConsumer]]:
     manifest = require_mapping(read_json(path, "curated fleet"), "curated fleet")
@@ -776,7 +1057,12 @@ def render_impact(
     normalized_edges = [edge.to_json() for edge in inventory.edges]
     inventory_preimage = {
         "root": root,
+        "inventoryScope": inventory.inventory_scope,
+        "registryId": inventory.registry_id,
         "versionPolicy": inventory.version_policy,
+        "packageListTotal": inventory.package_list_total,
+        "versionsAttempted": inventory.versions_attempted,
+        "graphsLoaded": inventory.graphs_loaded,
         "edges": normalized_edges,
         "packagesFetched": list(inventory.packages_fetched),
         "missingGraphs": list(inventory.missing_graphs),
@@ -788,8 +1074,12 @@ def render_impact(
             "graphView": "declared",
             "resolution": "unresolved-requirements",
             "reverseDependentsEndpointUsed": False,
-            "consumerDiscovery": "enumerate-visible-package-versions-and-invert-declared-edges",
-            "privateCoverage": "limited-to-caller-authorized-visible-inventory",
+            "consumerDiscovery": "enumerate-registry-package-index-and-invert-caller-authorized-declared-edges",
+            "packageIndexScope": "registry-wide-current-list-endpoint",
+            "privateCoverage": "graph-fetches-limited-to-caller-authorization",
+            "inventoryConsistency": "total-stable-pagination-without-registry-checkpoint",
+            "redirectsAllowed": False,
+            "registryIdentityRequired": True,
         },
         "inventory": {
             "scope": inventory.inventory_scope,
@@ -832,7 +1122,23 @@ def dot_id(value: str) -> str:
 
 
 def escape_dot(value: str) -> str:
-    return value.replace("\\", "\\\\").replace('"', '\\"')
+    escaped: list[str] = []
+    for character in value:
+        if character == "\\":
+            escaped.append("\\\\")
+        elif character == '"':
+            escaped.append('\\"')
+        elif character == "\n":
+            escaped.append("\\n")
+        elif character == "\r":
+            escaped.append("\\r")
+        elif character == "\t":
+            escaped.append("\\t")
+        elif ord(character) < 0x20 or ord(character) == 0x7F:
+            escaped.append(f"\\u{ord(character):04x}")
+        else:
+            escaped.append(character)
+    return "".join(escaped)
 
 
 def render_dot(report: Mapping[str, Any]) -> str:
@@ -872,7 +1178,21 @@ def mermaid_id(value: str) -> str:
 
 
 def escape_mermaid(value: str) -> str:
-    return value.replace('"', "'").replace("|", "/")
+    replacements = {
+        "&": "&amp;",
+        '"': "&quot;",
+        "|": "&#124;",
+        "[": "&#91;",
+        "]": "&#93;",
+        "<": "&lt;",
+        ">": "&gt;",
+    }
+    return "".join(
+        " "
+        if ord(character) < 0x20 or ord(character) == 0x7F
+        else replacements.get(character, character)
+        for character in value
+    )
 
 
 def render_mermaid(report: Mapping[str, Any]) -> str:
@@ -978,12 +1298,26 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="comma-separated graph-only, curated-only, unclassified, or missing-graphs",
     )
     parser.add_argument("--timeout-seconds", type=float, default=DEFAULT_TIMEOUT_SECONDS)
+    parser.add_argument("--max-response-bytes", type=int, default=DEFAULT_MAX_RESPONSE_BYTES)
+    parser.add_argument("--max-packages", type=int, default=DEFAULT_MAX_PACKAGES)
+    parser.add_argument("--max-versions", type=int, default=DEFAULT_MAX_VERSIONS)
+    parser.add_argument("--max-edges", type=int, default=DEFAULT_MAX_EDGES)
     return parser
 
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
-    if args.timeout_seconds <= 0:
-        raise ContractError("--timeout-seconds must be positive")
+    if (
+        not math.isfinite(args.timeout_seconds)
+        or args.timeout_seconds <= 0
+        or args.timeout_seconds > MAX_TIMEOUT_SECONDS
+    ):
+        raise ContractError(
+            f"--timeout-seconds must be finite and within (0, {MAX_TIMEOUT_SECONDS:g}]"
+        )
+    response_limit = require_positive_limit(args.max_response_bytes, "--max-response-bytes")
+    package_limit = require_positive_limit(args.max_packages, "--max-packages")
+    version_limit = require_positive_limit(args.max_versions, "--max-versions")
+    edge_limit = require_positive_limit(args.max_edges, "--max-edges")
     root = PackageCoordinate.parse(args.root, "--root").value
     curated_root, curated = load_curated_fleet(args.curated_fleet)
     if curated_root != root:
@@ -994,18 +1328,28 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         curated=curated,
     )
     if args.snapshot is not None:
-        inventory = load_snapshot(args.snapshot, version_policy=args.version_policy)
+        inventory = load_snapshot(
+            args.snapshot,
+            version_policy=args.version_policy,
+            max_packages=package_limit,
+            max_versions=version_limit,
+            max_edges=edge_limit,
+        )
     else:
         token = os.environ.get(args.token_env) or None
         client = RegistryClient(
             args.registry_url,
             bearer_token=token,
             timeout_seconds=args.timeout_seconds,
+            max_response_bytes=response_limit,
         )
         inventory = load_live_inventory(
             client,
             version_policy=args.version_policy,
             allow_missing_graphs=args.allow_missing_graphs,
+            max_packages=package_limit,
+            max_versions=version_limit,
+            max_edges=edge_limit,
         )
     report = render_impact(
         inventory,
