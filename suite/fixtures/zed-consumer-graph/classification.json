@@ -1,0 +1,25 @@
+{
+  "defaultClassification": "candidate",
+  "entries": {
+    "sonus-auris/sonus-auris-sync": {
+      "classification": "exact-pin",
+      "evidence": [
+        "DEN-607"
+      ]
+    },
+    "voxletra/voxletra-sync": {
+      "classification": "exact-pin",
+      "evidence": [
+        "DEN-607"
+      ]
+    },
+    "zed-pkg/zed-sync": {
+      "classification": "adapted-concept",
+      "evidence": [
+        "DEN-313"
+      ]
+    }
+  },
+  "root": "opto-sync/opto-sync-clients",
+  "schemaVersion": 1
+}

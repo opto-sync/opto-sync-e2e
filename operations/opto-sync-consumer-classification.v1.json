@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "root": "opto-sync/opto-sync-clients",
+  "defaultClassification": "candidate",
+  "entries": {
+    "sonus-auris/sonus-auris-sync": {
+      "classification": "exact-pin",
+      "evidence": [
+        "DEN-607",
+        "DEN-1386"
+      ],
+      "note": "Legacy pilot with inspected exact syncer.c and opto-sync-clients gitlinks; retain parity proof until the immutable Zed artifact is certified."
+    },
+    "voxletra/voxletra-sync": {
+      "classification": "exact-pin",
+      "evidence": [
+        "DEN-607",
+        "DEN-1386"
+      ],
+      "note": "Legacy pilot with inspected exact syncer.c and opto-sync-clients gitlinks; retain formal-trace and installed-artifact parity before deleting gitlinks."
+    },
+    "zed-pkg/zed-sync": {
+      "classification": "adapted-concept",
+      "evidence": [
+        "DEN-313",
+        "DEN-1153"
+      ],
+      "note": "Zed is the package plane and zed-sync is the domain adapter; graph confirmation does not by itself prove a frozen resolved install."
+    }
+  }
+}

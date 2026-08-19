@@ -1,0 +1,64 @@
+{
+  "dependency": {
+    "package": "opto-sync/opto-sync-clients",
+    "range": "^0.4.0"
+  },
+  "schemaVersion": 1,
+  "wrappers": [
+    {
+      "bootstrapIndependent": false,
+      "e2e": {
+        "repository": "sonus-auris/sonus-auris-e2e"
+      },
+      "languages": [
+        "rust",
+        "typescript",
+        "dart"
+      ],
+      "legacyParityRequired": true,
+      "linearIssue": "DEN-1386",
+      "persistence": [
+        "indexeddb",
+        "sqlite"
+      ],
+      "repository": "sonus-auris/sonus-auris-sync",
+      "wave": "A"
+    },
+    {
+      "bootstrapIndependent": false,
+      "e2e": {
+        "repository": "voxletra/voxletra-e2e"
+      },
+      "languages": [
+        "rust",
+        "typescript",
+        "dart"
+      ],
+      "legacyParityRequired": true,
+      "linearIssue": "DEN-1386",
+      "persistence": [
+        "indexeddb",
+        "sqlite"
+      ],
+      "repository": "voxletra/voxletra-sync",
+      "wave": "A"
+    },
+    {
+      "bootstrapIndependent": true,
+      "e2e": {
+        "repository": "zed-pkg/zed-e2e"
+      },
+      "languages": [
+        "rust",
+        "typescript"
+      ],
+      "legacyParityRequired": false,
+      "linearIssue": "DEN-1153",
+      "persistence": [
+        "indexeddb"
+      ],
+      "repository": "zed-pkg/zed-sync",
+      "wave": "A"
+    }
+  ]
+}

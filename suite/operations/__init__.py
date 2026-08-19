@@ -1,0 +1,1 @@
+"""Operational contract tests."""

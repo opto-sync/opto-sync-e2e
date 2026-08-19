@@ -1,0 +1,249 @@
+{
+  "inventoryScope": "fixture-public-and-authorized-private",
+  "packages": [
+    {
+      "name": "opto-sync-clients",
+      "org": "opto-sync",
+      "versions": [
+        {
+          "graph": {
+            "dependencies": [],
+            "graph_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+            "package": {
+              "name": "opto-sync-clients",
+              "org": "opto-sync",
+              "registry_id": "registry:test",
+              "version": "0.4.0"
+            },
+            "schema": "zpkg/dependency-graph/v1",
+            "view": "declared"
+          },
+          "version": "0.4.0"
+        }
+      ]
+    },
+    {
+      "name": "sonus-auris-sync",
+      "org": "sonus-auris",
+      "versions": [
+        {
+          "graph": {
+            "dependencies": [
+              {
+                "default_features": true,
+                "kind": "runtime",
+                "name": "opto-sync-clients",
+                "optional": false,
+                "org": "opto-sync",
+                "registry_id": "registry:test",
+                "requirement": "^0.4"
+              }
+            ],
+            "graph_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+            "package": {
+              "name": "sonus-auris-sync",
+              "org": "sonus-auris",
+              "registry_id": "registry:test",
+              "version": "1.0.0"
+            },
+            "schema": "zpkg/dependency-graph/v1",
+            "view": "declared"
+          },
+          "version": "1.0.0"
+        }
+      ]
+    },
+    {
+      "name": "voxletra-sync",
+      "org": "voxletra",
+      "versions": [
+        {
+          "graph": {
+            "dependencies": [
+              {
+                "default_features": true,
+                "features": [
+                  "sqlite"
+                ],
+                "kind": "runtime",
+                "name": "opto-sync-clients",
+                "optional": false,
+                "org": "opto-sync",
+                "registry_id": "registry:test",
+                "requirement": "^0.4"
+              }
+            ],
+            "graph_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+            "package": {
+              "name": "voxletra-sync",
+              "org": "voxletra",
+              "registry_id": "registry:test",
+              "version": "2.0.0"
+            },
+            "schema": "zpkg/dependency-graph/v1",
+            "view": "declared"
+          },
+          "version": "2.0.0"
+        }
+      ]
+    },
+    {
+      "name": "desktop-app",
+      "org": "example",
+      "versions": [
+        {
+          "graph": {
+            "dependencies": [
+              {
+                "default_features": true,
+                "kind": "runtime",
+                "name": "sonus-auris-sync",
+                "optional": false,
+                "org": "sonus-auris",
+                "registry_id": "registry:test",
+                "requirement": "^1",
+                "target": "cfg(desktop)"
+              }
+            ],
+            "graph_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+            "package": {
+              "name": "desktop-app",
+              "org": "example",
+              "registry_id": "registry:test",
+              "version": "3.0.0"
+            },
+            "schema": "zpkg/dependency-graph/v1",
+            "view": "declared"
+          },
+          "version": "3.0.0"
+        }
+      ]
+    },
+    {
+      "name": "new-sync",
+      "org": "newco",
+      "versions": [
+        {
+          "graph": {
+            "dependencies": [
+              {
+                "default_features": true,
+                "kind": "runtime",
+                "name": "opto-sync-clients",
+                "optional": false,
+                "org": "opto-sync",
+                "registry_id": "registry:test",
+                "requirement": "^0.4"
+              }
+            ],
+            "graph_digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+            "package": {
+              "name": "new-sync",
+              "org": "newco",
+              "registry_id": "registry:test",
+              "version": "0.1.0"
+            },
+            "schema": "zpkg/dependency-graph/v1",
+            "view": "declared"
+          },
+          "version": "0.1.0"
+        }
+      ]
+    },
+    {
+      "name": "a",
+      "org": "cycle",
+      "versions": [
+        {
+          "graph": {
+            "dependencies": [
+              {
+                "default_features": true,
+                "kind": "runtime",
+                "name": "opto-sync-clients",
+                "optional": false,
+                "org": "opto-sync",
+                "registry_id": "registry:test",
+                "requirement": "^0.4"
+              },
+              {
+                "default_features": true,
+                "kind": "runtime",
+                "name": "b",
+                "optional": false,
+                "org": "cycle",
+                "registry_id": "registry:test",
+                "requirement": "^1"
+              }
+            ],
+            "graph_digest": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+            "package": {
+              "name": "a",
+              "org": "cycle",
+              "registry_id": "registry:test",
+              "version": "1.0.0"
+            },
+            "schema": "zpkg/dependency-graph/v1",
+            "view": "declared"
+          },
+          "version": "1.0.0"
+        }
+      ]
+    },
+    {
+      "name": "b",
+      "org": "cycle",
+      "versions": [
+        {
+          "graph": {
+            "dependencies": [
+              {
+                "default_features": true,
+                "kind": "runtime",
+                "name": "a",
+                "optional": false,
+                "org": "cycle",
+                "registry_id": "registry:test",
+                "requirement": "^1"
+              }
+            ],
+            "graph_digest": "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+            "package": {
+              "name": "b",
+              "org": "cycle",
+              "registry_id": "registry:test",
+              "version": "1.0.0"
+            },
+            "schema": "zpkg/dependency-graph/v1",
+            "view": "declared"
+          },
+          "version": "1.0.0"
+        }
+      ]
+    },
+    {
+      "name": "tool",
+      "org": "irrelevant",
+      "versions": [
+        {
+          "graph": {
+            "dependencies": [],
+            "graph_digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+            "package": {
+              "name": "tool",
+              "org": "irrelevant",
+              "registry_id": "registry:test",
+              "version": "9.0.0"
+            },
+            "schema": "zpkg/dependency-graph/v1",
+            "view": "declared"
+          },
+          "version": "9.0.0"
+        }
+      ]
+    }
+  ],
+  "registryId": "registry:test",
+  "schema": "opto-sync/zed-declared-inventory/v1",
+  "versionPolicy": "latest-visible"
+}
