@@ -6,6 +6,11 @@ on:
       - agent/zed-consumer-graph-testing
     paths:
       - '.bootstrap/READY'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.bootstrap/READY'
 
 permissions:
   contents: write
