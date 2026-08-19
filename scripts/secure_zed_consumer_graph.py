@@ -99,7 +99,7 @@ class SameOriginRedirectHandler(urllib.request.HTTPRedirectHandler):
                 headers,
                 fp,
             )
-        return super().redirect_request(req, fp, code, msg, headers, newurl)
+        return super().redirect_request(req, fp, code, msg, headers, candidate)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
