@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - chore/bootstrap-gh-cli-v2.97.0-20260819
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: read
