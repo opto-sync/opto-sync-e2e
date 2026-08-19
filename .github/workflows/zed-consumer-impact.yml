@@ -38,7 +38,7 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref || github.run_id }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   deterministic-contract:
@@ -101,7 +101,7 @@ jobs:
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/impact-a" "$RUNNER_TEMP/impact-b" impact-fixture
           for target in "$RUNNER_TEMP/impact-a" "$RUNNER_TEMP/impact-b"; do
-            python3 scripts/zed_consumer_graph.py \
+            python3 scripts/secure_zed_consumer_graph.py \
               --snapshot suite/fixtures/zed-consumer-graph/inventory.json \
               --curated-fleet suite/fixtures/zed-consumer-graph/curated-fleet.json \
               --classification-policy suite/fixtures/zed-consumer-graph/classification.json \
@@ -109,9 +109,12 @@ jobs:
               --dot-output "$target/opto-sync-consumer-impact.dot" \
               --mermaid-output "$target/opto-sync-consumer-impact.mmd"
           done
-          cmp "$RUNNER_TEMP/impact-a/opto-sync-consumer-impact.json" "$RUNNER_TEMP/impact-b/opto-sync-consumer-impact.json"
-          cmp "$RUNNER_TEMP/impact-a/opto-sync-consumer-impact.dot" "$RUNNER_TEMP/impact-b/opto-sync-consumer-impact.dot"
-          cmp "$RUNNER_TEMP/impact-a/opto-sync-consumer-impact.mmd" "$RUNNER_TEMP/impact-b/opto-sync-consumer-impact.mmd"
+          cmp "$RUNNER_TEMP/impact-a/opto-sync-consumer-impact.json" \
+              "$RUNNER_TEMP/impact-b/opto-sync-consumer-impact.json"
+          cmp "$RUNNER_TEMP/impact-a/opto-sync-consumer-impact.dot" \
+              "$RUNNER_TEMP/impact-b/opto-sync-consumer-impact.dot"
+          cmp "$RUNNER_TEMP/impact-a/opto-sync-consumer-impact.mmd" \
+              "$RUNNER_TEMP/impact-b/opto-sync-consumer-impact.mmd"
           cp "$RUNNER_TEMP/impact-a"/* impact-fixture/
           python3 - <<'PY'
           import json
@@ -120,6 +123,10 @@ jobs:
           report = json.loads(Path('impact-fixture/opto-sync-consumer-impact.json').read_text())
           assert report['semantics']['graphView'] == 'declared'
           assert report['semantics']['resolution'] == 'unresolved-requirements'
+          assert report['semantics']['packageIndexScope'] == 'registry-wide-current-list-endpoint'
+          assert report['semantics']['privateCoverage'] == 'graph-fetches-limited-to-caller-authorization'
+          assert report['semantics']['redirectsAllowed'] is False
+          assert report['inventory']['registryId'] == 'registry:test'
           assert report['summary'] == {
               'allDiscoveredConsumers': 6,
               'curatedConsumers': 3,
@@ -140,8 +147,8 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  live-authorized-inventory:
-    name: Enumerate all authorized visible Zed package versions
+  live-registry-census:
+    name: Enumerate the registry index and caller-authorized Zed graphs
     if: >-
       (github.event_name == 'schedule' ||
        github.event_name == 'workflow_dispatch' ||
@@ -151,15 +158,13 @@ jobs:
     timeout-minutes: 30
     env:
       ZED_REGISTRY_URL: ${{ vars.ZED_REGISTRY_URL }}
-      ZED_REGISTRY_TOKEN: ${{ secrets.ZED_REGISTRY_TOKEN }}
-      ZED_REGISTRY_TOKEN_ORIGIN: ${{ vars.ZED_REGISTRY_TOKEN_ORIGIN }}
     steps:
       - name: Checkout impact controller
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
 
-      - name: Validate credential-bound registry configuration
+      - name: Validate registry URL with the same fail-closed client policy
         shell: bash
         run: |
           set -euo pipefail
@@ -169,22 +174,21 @@ jobs:
           import sys
           from pathlib import Path
 
-          scripts = Path('scripts').resolve()
-          sys.path.insert(0, str(scripts))
-          script = scripts / 'secure_zed_consumer_graph.py'
-          spec = importlib.util.spec_from_file_location('secure_zed_consumer_graph', script)
+          script = Path('scripts/zed_consumer_graph.py')
+          spec = importlib.util.spec_from_file_location('zed_consumer_graph', script)
           assert spec and spec.loader
           module = importlib.util.module_from_spec(spec)
           sys.modules[spec.name] = module
           spec.loader.exec_module(module)
-          module.validate_live_registry(
-              ['--registry-url', os.environ['ZED_REGISTRY_URL'], '--token-env', 'ZED_REGISTRY_TOKEN'],
-              os.environ,
-          )
+          normalized = module.normalize_registry_url(os.environ['ZED_REGISTRY_URL'])
+          print(f'validated registry origin: {normalized}')
           PY
 
-      - name: Build reverse consumer impact from every visible package version
+      - name: Build reverse consumer impact from every indexed package version
         shell: bash
+        env:
+          ZED_REGISTRY_TOKEN: ${{ secrets.ZED_REGISTRY_TOKEN }}
+          ZED_REGISTRY_TOKEN_ORIGIN: ${{ vars.ZED_REGISTRY_TOKEN_ORIGIN }}
         run: |
           set -euo pipefail
           mkdir -p impact-live
@@ -198,9 +202,14 @@ jobs:
             --output impact-live/opto-sync-consumer-impact.json \
             --dot-output impact-live/opto-sync-consumer-impact.dot \
             --mermaid-output impact-live/opto-sync-consumer-impact.mmd \
+            --max-response-bytes 16777216 \
+            --max-packages 50000 \
+            --max-versions 250000 \
+            --max-edges 100000 \
             --fail-on graph-only,unclassified,missing-graphs
 
       - name: Publish live impact summary
+        if: ${{ always() }}
         shell: bash
         run: |
           set -euo pipefail
@@ -208,7 +217,13 @@ jobs:
           import json
           from pathlib import Path
 
-          report = json.loads(Path('impact-live/opto-sync-consumer-impact.json').read_text())
+          path = Path('impact-live/opto-sync-consumer-impact.json')
+          if not path.exists():
+              print('## Opto-Sync Zed consumer impact')
+              print()
+              print('No live impact report was produced.')
+              raise SystemExit(0)
+          report = json.loads(path.read_text())
           summary = report['summary']
           inventory = report['inventory']
           print('## Opto-Sync Zed consumer impact')
@@ -216,7 +231,7 @@ jobs:
           print('| Metric | Count |')
           print('|---|---:|')
           for label, key in (
-              ('Visible packages', 'packageListTotal'),
+              ('Indexed packages', 'packageListTotal'),
               ('Package versions inspected', 'versionsAttempted'),
               ('Declared graphs loaded', 'graphsLoaded'),
               ('Declared edges', 'declaredEdgeCount'),
@@ -232,15 +247,16 @@ jobs:
           print()
           print(f"Inventory digest: `{inventory['inventoryDigest']}`")
           print()
-          print('This is declared, unresolved dependency coverage over the caller-authorized visible inventory; it is not a resolved lock graph.')
+          print('This is declared, unresolved coverage over the registry package index with caller-authorized graph fetches; it is neither an atomic registry snapshot nor a resolved lock graph.')
           PY
 
-      - name: Upload authorized live impact evidence
+      - name: Upload live impact evidence
+        if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: opto-sync-zed-consumer-impact-live
           path: impact-live/
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 30
 
   live-configuration-evidence:
@@ -263,7 +279,7 @@ jobs:
             echo '## Opto-Sync Zed consumer impact'
             echo
             echo 'Live graph enumeration did not run because the repository variable `ZED_REGISTRY_URL` is not configured.'
-            echo 'The deterministic API-contract fixture still ran; no claim of live or total authorized coverage is made.'
+            echo 'The deterministic API-contract fixture still ran; no claim of a live registry census, caller-authorized graph coverage, or atomic snapshot is made.'
           } >> "$GITHUB_STEP_SUMMARY"
           if [ "$REQUIRE_LIVE" = 'true' ]; then
             echo 'OPTO_SYNC_REQUIRE_LIVE_ZED_GRAPH=true, so missing live configuration is fatal.' >&2
