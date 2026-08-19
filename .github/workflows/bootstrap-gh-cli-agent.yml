@@ -1,0 +1,41 @@
+name: Bootstrap GitHub CLI binary for agent
+
+on:
+  push:
+    branches:
+      - chore/bootstrap-gh-cli-v2.97.0-20260819
+
+permissions:
+  contents: read
+
+jobs:
+  package-gh:
+    name: Package checksum-verified gh v2.97.0
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Download and verify official GitHub CLI release
+        shell: bash
+        run: |
+          set -euo pipefail
+          version='2.97.0'
+          archive="gh_${version}_linux_amd64.tar.gz"
+          expected='a2c9b8497e1f85b1ad0dfcb78b5a622e098801b8e461e459e88e1ee12f018112'
+          curl --fail --location --proto '=https' --tlsv1.2 \
+            --output "$archive" \
+            "https://github.com/cli/cli/releases/download/v${version}/${archive}"
+          printf '%s  %s\n' "$expected" "$archive" | sha256sum --check --strict
+          tar --extract --gzip --file "$archive"
+          mkdir -p /tmp/gh-artifact
+          install -m 0755 "gh_${version}_linux_amd64/bin/gh" /tmp/gh-artifact/gh
+          printf '%s  gh\n' "$expected" > /tmp/gh-artifact/release-archive.sha256
+          /tmp/gh-artifact/gh --version
+
+      - name: Upload Linux amd64 binary
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: gh-linux-amd64-v2.97.0
+          path: /tmp/gh-artifact/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
