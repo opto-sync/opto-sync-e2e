@@ -6,8 +6,10 @@ on:
       - 'operations/downstream-wrapper-fleet.v1.json'
       - 'operations/opto-sync-consumer-classification.v1.json'
       - 'scripts/zed_consumer_graph.py'
+      - 'scripts/secure_zed_consumer_graph.py'
       - 'suite/fixtures/zed-consumer-graph/**'
       - 'suite/operations/test_zed_consumer_graph.py'
+      - 'suite/operations/test_secure_zed_consumer_graph.py'
       - '.github/workflows/zed-consumer-impact.yml'
       - 'docs/zed-consumer-impact.md'
   push:
@@ -17,8 +19,10 @@ on:
       - 'operations/downstream-wrapper-fleet.v1.json'
       - 'operations/opto-sync-consumer-classification.v1.json'
       - 'scripts/zed_consumer_graph.py'
+      - 'scripts/secure_zed_consumer_graph.py'
       - 'suite/fixtures/zed-consumer-graph/**'
       - 'suite/operations/test_zed_consumer_graph.py'
+      - 'suite/operations/test_secure_zed_consumer_graph.py'
       - '.github/workflows/zed-consumer-impact.yml'
       - 'docs/zed-consumer-impact.md'
   schedule:
@@ -53,8 +57,13 @@ jobs:
           set -euo pipefail
           python3 -m py_compile \
             scripts/zed_consumer_graph.py \
-            suite/operations/test_zed_consumer_graph.py
-          python3 -m unittest suite.operations.test_zed_consumer_graph -v
+            scripts/secure_zed_consumer_graph.py \
+            suite/operations/test_zed_consumer_graph.py \
+            suite/operations/test_secure_zed_consumer_graph.py
+          python3 -m unittest \
+            suite.operations.test_zed_consumer_graph \
+            suite.operations.test_secure_zed_consumer_graph \
+            -v
 
       - name: Validate the production classification policy against all 17 wrappers
         shell: bash
@@ -100,12 +109,9 @@ jobs:
               --dot-output "$target/opto-sync-consumer-impact.dot" \
               --mermaid-output "$target/opto-sync-consumer-impact.mmd"
           done
-          cmp "$RUNNER_TEMP/impact-a/opto-sync-consumer-impact.json" \
-              "$RUNNER_TEMP/impact-b/opto-sync-consumer-impact.json"
-          cmp "$RUNNER_TEMP/impact-a/opto-sync-consumer-impact.dot" \
-              "$RUNNER_TEMP/impact-b/opto-sync-consumer-impact.dot"
-          cmp "$RUNNER_TEMP/impact-a/opto-sync-consumer-impact.mmd" \
-              "$RUNNER_TEMP/impact-b/opto-sync-consumer-impact.mmd"
+          cmp "$RUNNER_TEMP/impact-a/opto-sync-consumer-impact.json" "$RUNNER_TEMP/impact-b/opto-sync-consumer-impact.json"
+          cmp "$RUNNER_TEMP/impact-a/opto-sync-consumer-impact.dot" "$RUNNER_TEMP/impact-b/opto-sync-consumer-impact.dot"
+          cmp "$RUNNER_TEMP/impact-a/opto-sync-consumer-impact.mmd" "$RUNNER_TEMP/impact-b/opto-sync-consumer-impact.mmd"
           cp "$RUNNER_TEMP/impact-a"/* impact-fixture/
           python3 - <<'PY'
           import json
@@ -146,27 +152,43 @@ jobs:
     env:
       ZED_REGISTRY_URL: ${{ vars.ZED_REGISTRY_URL }}
       ZED_REGISTRY_TOKEN: ${{ secrets.ZED_REGISTRY_TOKEN }}
+      ZED_REGISTRY_TOKEN_ORIGIN: ${{ vars.ZED_REGISTRY_TOKEN_ORIGIN }}
     steps:
       - name: Checkout impact controller
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
 
-      - name: Validate registry configuration
+      - name: Validate credential-bound registry configuration
         shell: bash
         run: |
           set -euo pipefail
-          case "$ZED_REGISTRY_URL" in
-            https://*|http://localhost:*|http://127.0.0.1:*) ;;
-            *) echo 'ZED_REGISTRY_URL must use HTTPS except for an explicit local canary' >&2; exit 1 ;;
-          esac
+          python3 - <<'PY'
+          import importlib.util
+          import os
+          import sys
+          from pathlib import Path
+
+          scripts = Path('scripts').resolve()
+          sys.path.insert(0, str(scripts))
+          script = scripts / 'secure_zed_consumer_graph.py'
+          spec = importlib.util.spec_from_file_location('secure_zed_consumer_graph', script)
+          assert spec and spec.loader
+          module = importlib.util.module_from_spec(spec)
+          sys.modules[spec.name] = module
+          spec.loader.exec_module(module)
+          module.validate_live_registry(
+              ['--registry-url', os.environ['ZED_REGISTRY_URL'], '--token-env', 'ZED_REGISTRY_TOKEN'],
+              os.environ,
+          )
+          PY
 
       - name: Build reverse consumer impact from every visible package version
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p impact-live
-          python3 scripts/zed_consumer_graph.py \
+          python3 scripts/secure_zed_consumer_graph.py \
             --registry-url "$ZED_REGISTRY_URL" \
             --token-env ZED_REGISTRY_TOKEN \
             --version-policy all-visible \
