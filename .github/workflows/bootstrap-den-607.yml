@@ -6,12 +6,20 @@ on:
       - agent/den-607-zed-consumer-impact
     paths:
       - .bootstrap/ready
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - reopened
+      - synchronize
 
 permissions:
   contents: write
 
 jobs:
   assemble:
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -19,6 +27,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
 
       - name: Verify and assemble tested payload
         shell: bash
@@ -45,9 +54,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          target_branch="${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}"
           git config user.name 'opto-sync automation'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
           git diff --cached --check
           git commit -m 'test(zed): derive Opto-Sync consumer impact from declared graphs'
-          git push origin "HEAD:${GITHUB_REF_NAME}"
+          git push origin "HEAD:${target_branch}"
