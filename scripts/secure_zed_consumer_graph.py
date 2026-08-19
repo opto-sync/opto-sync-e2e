@@ -29,8 +29,6 @@ def normalized_origin(url: str) -> str:
         raise LiveRegistrySecurityError("registry URL must be an absolute http(s) URL")
     if parsed.username is not None or parsed.password is not None:
         raise LiveRegistrySecurityError("registry URL must not contain userinfo")
-    if parsed.query or parsed.fragment:
-        raise LiveRegistrySecurityError("registry URL must not contain a query or fragment")
     host = parsed.hostname.lower()
     if parsed.scheme == "http" and host not in {"localhost", "127.0.0.1", "::1"}:
         raise LiveRegistrySecurityError("live registry must use HTTPS except for an explicit loopback canary")
@@ -57,6 +55,9 @@ def validate_live_registry(argv: Sequence[str], environ: Mapping[str, str]) -> s
     registry_url = option_value(argv, "--registry-url")
     if registry_url is None:
         return None
+    parsed = urllib.parse.urlsplit(registry_url)
+    if parsed.query or parsed.fragment:
+        raise LiveRegistrySecurityError("registry URL must not contain a query or fragment")
     origin = normalized_origin(registry_url)
     token_env = option_value(argv, "--token-env", "ZED_REGISTRY_TOKEN")
     assert token_env is not None
@@ -68,6 +69,9 @@ def validate_live_registry(argv: Sequence[str], environ: Mapping[str, str]) -> s
             raise LiveRegistrySecurityError(
                 f"{origin_env} is required whenever {token_env} contains a bearer token"
             )
+        configured_parsed = urllib.parse.urlsplit(configured)
+        if configured_parsed.query or configured_parsed.fragment:
+            raise LiveRegistrySecurityError(f"{origin_env} must be an origin without query or fragment")
         configured_origin = normalized_origin(configured)
         if configured_origin != origin:
             raise LiveRegistrySecurityError(
@@ -106,9 +110,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"secure-zed-consumer-graph: {exc}", file=sys.stderr)
         return 2
     if origin is not None:
-        urllib.request.install_opener(
-            urllib.request.build_opener(SameOriginRedirectHandler(origin))
-        )
+        urllib.request.install_opener(urllib.request.build_opener(SameOriginRedirectHandler(origin)))
     return zed_consumer_graph.main(effective_argv)
 
 
