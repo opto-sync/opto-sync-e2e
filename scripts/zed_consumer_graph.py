@@ -61,6 +61,24 @@ class ContractError(ValueError):
     """Raised when registry or policy data violates the fail-closed contract."""
 
 
+def reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """Reject ambiguous JSON objects instead of silently keeping the last key."""
+
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ContractError(f"duplicate JSON object key {key!r}")
+        result[key] = value
+    return result
+
+
+def decode_json(payload: bytes | str, label: str) -> Any:
+    try:
+        return json.loads(payload, object_pairs_hook=reject_duplicate_keys)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ContractError(f"{label}: invalid JSON: {exc}") from exc
+
+
 @dataclass(frozen=True, order=True)
 class PackageCoordinate:
     org: str
@@ -77,7 +95,8 @@ class PackageCoordinate:
         for field, raw in (("org", org), ("name", name)):
             value = require_text(raw, f"{label}.{field}")
             if (
-                len(value) > MAX_COORDINATE_COMPONENT_LENGTH
+                value != raw
+                or len(value) > MAX_COORDINATE_COMPONENT_LENGTH
                 or value in {".", ".."}
                 or not COORDINATE_COMPONENT_RE.fullmatch(value)
             ):
@@ -303,10 +322,7 @@ class RegistryClient:
             raise ContractError(f"{path}: registry request failed: {exc.reason}") from exc
         if not payload:
             raise ContractError(f"{path}: registry returned an empty body")
-        try:
-            return json.loads(payload), headers, len(payload)
-        except json.JSONDecodeError as exc:
-            raise ContractError(f"{path}: invalid JSON: {exc}") from exc
+        return decode_json(payload, path), headers, len(payload)
 
     def get_json(self, path: str, *, allow_not_found: bool = False) -> Any | None:
         response = self._get_json_response(path, allow_not_found=allow_not_found)
@@ -429,10 +445,7 @@ def read_json(
         raise ContractError(f"cannot read {label} {path}: {exc}") from exc
     if len(payload) > limit:
         raise ContractError(f"{label} {path} exceeds the {limit}-byte safety limit")
-    try:
-        return json.loads(payload)
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise ContractError(f"invalid JSON in {label} {path}: {exc}") from exc
+    return decode_json(payload, f"invalid JSON in {label} {path}")
 
 
 def canonical_json_bytes(value: Any) -> bytes:
@@ -666,6 +679,8 @@ def load_snapshot(
                     f"snapshot edge count exceeds the {edge_limit}-edge safety limit"
                 )
             graphs_loaded += 1
+    if observed_registry_id is None:
+        raise ContractError("snapshot cannot establish the required registry identity")
     edge_set = tuple(sorted(set(edges)))
     return LoadedInventory(
         edges=edge_set,
@@ -815,6 +830,10 @@ def load_live_inventory(
             "The API intentionally conflates not-found and unauthorized. Use "
             "--allow-missing-graphs only for an explicitly non-strict migration census."
         )
+    if observed_registry_id is None:
+        raise ContractError(
+            "live inventory cannot establish the required registry identity from any declared graph"
+        )
     return LoadedInventory(
         edges=tuple(sorted(set(edges))),
         packages_fetched=tuple(sorted(package_summaries)),
@@ -940,44 +959,51 @@ def shortest_consumer_paths(
 
 
 def strongly_connected_components(adjacency: Mapping[str, set[str]]) -> list[list[str]]:
-    """Return deterministic non-trivial SCCs using Tarjan's algorithm."""
+    """Return deterministic non-trivial SCCs without recursion-depth limits."""
 
     nodes = sorted(set(adjacency) | {item for values in adjacency.values() for item in values})
-    index = 0
-    stack: list[str] = []
-    on_stack: set[str] = set()
-    indexes: dict[str, int] = {}
-    lowlinks: dict[str, int] = {}
+    visited: set[str] = set()
+    finish_order: list[str] = []
+    for start in nodes:
+        if start in visited:
+            continue
+        visited.add(start)
+        dfs_stack = [(start, iter(sorted(adjacency.get(start, set()))))]
+        while dfs_stack:
+            node, neighbors = dfs_stack[-1]
+            try:
+                neighbor = next(neighbors)
+            except StopIteration:
+                finish_order.append(node)
+                dfs_stack.pop()
+                continue
+            if neighbor not in visited:
+                visited.add(neighbor)
+                dfs_stack.append((neighbor, iter(sorted(adjacency.get(neighbor, set())))))
+
+    reverse: dict[str, set[str]] = defaultdict(set)
+    for source, targets in adjacency.items():
+        for target in targets:
+            reverse[target].add(source)
+
+    assigned: set[str] = set()
     result: list[list[str]] = []
-
-    def visit(node: str) -> None:
-        nonlocal index
-        indexes[node] = index
-        lowlinks[node] = index
-        index += 1
-        stack.append(node)
-        on_stack.add(node)
-        for neighbor in sorted(adjacency.get(node, set())):
-            if neighbor not in indexes:
-                visit(neighbor)
-                lowlinks[node] = min(lowlinks[node], lowlinks[neighbor])
-            elif neighbor in on_stack:
-                lowlinks[node] = min(lowlinks[node], indexes[neighbor])
-        if lowlinks[node] == indexes[node]:
-            component: list[str] = []
-            while True:
-                member = stack.pop()
-                on_stack.remove(member)
-                component.append(member)
-                if member == node:
-                    break
-            component = sorted(component)
-            if len(component) > 1 or node in adjacency.get(node, set()):
-                result.append(component)
-
-    for node in nodes:
-        if node not in indexes:
-            visit(node)
+    for start in reversed(finish_order):
+        if start in assigned:
+            continue
+        assigned.add(start)
+        component: list[str] = []
+        component_stack = [start]
+        while component_stack:
+            node = component_stack.pop()
+            component.append(node)
+            for neighbor in sorted(reverse.get(node, set()), reverse=True):
+                if neighbor not in assigned:
+                    assigned.add(neighbor)
+                    component_stack.append(neighbor)
+        component.sort()
+        if len(component) > 1 or start in adjacency.get(start, set()):
+            result.append(component)
     return sorted(result)
 
 

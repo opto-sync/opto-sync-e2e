@@ -23,7 +23,7 @@ The Zed v1 declared graph contains unresolved requirements. It is not an exact l
 
 The package index and graph authorization boundaries are different. The current package-list route enumerates the registry index, while protected graph reads require caller authorization and deliberately return the same no-store `404` for inaccessible, unknown, or absent graphs. A missing graph is therefore recorded as `not-found-or-inaccessible`; strict runs fail rather than guessing which condition occurred.
 
-Every report labels this limitation and includes an inventory digest that binds the registry identity, inventory scope, stable advertised total, selected versions, graph counts, missing-graph evidence, and exact declared edges. Pagination verifies a stable total but the current API does not expose a registry checkpoint for this declared-graph census, so the report does not claim an atomic global snapshot.
+Every report labels this limitation and includes an inventory digest that binds the registry identity, inventory scope, stable advertised total, selected versions, graph counts, missing-graph evidence, and exact declared edges. Pagination verifies a stable total but the current API does not expose a registry checkpoint for this declared-graph census, so the report does not claim an atomic global snapshot. Ambiguous duplicate JSON object keys and inventories that cannot establish one registry identity are rejected before impact evidence is rendered.
 
 ## Repository configuration
 

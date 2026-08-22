@@ -64,6 +64,20 @@ class ZedConsumerGraphTests(unittest.TestCase):
         self.assertEqual(report["cycles"], [["cycle/a", "cycle/b"]])
         self.assertEqual(report["summary"]["allDiscoveredConsumers"], 6)
 
+    def test_cycle_detection_exceeds_python_recursion_depth_safely(self):
+        node_count = 2_000
+        nodes = [f"example/node-{index:04d}" for index in range(node_count)]
+        adjacency = {
+            nodes[index]: {nodes[index + 1]}
+            for index in range(node_count - 1)
+        }
+        self.assertEqual(zed_consumer_graph.strongly_connected_components(adjacency), [])
+        adjacency[nodes[-1]] = {nodes[0]}
+        self.assertEqual(
+            zed_consumer_graph.strongly_connected_components(adjacency),
+            [nodes],
+        )
+
     def test_reconciles_discovery_with_curated_execution_metadata(self):
         report = self.build_report()
         self.assertEqual(
@@ -286,6 +300,17 @@ class ZedConsumerGraphTests(unittest.TestCase):
             server.server_close()
             thread.join(timeout=5)
 
+    def test_rejects_duplicate_json_keys_before_contract_interpretation(self):
+        with self.assertRaisesRegex(zed_consumer_graph.ContractError, "duplicate JSON object key"):
+            zed_consumer_graph.decode_json(b'{"total": 1, "total": 2}', "fixture")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "ambiguous.json"
+            path.write_text('{"schema": "first", "schema": "second"}')
+            with self.assertRaisesRegex(
+                zed_consumer_graph.ContractError,
+                "duplicate JSON object key",
+            ):
+                zed_consumer_graph.read_json(path, "ambiguous fixture")
 
     def test_rejects_graph_root_mismatch_and_invalid_digest(self):
         payload = json.loads((FIXTURES / "inventory.json").read_text())
@@ -311,6 +336,8 @@ class ZedConsumerGraphTests(unittest.TestCase):
             )
 
     def test_rejects_coordinate_and_registry_identity_injection(self):
+        with self.assertRaisesRegex(zed_consumer_graph.ContractError, "normalized package component"):
+            zed_consumer_graph.PackageCoordinate.parse(" opto-sync/opto-sync-clients")
         payload = json.loads((FIXTURES / "inventory.json").read_text())
         graph = copy.deepcopy(payload["packages"][1]["versions"][0]["graph"])
         graph["dependencies"][0]["org"] = ".."
@@ -359,6 +386,31 @@ class ZedConsumerGraphTests(unittest.TestCase):
                     version_policy="latest-visible",
                     max_edges=1,
                 )
+
+    def test_identityless_snapshot_and_live_inventory_are_rejected(self):
+        snapshot = {
+            "schema": zed_consumer_graph.SNAPSHOT_SCHEMA,
+            "versionPolicy": "latest-visible",
+            "inventoryScope": "deterministic-test",
+            "packages": [],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "identityless.json"
+            path.write_text(json.dumps(snapshot))
+            with self.assertRaisesRegex(zed_consumer_graph.ContractError, "registry identity"):
+                zed_consumer_graph.load_snapshot(path, version_policy="latest-visible")
+
+        class EmptyRegistryClient:
+            def get_json(_client, path):
+                self.assertEqual(path, "/v1/packages?limit=200&offset=0")
+                return {"items": [], "total": 0}
+
+        with self.assertRaisesRegex(zed_consumer_graph.ContractError, "registry identity"):
+            zed_consumer_graph.load_live_inventory(
+                EmptyRegistryClient(),
+                version_policy="latest-visible",
+                allow_missing_graphs=False,
+            )
 
     def test_inventory_digest_binds_scope_and_registry_identity(self):
         inventory = zed_consumer_graph.load_snapshot(
