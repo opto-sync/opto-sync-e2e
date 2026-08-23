@@ -51,8 +51,8 @@ env:
   # Exact pair certified by this E2E revision. Manual dispatch may opt into
   # candidate refs, but the sibling server core and the client repository's
   # nested gitlink must still resolve to the same commit.
-  SYNCER_C_REF: 4d0aa696a3957444197694fc9122e1bd379fccb2
-  CLIENTS_REF: b2d292316740595dba87fa6b981cfc0395d580a4
+  SYNCER_C_REF: 6bf3140a68a1ff3e70e14ce6dcd41d870b56513a
+  CLIENTS_REF: 400de2729dc4fd4eb4158ad259538dacf8a75149
 
 jobs:
   repository-contract:
