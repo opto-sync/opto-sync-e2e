@@ -16,7 +16,7 @@ MANIFEST = ROOT / ".zpkg.toml"
 LOCKFILE = ROOT / ".zpkg.lock"
 SHA = r"[0-9a-f]{40}"
 CERTIFIED_SYNCER = "6bf3140a68a1ff3e70e14ce6dcd41d870b56513a"
-CERTIFIED_CLIENTS = "64b3d903fc419c35675a2a9e7bd5e8caf9cfa988"
+CERTIFIED_CLIENTS = "5c8943dd693ab9efb9d47e25792a3a387534f12b"
 REMOTE_USE = re.compile(r"(?m)^\s*(?:-\s*)?uses:\s*([^\s#]+)")
 
 
