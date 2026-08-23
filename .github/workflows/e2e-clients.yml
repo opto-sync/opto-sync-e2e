@@ -32,8 +32,8 @@ env:
   # Exact pair certified by this E2E revision. opto-sync-clients embeds the same
   # syncer.c commit as a root gitlink; CI verifies that invariant before any
   # package manager or test code runs.
-  SYNCER_C_REF: 8d2b275a89062403666f4bdf196d246a07c84484
-  CLIENTS_REF: 68ede1dccefa9e9b7be7de5fe8441a4de7171dd1
+  SYNCER_C_REF: 4d0aa696a3957444197694fc9122e1bd379fccb2
+  CLIENTS_REF: b2d292316740595dba87fa6b981cfc0395d580a4
 
 jobs:
   client-in-the-loop:

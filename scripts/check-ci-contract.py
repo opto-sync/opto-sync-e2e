@@ -15,8 +15,8 @@ CLIENTS = ROOT / ".github/workflows/e2e-clients.yml"
 MANIFEST = ROOT / ".zpkg.toml"
 LOCKFILE = ROOT / ".zpkg.lock"
 SHA = r"[0-9a-f]{40}"
-CERTIFIED_SYNCER = "8d2b275a89062403666f4bdf196d246a07c84484"
-CERTIFIED_CLIENTS = "68ede1dccefa9e9b7be7de5fe8441a4de7171dd1"
+CERTIFIED_SYNCER = "4d0aa696a3957444197694fc9122e1bd379fccb2"
+CERTIFIED_CLIENTS = "b2d292316740595dba87fa6b981cfc0395d580a4"
 REMOTE_USE = re.compile(r"(?m)^\s*(?:-\s*)?uses:\s*([^\s#]+)")
 
 

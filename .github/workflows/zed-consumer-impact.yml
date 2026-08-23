@@ -278,7 +278,7 @@ jobs:
           {
             echo '## Opto-Sync Zed consumer impact'
             echo
-            echo 'Live graph enumeration did not run because the repository variable `ZED_REGISTRY_URL` is not configured.'
+            echo "Live graph enumeration did not run because the repository variable \`ZED_REGISTRY_URL\` is not configured."
             echo 'The deterministic API-contract fixture still ran; no claim of a live registry census, caller-authorized graph coverage, or atomic snapshot is made.'
           } >> "$GITHUB_STEP_SUMMARY"
           if [ "$REQUIRE_LIVE" = 'true' ]; then
