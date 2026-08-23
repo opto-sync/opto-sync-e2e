@@ -52,7 +52,7 @@ env:
   # candidate refs, but the sibling server core and the client repository's
   # nested gitlink must still resolve to the same commit.
   SYNCER_C_REF: 6bf3140a68a1ff3e70e14ce6dcd41d870b56513a
-  CLIENTS_REF: 400de2729dc4fd4eb4158ad259538dacf8a75149
+  CLIENTS_REF: 64b3d903fc419c35675a2a9e7bd5e8caf9cfa988
 
 jobs:
   repository-contract:
