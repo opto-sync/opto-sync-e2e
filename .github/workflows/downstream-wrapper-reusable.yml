@@ -47,6 +47,7 @@ jobs:
           import os
           import pathlib
           import re
+          import subprocess
           import tomllib
 
           def safe_path(value: str) -> pathlib.Path:
@@ -59,14 +60,52 @@ jobs:
           profile = json.loads(safe_path(os.environ['PROFILE_PATH']).read_text())
 
           dependency = 'opto-sync/opto-sync-clients'
-          assert manifest['dependencies'][dependency] == '^0.2.0'
-          assert manifest['install']['dir'] == 'zed_modules'
           assert profile['repository'] == os.environ['GITHUB_REPOSITORY']
-          assert profile['dependency'] == {
-              'package': dependency,
-              'range': '^0.2.0',
-              'installRoot': 'zed_modules/opto-sync/opto-sync-clients',
-          }
+
+          packages = lock.get('package', [])
+          if 'sourceAuthority' in profile:
+              source = profile['sourceAuthority']
+              assert 'dependency' not in profile
+              assert source['kind'] == 'git-submodules'
+              assert dependency not in manifest.get('dependencies', {})
+              safe_path(manifest['install']['dir'])
+              assert profile['releaseState'] == 'source-pinned-until-certified-package-published'
+              assert lock.get('version') == 1 and packages == []
+              assert source['installRoot'] == 'vendor'
+              for name in ('syncerC', 'clients'):
+                  pin = source[name]
+                  pin_path = safe_path(pin['path'])
+                  assert pin_path.parts[0] == source['installRoot']
+                  assert re.fullmatch(r'[0-9a-f]{40}', pin['commit'])
+                  tree_entry = subprocess.check_output(
+                      ['git', 'ls-tree', 'HEAD', '--', pin['path']], text=True
+                  ).strip()
+                  mode, object_type, commit_and_path = tree_entry.split(maxsplit=2)
+                  commit, recorded_path = commit_and_path.split('\t', maxsplit=1)
+                  assert (mode, object_type) == ('160000', 'commit')
+                  assert recorded_path == pin['path'] and commit == pin['commit']
+              adapter_root = source['clients']['path']
+          else:
+              requested = profile['dependency']
+              assert requested['package'] == dependency
+              assert requested['range'] and 'latest' not in requested['range'].lower()
+              assert manifest['dependencies'][dependency] == requested['range']
+              install_dir = manifest['install']['dir']
+              safe_path(install_dir)
+              adapter_root = f'{install_dir}/{dependency}'
+              assert requested['installRoot'] == adapter_root
+
+              if profile['releaseState'] == 'blocked-until-certified-package-published':
+                  assert lock.get('version') == 1 and packages == []
+              else:
+                  package = next(
+                      p for p in packages
+                      if p.get('org') == 'opto-sync' and p.get('name') == 'opto-sync-clients'
+                  )
+                  assert re.fullmatch(r'[0-9a-f]{64}', package['sha256'])
+                  assert re.fullmatch(r'[0-9a-f]{40}', package['vcs_commit'])
+                  assert package['size'] > 0
+                  assert package['format'] and package['vcs_tag'] and package['source']
 
           known = {
               'rust': ('opto-sync-client', 'clients/rust'),
@@ -80,7 +119,7 @@ jobs:
               path = pathlib.PurePosixPath(adapter['path'])
               assert adapter['package'] == package
               assert not path.is_absolute() and '..' not in path.parts
-              assert adapter['path'].startswith('zed_modules/opto-sync/opto-sync-clients/')
+              assert adapter['path'].startswith(adapter_root + '/')
               assert adapter['path'].endswith(suffix)
 
           persistence = profile['persistence']
@@ -101,18 +140,6 @@ jobs:
               'mutableGitRefsForbidden', 'removeBespokeCoreOnlyAfterParity',
           ):
               assert profile['invariants'][invariant] is True
-
-          packages = lock.get('package', [])
-          if profile['releaseState'] == 'blocked-until-certified-package-published':
-              assert lock.get('version') == 1 and packages == []
-          else:
-              package = next(
-                  p for p in packages
-                  if p.get('org') == 'opto-sync' and p.get('name') == 'opto-sync-clients'
-              )
-              assert re.fullmatch(r'[0-9a-f]{64}', package['sha256'])
-              assert re.fullmatch(r'[0-9a-f]{40}', package['vcs_commit'])
-              assert package['size'] > 0 and package['format'] and package['vcs_tag'] and package['source']
 
           serialized = json.dumps(profile).lower()
           for mutable in ('refs/heads/main', '"ref": "main"', '"ref": "latest"'):
