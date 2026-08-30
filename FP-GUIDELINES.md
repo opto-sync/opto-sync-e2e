@@ -138,18 +138,24 @@ Use the copying form — spread, `toSorted`, `toReversed`, `concat`, `filter` �
 
 A body over 60 lines is usually several transformations. Extract named, individually testable steps and compose them.
 
-## Language-native enforcement
+## Assurance boundary and language-native enforcement
 
-The Python scanner is the portable floor — it runs everywhere and costs nothing.
-The real type-level enforcement belongs to each toolchain, and those configs ship
-in this tree:
+The Python scanner is a portable lexical ratchet. It can prevent the currently
+recognized source patterns from increasing, including Rust wildcard arms and
+Dart `default:` arms. It does **not** parse either language, prove that a match
+is exhaustive, establish state-machine invariants, or replace compilation,
+model checking, trace replay, and runtime tests.
 
-- **Rust** — `[lints.clippy]` in `Cargo.toml`. Run `cargo clippy --all-targets`.
-- **TypeScript** — `eslint.fp.config.mjs`. Run `npx eslint -c eslint.fp.config.mjs .`
-  (needs `eslint`, `typescript-eslint` and `eslint-plugin-functional` as devDependencies).
-- **Dart** — `analysis_options.fp.yaml`. Add `include: analysis_options.fp.yaml`
-  to `analysis_options.yaml`, then run `dart analyze`.
+The remaining type-level rollout belongs to each toolchain and must be enabled
+in the repositories that own those sources:
 
-Those steps are deliberately **not** in the CI job. A toolchain install costs far
-more Actions minutes than the Python pass, and we are budget-conscious about
-runner time. Run them locally, and in the nightly job on the sibling `-test` org.
+- **Rust** — deny wildcard enum arms where they weaken a closed state machine,
+  and run formatting, Clippy, and tests on every target.
+- **TypeScript** — use discriminated unions plus an `assertNever` boundary and
+  enable `@typescript-eslint/switch-exhaustiveness-check` in typed ESLint.
+- **Dart** — use sealed types or enums, omit catch-all arms, enable analyzer
+  strictness, and run `dart analyze` plus transition-matrix tests.
+
+Those language-native gates are not added by this preservation PR. Until each
+repository has them, a green `fp-conformance` job is evidence only that the
+recorded lexical budget did not regress.
