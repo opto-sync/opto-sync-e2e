@@ -5,7 +5,7 @@
   "parentIssue": "DEN-313",
   "dependency": {
     "package": "opto-sync/opto-sync-clients",
-    "range": "^0.2.0"
+    "range": "^0.4.0"
   },
   "releaseGates": [
     "DEN-309",
@@ -572,7 +572,7 @@
     {
       "wave": "C",
       "linearIssue": "DEN-1388",
-      "repository": "StreemPilot/streempilot-sync",
+      "repository": "StreemPilot/sp-sync",
       "branch": "agent/den-1388-opto-sync-zed-adapter",
       "pullRequest": 2,
       "languages": [

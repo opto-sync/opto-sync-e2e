@@ -50,7 +50,7 @@ jobs:
           assert profile['syncRepository'] == os.environ['GITHUB_REPOSITORY']
           assert profile['dependency'] == {
               'package': 'opto-sync/opto-sync-clients',
-              'range': '^0.2.0',
+              'range': '^0.4.0',
           }
           assert profile['persistence']['web'] and profile['persistence']['backend']
           assert profile['securityExclusions']

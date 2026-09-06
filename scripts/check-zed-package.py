@@ -31,7 +31,7 @@ def main() -> int:
     assert package["repository"]["url"] == "https://github.com/opto-sync/opto-sync-e2e"
     assert manifest["dependencies"] == {
         "opto-sync/syncer": "^0.2.1",
-        "opto-sync/opto-sync-clients": "^0.2.0",
+        "opto-sync/opto-sync-clients": "^0.4.0",
     }
     assert ".env" in manifest["publish"]["exclude"]
     assert "**/*.log" in manifest["publish"]["exclude"]

@@ -16,7 +16,7 @@ The root manifest records:
 ```toml
 [dependencies]
 "opto-sync/syncer" = "^0.2.1"
-"opto-sync/opto-sync-clients" = "^0.2.0"
+"opto-sync/opto-sync-clients" = "^0.4.0"
 ```
 
 The native Docker and GitHub Actions workflows still check the repositories out
@@ -49,7 +49,7 @@ Publish in dependency order after matching reviewed tags point at each release
 commit:
 
 1. `opto-sync/syncer@0.2.1`;
-2. `opto-sync/opto-sync-clients@0.2.0`;
+2. `opto-sync/opto-sync-clients@0.4.0`;
 3. `opto-sync/opto-sync-e2e@0.1.0`.
 
 `.github/workflows/zed-publish.yml` dry-runs package publication on pull

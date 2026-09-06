@@ -115,7 +115,7 @@ def load_manifest(path: Path) -> dict[str, Any]:
         fail("fleet manifest must be a schemaVersion 1 object")
     if value.get("dependency") != {
         "package": "opto-sync/opto-sync-clients",
-        "range": "^0.2.0",
+        "range": "^0.4.0",
     }:
         fail("fleet dependency contract changed unexpectedly")
     return value
@@ -245,7 +245,7 @@ def validate_profile(profile):
     assert profile["releaseState"] == "blocked-until-certified-package-published"
     assert profile["dependency"] == {
         "package": "opto-sync/opto-sync-clients",
-        "range": "^0.2.0",
+        "range": "^0.4.0",
         "installRoot": "zed_modules/opto-sync/opto-sync-clients",
     }
     assert profile["wrapperRef"].startswith("agent/den-")
@@ -263,7 +263,7 @@ def validate_wrapper(profile, wrapper, live):
     manifest = tomllib.loads((wrapper / ".zpkg.toml").read_text())
     lock = tomllib.loads((wrapper / ".zpkg.lock").read_text())
     adapter = load(wrapper / "opto-sync-adapter.json")
-    assert manifest["dependencies"]["opto-sync/opto-sync-clients"] == "^0.2.0"
+    assert manifest["dependencies"]["opto-sync/opto-sync-clients"] == "^0.4.0"
     assert manifest["install"]["dir"] == "zed_modules"
     assert adapter["repository"] == profile["wrapperRepository"]
     assert adapter["e2eRepository"] == profile["e2eRepository"]
@@ -346,7 +346,7 @@ async function openClient(databaseName) {
 
 test("generated profile preserves product policy above the shared engine", () => {
   assert.equal(profile.dependency.package, "opto-sync/opto-sync-clients");
-  assert.equal(profile.dependency.range, "^0.2.0");
+  assert.equal(profile.dependency.range, "^0.4.0");
   assert.ok(profile.domainGuards.length >= 2);
   assert.ok(profile.persistence.includes("postgres"));
   assert.ok(profile.persistence.includes("supabase"));
