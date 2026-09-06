@@ -572,7 +572,7 @@
     {
       "wave": "C",
       "linearIssue": "DEN-1388",
-      "repository": "StreemPilot/streempilot-sync",
+      "repository": "StreemPilot/sp-sync",
       "branch": "agent/den-1388-opto-sync-zed-adapter",
       "pullRequest": 2,
       "languages": [
