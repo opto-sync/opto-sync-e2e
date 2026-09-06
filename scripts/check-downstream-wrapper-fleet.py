@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MANIFEST = ROOT / "operations/downstream-wrapper-fleet.v1.json"
 EXPECTED_DEPENDENCY = {
     "package": "opto-sync/opto-sync-clients",
-    "range": "^0.2.0",
+    "range": "^0.4.0",
 }
 EXPECTED_RELEASE_GATES = {"DEN-309", "DEN-363"}
 EXPECTED_WAVE_COUNTS = {"A": 3, "B": 9, "C": 5}
@@ -144,7 +144,7 @@ def validate_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
     if manifest.get("parentIssue") != "DEN-313":
         fail("parentIssue must be DEN-313")
     if manifest.get("dependency") != EXPECTED_DEPENDENCY:
-        fail("dependency must be opto-sync/opto-sync-clients@^0.2.0")
+        fail("dependency must be opto-sync/opto-sync-clients@^0.4.0")
     release_gates = require_unique_strings(manifest.get("releaseGates"), "releaseGates", minimum=2)
     if set(release_gates) != EXPECTED_RELEASE_GATES:
         fail("releaseGates must contain exactly DEN-309 and DEN-363")

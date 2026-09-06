@@ -42,7 +42,7 @@ the overridden client ref must still embed the same core selected by
 ## Zed package relationship
 
 The E2E source package records compatible ranges for
-`opto-sync/syncer@^0.2.1` and `opto-sync/opto-sync-clients@^0.2.0`. Those ranges
+`opto-sync/syncer@^0.2.1` and `opto-sync/opto-sync-clients@^0.4.0`. Those ranges
 express release compatibility, while the workflow SHAs identify the exact pair
 certified by this E2E commit. Both are required:
 

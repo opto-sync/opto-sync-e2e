@@ -5,7 +5,7 @@
   "parentIssue": "DEN-313",
   "dependency": {
     "package": "opto-sync/opto-sync-clients",
-    "range": "^0.2.0"
+    "range": "^0.4.0"
   },
   "releaseGates": [
     "DEN-309",

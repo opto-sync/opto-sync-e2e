@@ -15,8 +15,8 @@ CLIENTS = ROOT / ".github/workflows/e2e-clients.yml"
 MANIFEST = ROOT / ".zpkg.toml"
 LOCKFILE = ROOT / ".zpkg.lock"
 SHA = r"[0-9a-f]{40}"
-CERTIFIED_SYNCER = "6bf3140a68a1ff3e70e14ce6dcd41d870b56513a"
-CERTIFIED_CLIENTS = "5c8943dd693ab9efb9d47e25792a3a387534f12b"
+CERTIFIED_SYNCER = "daade9935ce59a2fe84ec8b407d75ad1200428ed"
+CERTIFIED_CLIENTS = "7629c7709248c923cc969e2f4f94e527986c8426"
 REMOTE_USE = re.compile(r"(?m)^\s*(?:-\s*)?uses:\s*([^\s#]+)")
 
 
@@ -144,8 +144,8 @@ def main() -> int:
     dependencies = manifest.get("dependencies", {})
     if dependencies.get("opto-sync/syncer") != "^0.2.1":
         fail("the E2E Zed package must depend on opto-sync/syncer ^0.2.1")
-    if dependencies.get("opto-sync/opto-sync-clients") != "^0.2.0":
-        fail("the E2E Zed package must depend on opto-sync/opto-sync-clients ^0.2.0")
+    if dependencies.get("opto-sync/opto-sync-clients") != "^0.4.0":
+        fail("the E2E Zed package must depend on opto-sync/opto-sync-clients ^0.4.0")
     if read_toml(LOCKFILE).get("version") != 1:
         fail(".zpkg.lock must declare format version 1")
 
