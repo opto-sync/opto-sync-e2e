@@ -38,6 +38,8 @@ const MAX_FRAME_BYTES = 32 * 1024 * 1024;
  * strictly better than growing the buffer of an already-slow consumer.
  */
 export const MAX_BROADCAST_BUFFERED_BYTES = 1024 * 1024;
+/** Bound concurrent async handlers retained by one WebSocket peer. */
+export const MAX_WS_IN_FLIGHT_FRAMES = 32;
 
 // ── Change hub ───────────────────────────────────────────────────────────
 
@@ -332,13 +334,32 @@ export function attachWebSocketTransport(
       connection,
     );
     hub.add(connection);
-    client.on("close", () => hub.remove(connection));
-    client.on("error", () => {
-      // `close` follows and cleans up; an errored peer must not crash us.
-    });
-    client.on("message", (data) => {
+    let inFlightFrames = 0;
+    let terminal = false;
+    const retire = () => {
+      if (terminal) return;
+      terminal = true;
+      hub.remove(connection);
+    };
+    client.on("close", retire);
+    client.on("error", retire);
+    client.on("message", (data, isBinary) => {
+      if (terminal) return;
+      if (isBinary) {
+        retire();
+        client.close(1003, "text frames required");
+        return;
+      }
+      if (inFlightFrames >= MAX_WS_IN_FLIGHT_FRAMES) {
+        retire();
+        client.close(1013, "too many in-flight frames");
+        return;
+      }
+      inFlightFrames += 1;
       void routeFrame(data.toString(), handlers, (frame) => {
         if (client.readyState === client.OPEN) client.send(JSON.stringify(frame));
+      }).finally(() => {
+        inFlightFrames -= 1;
       });
     });
   };
