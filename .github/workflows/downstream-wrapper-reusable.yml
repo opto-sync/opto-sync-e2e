@@ -55,18 +55,28 @@ jobs:
               return pathlib.Path(value)
 
           manifest = tomllib.loads(safe_path(os.environ['MANIFEST_PATH']).read_text())
+          manifest_text = safe_path(os.environ['MANIFEST_PATH']).read_text()
           lock = tomllib.loads(safe_path(os.environ['LOCK_PATH']).read_text())
           profile = json.loads(safe_path(os.environ['PROFILE_PATH']).read_text())
 
           dependency = 'opto-sync/opto-sync-clients'
-          assert manifest['dependencies'][dependency] == '^0.2.0'
+          expected_range = profile['dependency']['range']
+          assert re.fullmatch(r'\^[0-9]+\.[0-9]+\.[0-9]+', expected_range)
           assert manifest['install']['dir'] == 'zed_modules'
           assert profile['repository'] == os.environ['GITHUB_REPOSITORY']
           assert profile['dependency'] == {
               'package': dependency,
-              'range': '^0.2.0',
+              'range': expected_range,
               'installRoot': 'zed_modules/opto-sync/opto-sync-clients',
           }
+          if profile['releaseState'] == 'blocked-until-certified-package-published':
+              # A blocked adapter records the reviewed package range in the
+              # manifest comments but must not claim an unresolved dependency
+              # or fabricate lock evidence.
+              assert dependency not in manifest.get('dependencies', {})
+              assert f'opto-sync/opto-sync-clients@{expected_range}' in manifest_text
+          else:
+              assert manifest['dependencies'][dependency] == expected_range
 
           known = {
               'rust': ('opto-sync-client', 'clients/rust'),
