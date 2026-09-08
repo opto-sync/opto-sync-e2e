@@ -1,7 +1,7 @@
 {
   "dependency": {
     "package": "opto-sync/opto-sync-clients",
-    "range": "^0.4.0"
+    "range": "^0.5.0"
   },
   "schemaVersion": 1,
   "wrappers": [
