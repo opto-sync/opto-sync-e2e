@@ -62,7 +62,7 @@ jobs:
             suite.operations.test_missing_e2e_bootstrap \
             -v
 
-      - name: Render the deterministic 32-target read-only plan twice
+      - name: Render the deterministic 34-target read-only plan twice
         shell: bash
         run: |
           set -euo pipefail
@@ -82,12 +82,12 @@ jobs:
               'ZED_INTERFACES_SHA': 'c2e049006453c26ca8ca291783f681fce75cb01f',
           }
           assert plan['summary'] == {
-              'targets': 32,
+              'targets': 34,
               'wrappers': 17,
-              'e2e': 15,
-              'provisioningRequired': 2,
+              'e2e': 17,
+              'provisioningRequired': 0,
           }
-          assert len({(item['repository'], item['path']) for item in plan['targets']}) == 32
+          assert len({(item['repository'], item['path']) for item in plan['targets']}) == 34
           PY
 
       - name: Render both missing E2E starters and prove their final package-plane pins
@@ -121,7 +121,7 @@ jobs:
           retention-days: 14
 
   live-audit:
-    name: Read all 32 adoption workflows and reject stale Zed pins
+    name: Read all 34 adoption workflows and reject stale Zed pins
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.live_audit }}
     needs:
       - static-contract
@@ -169,8 +169,8 @@ jobs:
           report = json.load(open('final-zed-pin-audit.json'))
           assert report['readOnly'] is True
           assert report['summary'] == {
-              'targets': 32,
-              'passed': 32,
+              'targets': 34,
+              'passed': 34,
               'failed': 0,
           }
           PY
