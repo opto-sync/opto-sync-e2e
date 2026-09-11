@@ -181,13 +181,21 @@ function connectWs(url, label) {
       () => socket.close(),
       label,
     );
+    let resolveClosed;
+    client.closed = new Promise((resolveClose) => {
+      resolveClosed = resolveClose;
+    });
+    client.sendBinary = (bytes) => socket.send(bytes);
     const timer = setTimeout(() => reject(new Error(`${label}: dial timed out`)), 10_000);
     socket.addEventListener("open", () => {
       clearTimeout(timer);
       resolveConnect(client);
     });
     socket.addEventListener("message", (event) => client.handleFrame(String(event.data)));
-    socket.addEventListener("close", () => client.fail(new Error(`${label} closed`)));
+    socket.addEventListener("close", (event) => {
+      resolveClosed({ code: event.code, reason: event.reason });
+      client.fail(new Error(`${label} closed`));
+    });
     socket.addEventListener("error", () => {
       clearTimeout(timer);
       reject(new Error(`${label}: websocket error`));
@@ -349,6 +357,20 @@ await test("reset clears protocol state", async () => {
 
 const wsA = await connectWs(wsUrl, "ws-a");
 const wsB = await connectWs(wsUrl, "ws-b");
+
+await test("websocket rejects binary frames and keeps the server healthy", async () => {
+  const binary = await connectWs(wsUrl, "ws-binary");
+  binary.sendBinary(new Uint8Array([1, 2, 3]));
+  const closed = await Promise.race([
+    binary.closed,
+    sleep(5_000).then(() => {
+      throw new Error("binary websocket was not closed");
+    }),
+  ]);
+  equal(closed.code, 1003);
+  const health = await request("GET", "/health");
+  equal(health.status, 200);
+});
 
 await transportParitySuite("websocket", wsA, wsB, "ws-tp");
 
