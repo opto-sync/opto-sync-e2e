@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "opto-sync.partial-sync-trace.v1",
+  "kind": "schema-optional-field-truncation",
+  "events": [
+    { "type": "decode", "clientVersion": 1, "serverVersion": 2, "payload": { "id": "x", "title": "hello", "note": "must-survive" } },
+    { "type": "reencode", "clientVersion": 1, "serverVersion": 2 }
+  ]
+}

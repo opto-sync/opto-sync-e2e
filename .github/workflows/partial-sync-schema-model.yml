@@ -1,30 +1,30 @@
-name: Model-based convergence
+name: Partial sync and schema model
 
 on:
   pull_request:
     paths:
-      - 'formal/model-based-convergence.mjs'
-      - 'formal/counterexamples/**'
-      - 'formal/procedure.toml'
-      - 'suite/conformance/scenarios/06-convergence.mjs'
-      - '.github/workflows/model-based-convergence.yml'
+      - 'formal/partial-sync-schema-model.mjs'
+      - 'formal/counterexamples/control-delete-by-filter-absence.v1.json'
+      - 'formal/counterexamples/control-cross-tenant-index-leak.v1.json'
+      - 'formal/counterexamples/control-schema-truncation.v1.json'
+      - '.github/workflows/partial-sync-schema-model.yml'
   push:
     branches: [main]
     paths:
-      - 'formal/model-based-convergence.mjs'
-      - 'formal/counterexamples/**'
-      - 'formal/procedure.toml'
-      - 'suite/conformance/scenarios/06-convergence.mjs'
-      - '.github/workflows/model-based-convergence.yml'
+      - 'formal/partial-sync-schema-model.mjs'
+      - 'formal/counterexamples/control-delete-by-filter-absence.v1.json'
+      - 'formal/counterexamples/control-cross-tenant-index-leak.v1.json'
+      - 'formal/counterexamples/control-schema-truncation.v1.json'
+      - '.github/workflows/partial-sync-schema-model.yml'
   schedule:
-    - cron: '11 5 * * *'
+    - cron: '29 5 * * *'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: model-based-convergence-${{ github.workflow }}-${{ github.ref }}
+  group: partial-sync-schema-model-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -34,8 +34,8 @@ env:
   SYNCER_RS_SHA: 4270bf9a5912e2c8a37bf844c12046c21a804dd5
 
 jobs:
-  reduced-model:
-    name: seeded transport/replay model + broken-control proof
+  partial-sync-schema:
+    name: filter/tenant/schema seeded model + broken controls
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -91,7 +91,7 @@ jobs:
           test "$(git -C source/syncer-c-main rev-parse HEAD)" = "$SYNCER_C_MAIN_SHA"
           test "$(git -C source/syncer-rs rev-parse HEAD)" = "$SYNCER_RS_SHA"
 
-      - name: Execute seeded reduced model and prove checker sensitivity
+      - name: Execute partial/filter and mixed-version model
         working-directory: controller
         env:
           OPTO_SYNC_E2E_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -101,27 +101,29 @@ jobs:
           SYNCER_RS_SHA: ${{ env.SYNCER_RS_SHA }}
         run: |
           set -euo pipefail
-          node --check formal/model-based-convergence.mjs
-          node formal/model-based-convergence.mjs \
-            --seeds 1,7,42,20260912 \
-            --control-fixture formal/counterexamples/control-drop-tombstone.v1.json \
-            --receipt artifacts/model-based-convergence.json
+          node --check formal/partial-sync-schema-model.mjs
+          node formal/partial-sync-schema-model.mjs \
+            --seeds 3,17,42,20260912 \
+            --fixture-dir formal/counterexamples \
+            --receipt artifacts/partial-sync-schema-model.json
           python3 - <<'PY'
           import json
           from pathlib import Path
-          receipt = json.loads(Path('artifacts/model-based-convergence.json').read_text())
+          receipt = json.loads(Path('artifacts/partial-sync-schema-model.json').read_text())
           assert receipt['runtimeReplay']['status'] == 'modeling-only'
-          assert receipt['checkerControl']['detected'] is True
-          assert receipt['checkerControl']['minimizedEventCount'] == 2
           assert len(receipt['seeds']) == 4
-          assert all(item['mutationCount'] == 24 for item in receipt['seeds'])
+          assert len(receipt['controls']) == 3
+          assert all(control['diverges'] for control in receipt['controls'])
+          assert all(len(control['events']) == 2 for control in receipt['controls'])
+          assert any(row['mode'] == 'refuse' for row in receipt['compatibilityMatrix'])
           assert 'no CRDT' in receipt['guaranteeScope']
+          assert 'must not mutate server schema' in receipt['migrationPolicy']
           PY
 
-      - name: Upload exact-head model receipt
+      - name: Upload exact-head partial-sync receipt
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: model-based-convergence-${{ github.run_id }}-${{ github.run_attempt }}
-          path: controller/artifacts/model-based-convergence.json
+          name: partial-sync-schema-model-${{ github.run_id }}-${{ github.run_attempt }}
+          path: controller/artifacts/partial-sync-schema-model.json
           if-no-files-found: error
           retention-days: 30

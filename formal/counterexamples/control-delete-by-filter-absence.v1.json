@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "opto-sync.partial-sync-trace.v1",
+  "kind": "deletion-by-filter-absence",
+  "events": [
+    { "type": "seed-cache", "entities": ["alpha", "beta"] },
+    { "type": "partial-page", "entities": ["alpha"], "complete": false }
+  ]
+}
