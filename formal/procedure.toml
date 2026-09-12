@@ -48,10 +48,11 @@ review_triggers = ["auth mode", "claim mapping", "tenant filter", "client bindin
 [[machine]]
 id = "cross-runtime-convergence"
 risk = "high"
-status = "planned"
+status = "modeling"
 backend = "differential-system-replay"
 owner = "opto-sync-conformance"
 source_paths = ["suite/cross-server", "suite/clients", "suite/conformance"]
+model_paths = ["formal/model-based-convergence.mjs", "formal/counterexamples/control-drop-tombstone.v1.json"]
 safety = [
   "all applicable runtimes apply the same documented merge policy",
   "noncontending mutations converge independent of permitted apply order",
