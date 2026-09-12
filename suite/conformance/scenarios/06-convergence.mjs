@@ -1,5 +1,9 @@
 /**
- * Scenario 6 — convergence / order-independence. The core CRDT promise.
+ * Scenario 6 — convergence / order-independence for the documented merge-policy subset.
+ *
+ * This is deliberately NOT a CRDT, OT, or causal-consistency claim. It exercises
+ * the order-independent subset that the current timestamp/keyed-array merge
+ * policy actually implements and pins an explicit order-dependent boundary.
  *
  * Four "concurrent" client mutations are applied in EVERY one of the 4! = 24
  * orders, with a /reset between runs, and all 24 final documents must be
@@ -73,7 +77,7 @@ const MUTATIONS = {
 const NAMES = ["M1", "M2", "M3", "M4"];
 
 export default {
-  name: "6. Convergence under reordering (CRDT promise)",
+  name: "6. Convergence under reordering (documented merge-policy subset)",
   cases: [
     {
       name: "all 24 permutations of 4 concurrent mutations converge to one document",
