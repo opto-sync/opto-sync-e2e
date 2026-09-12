@@ -119,19 +119,17 @@ function parseJson(raw: string, variable: string): unknown {
 
 function loadStaticEntries(env: NodeJS.ProcessEnv): AuthEntry[] {
   const configured = env.SYNCER_PROTOCOL_AUTH_JSON;
-  let raw: unknown;
-  if (configured !== undefined) {
-    raw = parseJson(configured, "SYNCER_PROTOCOL_AUTH_JSON");
-  } else {
-    const token = env.SYNCER_PROTOCOL_BEARER_TOKEN;
-    const subject = env.SYNCER_PROTOCOL_SUBJECT;
-    const tenantId = env.SYNCER_PROTOCOL_TENANT_ID;
-    const clientIds = env.SYNCER_PROTOCOL_CLIENT_IDS
-      ?.split(",")
-      .map((value) => value.trim())
-      .filter(Boolean);
-    raw = [{ token, subject, tenantId, clientIds }];
-  }
+  const raw: unknown = configured !== undefined
+    ? parseJson(configured, "SYNCER_PROTOCOL_AUTH_JSON")
+    : [{
+        token: env.SYNCER_PROTOCOL_BEARER_TOKEN,
+        subject: env.SYNCER_PROTOCOL_SUBJECT,
+        tenantId: env.SYNCER_PROTOCOL_TENANT_ID,
+        clientIds: env.SYNCER_PROTOCOL_CLIENT_IDS
+          ?.split(",")
+          .map((value) => value.trim())
+          .filter(Boolean),
+      }];
 
   const parsed = AuthConfigSchema.safeParse(raw);
   if (!parsed.success) {
@@ -193,18 +191,22 @@ function identityFromJwt(
     return null;
   }
 
-  let clientIds: ReadonlySet<string> | null = null;
-  if (config.clientIdsClaim !== null) {
-    const parsed = z
-      .array(ClientId)
-      .min(1)
-      .max(100)
-      .safeParse(claimAt(payload, config.clientIdsClaim));
-    if (!parsed.success || new Set(parsed.data).size !== parsed.data.length) {
-      return null;
-    }
-    clientIds = new Set(parsed.data);
+  const parsedClientIds = config.clientIdsClaim === null
+    ? null
+    : z
+        .array(ClientId)
+        .min(1)
+        .max(100)
+        .safeParse(claimAt(payload, config.clientIdsClaim));
+  if (
+    parsedClientIds !== null &&
+    (!parsedClientIds.success || new Set(parsedClientIds.data).size !== parsedClientIds.data.length)
+  ) {
+    return null;
   }
+  const clientIds: ReadonlySet<string> | null = parsedClientIds === null
+    ? null
+    : new Set(parsedClientIds.data);
   return {
     subject: subject.data,
     tenantId: tenantId.data,
