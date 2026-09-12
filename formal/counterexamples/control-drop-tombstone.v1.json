@@ -1,0 +1,29 @@
+{
+  "schemaVersion": "opto-sync.model-trace.v1",
+  "kind": "checker-control",
+  "description": "Intentional broken-mutation control: a reducer that drops an explicit tombstone turns durable deletion state into absence. This is a checker test, not a product incident.",
+  "implementationCommits": {
+    "e2eBase": "8ed3687e2bc4d7642a1650cb8d564dfc7fc0bc6e",
+    "clients": "e3c51cde642ae384defebe5ed0829065cb9ddcff",
+    "syncerCMain": "bb9e4283a9a0abaf4243c150c9a8f868368a3dc7",
+    "syncerCClientGitlink": "daade9935ce59a2fe84ec8b407d75ad1200428ed",
+    "syncerRust": "cceb149f73a1a2783af44dfd49aa046063e23baa"
+  },
+  "events": [
+    {
+      "clientId": "ts-a1b2c3",
+      "mutationId": 1,
+      "entityId": "zombie",
+      "op": "upsert",
+      "updatedAt": "0000000001000-0000-a1b2c3",
+      "value": { "value": "old" }
+    },
+    {
+      "clientId": "ts-a1b2c3",
+      "mutationId": 2,
+      "entityId": "zombie",
+      "op": "delete",
+      "updatedAt": "0000000002000-0000-a1b2c3"
+    }
+  ]
+}
