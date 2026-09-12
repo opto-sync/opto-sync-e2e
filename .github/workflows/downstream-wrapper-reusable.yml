@@ -43,10 +43,12 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'PY'
+          import configparser
           import json
           import os
           import pathlib
           import re
+          import subprocess
           import tomllib
 
           def safe_path(value: str) -> pathlib.Path:
@@ -54,29 +56,87 @@ jobs:
               assert value and not path.is_absolute() and '..' not in path.parts
               return pathlib.Path(value)
 
-          manifest = tomllib.loads(safe_path(os.environ['MANIFEST_PATH']).read_text())
-          manifest_text = safe_path(os.environ['MANIFEST_PATH']).read_text()
-          lock = tomllib.loads(safe_path(os.environ['LOCK_PATH']).read_text())
-          profile = json.loads(safe_path(os.environ['PROFILE_PATH']).read_text())
+          manifest_path = safe_path(os.environ['MANIFEST_PATH'])
+          lock_path = safe_path(os.environ['LOCK_PATH'])
+          profile_path = safe_path(os.environ['PROFILE_PATH'])
+          manifest_text = manifest_path.read_text()
+          manifest = tomllib.loads(manifest_text)
+          lock = tomllib.loads(lock_path.read_text())
+          profile = json.loads(profile_path.read_text())
 
           dependency = 'opto-sync/opto-sync-clients'
-          expected_range = profile['dependency']['range']
-          assert re.fullmatch(r'\^[0-9]+\.[0-9]+\.[0-9]+', expected_range)
-          assert manifest['install']['dir'] == 'zed_modules'
           assert profile['repository'] == os.environ['GITHUB_REPOSITORY']
-          assert profile['dependency'] == {
-              'package': dependency,
-              'range': expected_range,
-              'installRoot': 'zed_modules/opto-sync/opto-sync-clients',
-          }
-          if profile['releaseState'] == 'blocked-until-certified-package-published':
-              # A blocked adapter records the reviewed package range in the
-              # manifest comments but must not claim an unresolved dependency
-              # or fabricate lock evidence.
+          packages = lock.get('package', [])
+
+          if 'sourceAuthority' in profile:
+              # Pre-publication wrappers may consume immutable Git submodules,
+              # but a copied directory or merely documented SHA is not source
+              # identity. Require an actual HEAD gitlink plus canonical .gitmodules
+              # URL for both the C core and client repository.
+              source = profile['sourceAuthority']
+              assert 'dependency' not in profile
+              assert source['kind'] == 'git-submodules'
+              assert source['installRoot'] == 'vendor'
+              assert profile['releaseState'] == 'source-pinned-until-certified-package-published'
               assert dependency not in manifest.get('dependencies', {})
-              assert f'opto-sync/opto-sync-clients@{expected_range}' in manifest_text
+              safe_path(manifest['install']['dir'])
+              assert lock.get('version') == 1 and packages == []
+
+              gitmodules_path = pathlib.Path('.gitmodules')
+              assert gitmodules_path.is_file()
+              modules = configparser.ConfigParser()
+              modules.read_string(gitmodules_path.read_text())
+              expected_sources = {
+                  'syncerC': 'https://github.com/opto-sync/syncer.c.git',
+                  'clients': 'https://github.com/opto-sync/opto-sync-clients.git',
+              }
+              for name, expected_url in expected_sources.items():
+                  pin = source[name]
+                  pin_path = safe_path(pin['path'])
+                  assert pin_path.parts[0] == source['installRoot']
+                  assert re.fullmatch(r'[0-9a-f]{40}', pin['commit'])
+
+                  tree_entry = subprocess.check_output(
+                      ['git', 'ls-tree', 'HEAD', '--', pin['path']], text=True
+                  ).strip()
+                  mode, object_type, commit_and_path = tree_entry.split(maxsplit=2)
+                  commit, recorded_path = commit_and_path.split('\t', maxsplit=1)
+                  assert (mode, object_type) == ('160000', 'commit')
+                  assert recorded_path == pin['path'] and commit == pin['commit']
+
+                  section = f'submodule "{pin["path"]}"'
+                  assert modules.has_section(section)
+                  assert modules.get(section, 'path') == pin['path']
+                  assert modules.get(section, 'url') == expected_url
+
+              adapter_root = source['clients']['path']
           else:
-              assert manifest['dependencies'][dependency] == expected_range
+              # Registry-package mode is version-aware. A blocked adapter may
+              # document a reviewed range while keeping manifest + lock
+              # unresolved; once releaseState is publishable, both dependency
+              # declaration and immutable lock evidence are mandatory.
+              expected_range = profile['dependency']['range']
+              assert re.fullmatch(r'\^[0-9]+\.[0-9]+\.[0-9]+', expected_range)
+              assert manifest['install']['dir'] == 'zed_modules'
+              assert profile['dependency'] == {
+                  'package': dependency,
+                  'range': expected_range,
+                  'installRoot': 'zed_modules/opto-sync/opto-sync-clients',
+              }
+              if profile['releaseState'] == 'blocked-until-certified-package-published':
+                  assert dependency not in manifest.get('dependencies', {})
+                  assert f'opto-sync/opto-sync-clients@{expected_range}' in manifest_text
+                  assert lock.get('version') == 1 and packages == []
+              else:
+                  assert manifest['dependencies'][dependency] == expected_range
+                  package = next(
+                      p for p in packages
+                      if p.get('org') == 'opto-sync' and p.get('name') == 'opto-sync-clients'
+                  )
+                  assert re.fullmatch(r'[0-9a-f]{64}', package['sha256'])
+                  assert re.fullmatch(r'[0-9a-f]{40}', package['vcs_commit'])
+                  assert package['size'] > 0 and package['format'] and package['vcs_tag'] and package['source']
+              adapter_root = profile['dependency']['installRoot']
 
           known = {
               'rust': ('opto-sync-client', 'clients/rust'),
@@ -90,7 +150,7 @@ jobs:
               path = pathlib.PurePosixPath(adapter['path'])
               assert adapter['package'] == package
               assert not path.is_absolute() and '..' not in path.parts
-              assert adapter['path'].startswith('zed_modules/opto-sync/opto-sync-clients/')
+              assert adapter['path'].startswith(adapter_root + '/')
               assert adapter['path'].endswith(suffix)
 
           persistence = profile['persistence']
@@ -111,18 +171,6 @@ jobs:
               'mutableGitRefsForbidden', 'removeBespokeCoreOnlyAfterParity',
           ):
               assert profile['invariants'][invariant] is True
-
-          packages = lock.get('package', [])
-          if profile['releaseState'] == 'blocked-until-certified-package-published':
-              assert lock.get('version') == 1 and packages == []
-          else:
-              package = next(
-                  p for p in packages
-                  if p.get('org') == 'opto-sync' and p.get('name') == 'opto-sync-clients'
-              )
-              assert re.fullmatch(r'[0-9a-f]{64}', package['sha256'])
-              assert re.fullmatch(r'[0-9a-f]{40}', package['vcs_commit'])
-              assert package['size'] > 0 and package['format'] and package['vcs_tag'] and package['source']
 
           serialized = json.dumps(profile).lower()
           for mutable in ('refs/heads/main', '"ref": "main"', '"ref": "latest"'):
