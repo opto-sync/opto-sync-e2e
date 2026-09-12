@@ -28,10 +28,10 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  CLIENTS_SHA: e3c51cde642ae384defebe5ed0829065cb9ddcff
+  CLIENTS_SHA: dd87cc1555d8dac1c2955489cabcb419e288cb53
   SYNCER_C_CLIENT_GITLINK_SHA: daade9935ce59a2fe84ec8b407d75ad1200428ed
   SYNCER_C_MAIN_SHA: bb9e4283a9a0abaf4243c150c9a8f868368a3dc7
-  SYNCER_RS_SHA: cceb149f73a1a2783af44dfd49aa046063e23baa
+  SYNCER_RS_SHA: 4270bf9a5912e2c8a37bf844c12046c21a804dd5
 
 jobs:
   reduced-model:
