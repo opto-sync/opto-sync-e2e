@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "opto-sync.partial-sync-trace.v1",
+  "kind": "cross-tenant-index-retention",
+  "events": [
+    { "type": "seed-index", "tenantId": "tenant-a", "entityId": "a-secret", "tag": "blue" },
+    { "type": "switch-tenant", "tenantId": "tenant-b", "filter": ["blue"] }
+  ]
+}
