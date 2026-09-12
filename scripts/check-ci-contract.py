@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = ROOT / ".github/workflows"
 DOCKER = ROOT / ".github/workflows/e2e-docker.yml"
 CLIENTS = ROOT / ".github/workflows/e2e-clients.yml"
+DOWNSTREAM = ROOT / ".github/workflows/downstream-wrapper-reusable.yml"
 MANIFEST = ROOT / ".zpkg.toml"
 LOCKFILE = ROOT / ".zpkg.lock"
 SHA = r"[0-9a-f]{40}"
@@ -71,8 +72,38 @@ def check_workflow_supply_chain() -> None:
         fail("\n".join(failures))
 
 
+def check_downstream_source_authority() -> None:
+    text = DOWNSTREAM.read_text(encoding="utf-8")
+    required = (
+        "'sourceAuthority' in profile",
+        "source['kind'] == 'git-submodules'",
+        "profile['releaseState'] == 'source-pinned-until-certified-package-published'",
+        "['git', 'ls-tree', 'HEAD', '--', pin['path']]",
+        "(mode, object_type) == ('160000', 'commit')",
+        "https://github.com/opto-sync/syncer.c.git",
+        "https://github.com/opto-sync/opto-sync-clients.git",
+        "assert lock.get('version') == 1 and packages == []",
+        "dependency not in manifest.get('dependencies', {})",
+    )
+    for marker in required:
+        if marker not in text:
+            fail(f"{DOWNSTREAM}: missing immutable source-authority guard: {marker}")
+
+    # Both authority modes must remain explicit. A source-pinned wrapper is not a
+    # package-consumption claim, while a publishable package consumer must carry
+    # immutable lock evidence.
+    for marker in (
+        "expected_range = profile['dependency']['range']",
+        "re.fullmatch(r'[0-9a-f]{64}', package['sha256'])",
+        "re.fullmatch(r'[0-9a-f]{40}', package['vcs_commit'])",
+    ):
+        if marker not in text:
+            fail(f"{DOWNSTREAM}: missing registry source-identity guard: {marker}")
+
+
 def main() -> int:
     check_workflow_supply_chain()
+    check_downstream_source_authority()
     docker = DOCKER.read_text(encoding="utf-8")
     clients = CLIENTS.read_text(encoding="utf-8")
 
