@@ -1,0 +1,129 @@
+name: Partial sync and schema model
+
+on:
+  pull_request:
+    paths:
+      - 'formal/partial-sync-schema-model.mjs'
+      - 'formal/counterexamples/control-delete-by-filter-absence.v1.json'
+      - 'formal/counterexamples/control-cross-tenant-index-leak.v1.json'
+      - 'formal/counterexamples/control-schema-truncation.v1.json'
+      - '.github/workflows/partial-sync-schema-model.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'formal/partial-sync-schema-model.mjs'
+      - 'formal/counterexamples/control-delete-by-filter-absence.v1.json'
+      - 'formal/counterexamples/control-cross-tenant-index-leak.v1.json'
+      - 'formal/counterexamples/control-schema-truncation.v1.json'
+      - '.github/workflows/partial-sync-schema-model.yml'
+  schedule:
+    - cron: '29 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: partial-sync-schema-model-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CLIENTS_SHA: dd87cc1555d8dac1c2955489cabcb419e288cb53
+  SYNCER_C_CLIENT_GITLINK_SHA: daade9935ce59a2fe84ec8b407d75ad1200428ed
+  SYNCER_C_MAIN_SHA: bb9e4283a9a0abaf4243c150c9a8f868368a3dc7
+  SYNCER_RS_SHA: 4270bf9a5912e2c8a37bf844c12046c21a804dd5
+
+jobs:
+  partial-sync-schema:
+    name: filter/tenant/schema seeded model + broken controls
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact controller head
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          path: controller
+          persist-credentials: false
+
+      - name: Checkout exact client source identity
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: opto-sync/opto-sync-clients
+          ref: ${{ env.CLIENTS_SHA }}
+          path: source/clients
+          persist-credentials: false
+
+      - name: Checkout client-paired C core
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: opto-sync/syncer.c
+          ref: ${{ env.SYNCER_C_CLIENT_GITLINK_SHA }}
+          path: source/syncer-c-client-gitlink
+          persist-credentials: false
+
+      - name: Checkout current C core head snapshot
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: opto-sync/syncer.c
+          ref: ${{ env.SYNCER_C_MAIN_SHA }}
+          path: source/syncer-c-main
+          persist-credentials: false
+
+      - name: Checkout current Rust engine head snapshot
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: opto-sync/syncer.rs
+          ref: ${{ env.SYNCER_RS_SHA }}
+          path: source/syncer-rs
+          persist-credentials: false
+
+      - name: Verify exact source identities before modeling
+        shell: bash
+        env:
+          OPTO_SYNC_E2E_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git -C controller rev-parse HEAD)" = "$OPTO_SYNC_E2E_SHA"
+          test "$(git -C source/clients rev-parse HEAD)" = "$CLIENTS_SHA"
+          test "$(git -C source/clients rev-parse HEAD:syncer.c)" = "$SYNCER_C_CLIENT_GITLINK_SHA"
+          test "$(git -C source/syncer-c-client-gitlink rev-parse HEAD)" = "$SYNCER_C_CLIENT_GITLINK_SHA"
+          test "$(git -C source/syncer-c-main rev-parse HEAD)" = "$SYNCER_C_MAIN_SHA"
+          test "$(git -C source/syncer-rs rev-parse HEAD)" = "$SYNCER_RS_SHA"
+
+      - name: Execute partial/filter and mixed-version model
+        working-directory: controller
+        env:
+          OPTO_SYNC_E2E_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          OPTO_SYNC_CLIENTS_SHA: ${{ env.CLIENTS_SHA }}
+          SYNCER_C_SHA: ${{ env.SYNCER_C_CLIENT_GITLINK_SHA }}
+          SYNCER_C_MAIN_SHA: ${{ env.SYNCER_C_MAIN_SHA }}
+          SYNCER_RS_SHA: ${{ env.SYNCER_RS_SHA }}
+        run: |
+          set -euo pipefail
+          node --check formal/partial-sync-schema-model.mjs
+          node formal/partial-sync-schema-model.mjs \
+            --seeds 3,17,42,20260912 \
+            --fixture-dir formal/counterexamples \
+            --receipt artifacts/partial-sync-schema-model.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          receipt = json.loads(Path('artifacts/partial-sync-schema-model.json').read_text())
+          assert receipt['runtimeReplay']['status'] == 'modeling-only'
+          assert len(receipt['seeds']) == 4
+          assert len(receipt['controls']) == 3
+          assert all(control['diverges'] for control in receipt['controls'])
+          assert all(len(control['events']) == 2 for control in receipt['controls'])
+          assert any(row['mode'] == 'refuse' for row in receipt['compatibilityMatrix'])
+          assert 'no CRDT' in receipt['guaranteeScope']
+          assert 'must not mutate server schema' in receipt['migrationPolicy']
+          PY
+
+      - name: Upload exact-head partial-sync receipt
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: partial-sync-schema-model-${{ github.run_id }}-${{ github.run_attempt }}
+          path: controller/artifacts/partial-sync-schema-model.json
+          if-no-files-found: error
+          retention-days: 30
