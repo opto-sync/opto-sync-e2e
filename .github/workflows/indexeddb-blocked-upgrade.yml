@@ -30,11 +30,20 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
-      - name: Checkout compatibility fixtures
+      - name: Checkout exact E2E head
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           path: opto-sync-e2e
           persist-credentials: false
+
+      - name: Verify exact E2E head
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git -C opto-sync-e2e rev-parse HEAD)" = "$EXPECTED_SHA"
 
       - name: Checkout the certified browser client and nested core
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
