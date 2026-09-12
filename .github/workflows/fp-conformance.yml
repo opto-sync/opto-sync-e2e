@@ -7,8 +7,9 @@ name: fp-conformance
 # only on regression, so the pre-existing backlog never blocks a pull request
 # while new violations do.
 #
-# Language-native checks (cargo clippy, eslint, dart analyze) are configured in
-# the tree but not run here, to keep Actions minutes low. See FP-GUIDELINES.md.
+# This lexical ratchet complements, but does not replace, language-native
+# exhaustiveness checks or model checking. See FP-GUIDELINES.md for the proof
+# boundary and the remaining rollout work.
 
 on:
   pull_request:
@@ -26,6 +27,8 @@ on:
       - '**.ts'
       - '**.tsx'
       - '**.dart'
+      - 'tools/fp-conformance/**'
+      - '.github/workflows/fp-conformance.yml'
   workflow_dispatch:
 
 permissions:
