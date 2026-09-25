@@ -1,107 +1,170 @@
-use std::{collections::HashSet, fs, path::{Path, PathBuf}};
+use std::{collections::HashSet, fs, path::Path};
 
 const REGISTRY: &str = "conformance/evidence-registry.tsv";
 const HEADER: &str = "property_id\tevidence_class\texecutable_lane\timplementation_binding\tnegative_control\tclaim_boundary";
-const CLASSES: [&str; 4] = ["declaration-only", "modeling-only", "implementation-linked", "cross-runtime"];
+const CLASSES: [&str; 4] = [
+    "declaration-only",
+    "modeling-only",
+    "implementation-linked",
+    "cross-runtime",
+];
 
-fn fail(message: impl AsRef<str>) -> ! {
-    eprintln!("evidence-governance: {}", message.as_ref());
-    std::process::exit(1);
+type CheckResult<T> = Result<T, String>;
+
+#[derive(Clone, Copy)]
+struct EvidenceRow<'a> {
+    property_id: &'a str,
+    evidence_class: &'a str,
+    executable_lane: &'a str,
+    implementation_binding: &'a str,
+    negative_control: &'a str,
+    claim_boundary: &'a str,
 }
 
-fn require_file(path: &str, field: &str, property_id: &str) {
-    if !Path::new(path).is_file() {
-        fail(format!("{property_id}: {field} does not name a repository file: {path}"));
-    }
+fn require_file(path: &str, field: &str, property_id: &str) -> CheckResult<()> {
+    Path::new(path).is_file().then_some(()).ok_or_else(|| {
+        format!("{property_id}: {field} does not name a repository file: {path}")
+    })
 }
 
-fn reject_python(path: &Path) {
-    let entries = fs::read_dir(path).unwrap_or_else(|error| fail(format!("cannot read {}: {error}", path.display())));
-    for entry in entries {
-        let entry = entry.unwrap_or_else(|error| fail(format!("cannot read directory entry: {error}")));
-        let child = entry.path();
-        if child.is_dir() {
-            reject_python(&child);
-        } else if child.extension().and_then(|value| value.to_str()) == Some("py") {
-            fail(format!("Python conformance tooling is not admissible: {}", child.display()));
-        }
-    }
+fn reject_python(path: &Path) -> CheckResult<()> {
+    fs::read_dir(path)
+        .map_err(|error| format!("cannot read {}: {error}", path.display()))?
+        .map(|entry| entry.map_err(|error| format!("cannot read directory entry: {error}")))
+        .collect::<CheckResult<Vec<_>>>()?
+        .into_iter()
+        .try_for_each(|entry| {
+            let child = entry.path();
+            if child.is_dir() {
+                reject_python(&child)
+            } else if child.extension().and_then(|value| value.to_str()) == Some("py") {
+                Err(format!(
+                    "Python conformance tooling is not admissible: {}",
+                    child.display()
+                ))
+            } else {
+                Ok(())
+            }
+        })
 }
 
-fn main() {
-    let body = fs::read_to_string(REGISTRY).unwrap_or_else(|error| fail(format!("cannot read {REGISTRY}: {error}")));
-    let mut lines = body.lines();
-    if lines.next() != Some(HEADER) {
-        fail("evidence registry header changed or is malformed");
+fn parse_row(index: usize, line: &str) -> CheckResult<EvidenceRow<'_>> {
+    let columns = line.split('\t').collect::<Vec<_>>();
+    let [property_id, evidence_class, executable_lane, implementation_binding, negative_control, claim_boundary] =
+        columns.as_slice()
+    else {
+        return Err(format!(
+            "registry line {} has {} columns; expected 6",
+            index + 2,
+            columns.len()
+        ));
+    };
+    Ok(EvidenceRow {
+        property_id,
+        evidence_class,
+        executable_lane,
+        implementation_binding,
+        negative_control,
+        claim_boundary,
+    })
+}
+
+fn parse_registry(body: &str) -> CheckResult<Vec<EvidenceRow<'_>>> {
+    if body.lines().next() != Some(HEADER) {
+        return Err("evidence registry header changed or is malformed".to_owned());
     }
+    body.lines()
+        .skip(1)
+        .filter(|line| !line.trim().is_empty())
+        .enumerate()
+        .map(|(index, line)| parse_row(index, line))
+        .collect()
+}
 
-    let mut ids = HashSet::new();
-    let mut count = 0usize;
-    for (index, line) in lines.enumerate() {
-        if line.trim().is_empty() {
-            continue;
-        }
-        let columns: Vec<&str> = line.split('\t').collect();
-        if columns.len() != 6 {
-            fail(format!("registry line {} has {} columns; expected 6", index + 2, columns.len()));
-        }
-        let property_id = columns[0];
-        let evidence_class = columns[1];
-        let executable_lane = columns[2];
-        let implementation_binding = columns[3];
-        let negative_control = columns[4];
-        let claim_boundary = columns[5];
-
-        if property_id.is_empty() || !ids.insert(property_id.to_owned()) {
-            fail(format!("registry line {} has an empty or duplicate property_id: {property_id}", index + 2));
-        }
-        if !CLASSES.contains(&evidence_class) {
-            fail(format!("{property_id}: unknown evidence_class {evidence_class}"));
-        }
-        if claim_boundary.is_empty() {
-            fail(format!("{property_id}: claim_boundary is required"));
-        }
-
-        match evidence_class {
-            "declaration-only" => {
-                if executable_lane != "none" {
-                    fail(format!("{property_id}: declaration-only evidence must use executable_lane=none"));
-                }
-            }
-            "modeling-only" => {
-                require_file(executable_lane, "executable_lane", property_id);
-                if claim_boundary != "modeling-only-no-runtime-claim" {
-                    fail(format!("{property_id}: modeling-only evidence must preserve the no-runtime-claim boundary"));
-                }
-            }
-            "implementation-linked" | "cross-runtime" => {
-                require_file(executable_lane, "executable_lane", property_id);
-                if !implementation_binding.contains('@') {
-                    fail(format!("{property_id}: stronger evidence requires an immutable implementation binding containing @<revision>"));
-                }
-            }
-            _ => unreachable!(),
-        }
-
-        if negative_control != "none" {
-            require_file(negative_control, "negative_control", property_id);
-        }
-        count += 1;
+fn validate_class(row: EvidenceRow<'_>) -> CheckResult<()> {
+    if !CLASSES.contains(&row.evidence_class) {
+        return Err(format!(
+            "{}: unknown evidence_class {}",
+            row.property_id, row.evidence_class
+        ));
     }
-
-    if count == 0 {
-        fail("evidence registry contains no properties");
+    if row.claim_boundary.is_empty() {
+        return Err(format!("{}: claim_boundary is required", row.property_id));
     }
+    if row.evidence_class == "declaration-only" && row.executable_lane != "none" {
+        return Err(format!(
+            "{}: declaration-only evidence must use executable_lane=none",
+            row.property_id
+        ));
+    }
+    if row.evidence_class == "modeling-only" {
+        require_file(row.executable_lane, "executable_lane", row.property_id)?;
+        if row.claim_boundary != "modeling-only-no-runtime-claim" {
+            return Err(format!(
+                "{}: modeling-only evidence must preserve the no-runtime-claim boundary",
+                row.property_id
+            ));
+        }
+    }
+    Ok(())
+}
 
-    let conformance = PathBuf::from("conformance");
+fn validate_strong_evidence(row: EvidenceRow<'_>) -> CheckResult<()> {
+    if row.evidence_class != "implementation-linked" && row.evidence_class != "cross-runtime" {
+        return Ok(());
+    }
+    require_file(row.executable_lane, "executable_lane", row.property_id)?;
+    row.implementation_binding.contains('@').then_some(()).ok_or_else(|| {
+        format!(
+            "{}: stronger evidence requires an immutable implementation binding containing @<revision>",
+            row.property_id
+        )
+    })
+}
+
+fn validate_row(row: EvidenceRow<'_>) -> CheckResult<()> {
+    if row.property_id.is_empty() {
+        return Err("property_id must not be empty".to_owned());
+    }
+    validate_class(row)?;
+    validate_strong_evidence(row)?;
+    if row.negative_control != "none" {
+        require_file(row.negative_control, "negative_control", row.property_id)?;
+    }
+    Ok(())
+}
+
+fn validate_registry(body: &str) -> CheckResult<()> {
+    let rows = parse_registry(body)?;
+    if rows.is_empty() {
+        return Err("evidence registry contains no properties".to_owned());
+    }
+    rows.iter().copied().try_for_each(validate_row)?;
+    let ids = rows.iter().map(|row| row.property_id).collect::<Vec<_>>();
+    let unique_ids = ids.iter().copied().collect::<HashSet<_>>();
+    (ids.len() == unique_ids.len())
+        .then_some(())
+        .ok_or_else(|| "evidence registry contains duplicate property_id values".to_owned())
+}
+
+fn validate_repository() -> CheckResult<()> {
+    let body = fs::read_to_string(REGISTRY)
+        .map_err(|error| format!("cannot read {REGISTRY}: {error}"))?;
+    validate_registry(&body)?;
+    let conformance = Path::new("conformance");
     if !conformance.is_dir() {
-        fail("conformance directory is missing");
+        return Err("conformance directory is missing".to_owned());
     }
-    reject_python(&conformance);
+    reject_python(conformance)?;
+    [
+        "contracts/README.md",
+        "conformance/README.md",
+        "governance/PROMOTION.md",
+    ]
+    .into_iter()
+    .try_for_each(|required| require_file(required, "required governance artifact", "repository"))
+}
 
-    for required in ["contracts/README.md", "conformance/README.md", "governance/PROMOTION.md"] {
-        require_file(required, "required governance artifact", "repository");
-    }
-
-    println!("evidence-governance: validated {count} registered properties");
+fn main() -> CheckResult<()> {
+    validate_repository()
 }
