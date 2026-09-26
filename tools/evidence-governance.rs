@@ -1,5 +1,7 @@
 #[path = "evidence-governance/binding.rs"]
 mod binding;
+#[path = "evidence-governance/paths.rs"]
+mod paths;
 
 use std::{collections::HashSet, fs, path::Path};
 
@@ -25,12 +27,16 @@ struct EvidenceRow<'a> {
 }
 
 fn require_file(path: &str, field: &str, property_id: &str) -> CheckResult<()> {
-    Path::new(path).is_file().then_some(()).ok_or_else(|| {
-        format!("{property_id}: {field} does not name a repository file: {path}")
-    })
+    return paths::repository_file(Path::new("."), path)
+        .map_err(|error| format!("{property_id}: {field}: {error}"));
 }
 
 fn reject_python(path: &Path) -> CheckResult<()> {
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|_| "cannot inspect conformance directory".to_owned())?;
+    if !metadata.file_type().is_dir() {
+        return Err("conformance scan requires a real directory".to_owned());
+    }
     fs::read_dir(path)
         .map_err(|error| format!("cannot read {}: {error}", path.display()))?
         .map(|entry| entry.map_err(|error| format!("cannot read directory entry: {error}")))
@@ -38,7 +44,12 @@ fn reject_python(path: &Path) -> CheckResult<()> {
         .into_iter()
         .try_for_each(|entry| {
             let child = entry.path();
-            if child.is_dir() {
+            let file_type = entry.file_type()
+                .map_err(|_| "cannot inspect conformance entry".to_owned())?;
+            if file_type.is_symlink() {
+                return Err("symlinked conformance entries are not admissible".to_owned());
+            }
+            if file_type.is_dir() {
                 reject_python(&child)
             } else if child.extension().and_then(|value| value.to_str()) == Some("py") {
                 Err(format!(

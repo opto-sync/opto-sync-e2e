@@ -26,3 +26,9 @@ Implementation-linked and cross-runtime registry rows must bind one source as
 all-zero placeholders, and URLs are rejected. This is structural admission:
 it does not verify that a commit exists, that its code was executed, or that
 all claimed runtimes passed. Those obligations still require execution receipts.
+
+Executable lanes and negative-control paths must be existing, normalized
+repository-relative files. Absolute paths, parent traversal, and symlink
+components are rejected. The conformance scan also rejects symlinks rather than
+following directory cycles or external trees. Verification assumes a stable
+checkout; it does not provide a sandbox against concurrent filesystem mutation.

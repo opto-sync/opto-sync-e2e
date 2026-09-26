@@ -25,3 +25,24 @@ fn strong_registry_rows_accept_complete_commit_bindings() {
             .is_ok()
         }));
 }
+
+#[test]
+fn registry_rejects_existing_absolute_lane() -> Result<(), std::io::Error> {
+    let absolute = std::fs::canonicalize("tools/evidence-governance.rs")?;
+    let row = format!(
+        "{HEADER}\npath.escape\tmodeling-only\t{}\tnone\tnone\tmodeling-only-no-runtime-claim\n",
+        absolute.display()
+    );
+    assert!(validate_registry(&row).is_err());
+    return Ok(());
+}
+
+#[cfg(unix)]
+#[test]
+fn conformance_scan_rejects_symlink_cycles() -> Result<(), std::io::Error> {
+    let root = std::path::PathBuf::from(format!("tmp/conformance-cycle-{}", std::process::id()));
+    std::fs::create_dir_all(&root)?;
+    std::os::unix::fs::symlink(".", root.join("loop"))?;
+    assert!(super::reject_python(&root).is_err());
+    return Ok(());
+}
