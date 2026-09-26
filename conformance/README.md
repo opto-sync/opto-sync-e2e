@@ -20,3 +20,9 @@ Queued, skipped, zero-step, stale-head, historical-only, runner-admission, billi
 ## Counterexamples
 
 Modeling lanes that carry broken controls must persist the counterexample identity in the registry. Controls prove that the lane can detect the targeted defect; they do not make the model a runtime proof.
+
+Implementation-linked and cross-runtime registry rows must bind one source as
+`owner/repository@<40 lowercase hex commit>`. Branches, tags, short hashes,
+all-zero placeholders, and URLs are rejected. This is structural admission:
+it does not verify that a commit exists, that its code was executed, or that
+all claimed runtimes passed. Those obligations still require execution receipts.

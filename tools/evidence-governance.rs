@@ -1,3 +1,6 @@
+#[path = "evidence-governance/binding.rs"]
+mod binding;
+
 use std::{collections::HashSet, fs, path::Path};
 
 const REGISTRY: &str = "conformance/evidence-registry.tsv";
@@ -114,12 +117,12 @@ fn validate_strong_evidence(row: EvidenceRow<'_>) -> CheckResult<()> {
         return Ok(());
     }
     require_file(row.executable_lane, "executable_lane", row.property_id)?;
-    row.implementation_binding.contains('@').then_some(()).ok_or_else(|| {
+    return binding::immutable_binding(row.implementation_binding).then_some(()).ok_or_else(|| {
         format!(
-            "{}: stronger evidence requires an immutable implementation binding containing @<revision>",
+            "{}: stronger evidence requires owner/repository@<40 lowercase hex commit>",
             row.property_id
         )
-    })
+    });
 }
 
 fn validate_row(row: EvidenceRow<'_>) -> CheckResult<()> {
@@ -168,3 +171,7 @@ fn validate_repository() -> CheckResult<()> {
 fn main() -> CheckResult<()> {
     validate_repository()
 }
+
+#[cfg(test)]
+#[path = "evidence-governance/tests.rs"]
+mod tests;

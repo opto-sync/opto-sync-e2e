@@ -8,6 +8,7 @@ on:
       - "governance/**"
       - "formal/**"
       - "tools/evidence-governance.rs"
+      - "tools/evidence-governance/**"
       - ".github/workflows/evidence-governance.yml"
   push:
     branches: [main]
@@ -17,6 +18,7 @@ on:
       - "governance/**"
       - "formal/**"
       - "tools/evidence-governance.rs"
+      - "tools/evidence-governance/**"
       - ".github/workflows/evidence-governance.yml"
   workflow_dispatch:
 
@@ -51,6 +53,11 @@ jobs:
 
       - name: Compile evidence-governance verifier
         run: rustc --edition=2021 -D warnings tools/evidence-governance.rs -o /tmp/opto-sync-evidence-governance
+
+      - name: Reject mutable and malformed implementation bindings
+        run: |
+          rustc --edition=2021 -D warnings --test tools/evidence-governance.rs -o /tmp/opto-sync-evidence-tests
+          /tmp/opto-sync-evidence-tests
 
       - name: Validate evidence classes and repository references
         run: /tmp/opto-sync-evidence-governance
