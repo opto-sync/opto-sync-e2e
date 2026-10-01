@@ -1,0 +1,5 @@
+property_id	evidence_class	executable_lane	implementation_binding	negative_control	claim_boundary
+sync.model.convergence	modeling-only	formal/model-based-convergence.mjs	model-source-identities-in-lane	none	modeling-only-no-runtime-claim
+partial.filter.absence_not_delete	modeling-only	formal/partial-sync-schema-model.mjs	model-source-identities-in-lane	formal/counterexamples/control-delete-by-filter-absence.v1.json	modeling-only-no-runtime-claim
+tenant.isolation.no_index_leak	modeling-only	formal/partial-sync-schema-model.mjs	model-source-identities-in-lane	formal/counterexamples/control-cross-tenant-index-leak.v1.json	modeling-only-no-runtime-claim
+schema.adjacent.optional_field_no_truncation	modeling-only	formal/partial-sync-schema-model.mjs	model-source-identities-in-lane	formal/counterexamples/control-schema-truncation.v1.json	modeling-only-no-runtime-claim
