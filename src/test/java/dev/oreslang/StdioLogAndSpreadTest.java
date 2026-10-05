@@ -1,6 +1,10 @@
 package dev.oreslang;
 
+import dev.oreslang.compiler.BuildOptions;
+import dev.oreslang.compiler.OresCompiler;
 import dev.oreslang.parser.Parser;
+import dev.oreslang.runtime.CapabilityChecker;
+import dev.oreslang.runtime.IsolatePolicy;
 import dev.oreslang.types.TypeChecker;
 import org.graalvm.polyglot.Context;
 import org.graalvm.polyglot.Source;
@@ -71,6 +75,34 @@ final class StdioLogAndSpreadTest {
                         """)));
 
         assertTrue(failure.getMessage().contains("spread arguments require a variadic callable"));
+    }
+
+    @Test
+    void treeShakerPreservesSpreadOperands() {
+        assertDoesNotThrow(() -> OresCompiler.compileForBuild("""
+                pub routine main(): void {
+                  val parts = arr["A", "B"];
+                  stdio.stdout.log(...parts);
+                  return;
+                }
+                """, BuildOptions.executable(java.util.Map.of())));
+    }
+
+    @Test
+    void capabilityCheckerTraversesSpreadOperands() {
+        var program = TypeChecker.check(Parser.parse("""
+                pub routine main(): void {
+                  val values = arr[process.descriptor];
+                  stdio.stdout.log(...values);
+                  return;
+                }
+                """));
+
+        SecurityException failure = assertThrows(
+                SecurityException.class,
+                () -> CapabilityChecker.check(program, IsolatePolicy.strictFaas()));
+
+        assertTrue(failure.getMessage().contains("PROCESS_INFO"));
     }
 
     @Test
