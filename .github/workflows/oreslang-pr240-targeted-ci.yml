@@ -1,0 +1,24 @@
+name: oreslang-pr240-targeted-ci
+
+on:
+  push:
+    branches:
+      - feat/oreslang-pr240-stdio-log-spread-ci
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up GraalVM
+        uses: graalvm/setup-graalvm@v1
+        with:
+          version: '25.3'
+          java-version: '25'
+          distribution: 'graalvm'
+          cache: maven
+      - name: Run stdio spread tests
+        run: mvn -B -ntp -Dtest=StdioLogAndSpreadTest test
