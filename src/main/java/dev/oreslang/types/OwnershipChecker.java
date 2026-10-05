@@ -591,7 +591,7 @@ public final class OwnershipChecker {
     }
 
     private ValueInfo checkCall(Ast.CallExpr call, Scope scope) {
-        if (isStdoutCall(call, "log") || isStdoutCall(call, "logList")) {
+        if (isBuiltinStdoutCall(call, "log", scope) || isBuiltinStdoutCall(call, "logList", scope)) {
             for (Ast.Expr argument : call.arguments()) {
                 Ast.Expr value = argument instanceof Ast.SpreadExpr spread ? spread.expression() : argument;
                 ValueInfo info = checkExpr(value, scope, false);
@@ -792,10 +792,12 @@ public final class OwnershipChecker {
         return new ValueInfo(Ast.TypeRef.inferred(), ValueKind.MOVE_ONLY, null);
     }
 
-    private static boolean isStdoutCall(Ast.CallExpr call, String memberName) {
+    private static boolean isBuiltinStdoutCall(Ast.CallExpr call, String memberName, Scope scope) {
         if (!(call.callee() instanceof Ast.MemberExpr member) || !member.member().equals(memberName)) return false;
         if (!(member.receiver() instanceof Ast.MemberExpr stdout) || !stdout.member().equals("stdout")) return false;
-        return stdout.receiver() instanceof Ast.NameExpr stdio && stdio.name().equals("stdio");
+        return stdout.receiver() instanceof Ast.NameExpr stdio
+                && stdio.name().equals("stdio")
+                && scope.lookup("stdio") == null;
     }
 
     private ValueInfo checkBuiltinSumCall(Ast.MemberExpr member, List<Ast.Expr> arguments, Scope scope) {
