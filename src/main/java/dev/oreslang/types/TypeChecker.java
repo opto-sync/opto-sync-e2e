@@ -856,7 +856,7 @@ public final class TypeChecker {
                     "spread expressions are only valid as arguments to a variadic callable");
         }
         if (expr instanceof Ast.CallExpr call) {
-            if (isStdoutCall(call, "log")) {
+            if (isBuiltinStdoutCall(call, "log", env)) {
                 if (call.typeArgumentsPresent()) {
                     throw new IllegalArgumentException("stdio.stdout.log does not accept call-site type arguments");
                 }
@@ -869,7 +869,7 @@ public final class TypeChecker {
                 }
                 return Primitive.VOID;
             }
-            if (isStdoutCall(call, "logList")) {
+            if (isBuiltinStdoutCall(call, "logList", env)) {
                 if (call.typeArgumentsPresent()) {
                     throw new IllegalArgumentException("stdio.stdout.logList does not accept call-site type arguments");
                 }
@@ -1512,10 +1512,12 @@ public final class TypeChecker {
         return Unknown.INSTANCE;
     }
 
-    private static boolean isStdoutCall(Ast.CallExpr call, String memberName) {
+    private static boolean isBuiltinStdoutCall(Ast.CallExpr call, String memberName, Env env) {
         if (!(call.callee() instanceof Ast.MemberExpr member) || !member.member().equals(memberName)) return false;
         if (!(member.receiver() instanceof Ast.MemberExpr stdout) || !stdout.member().equals("stdout")) return false;
-        return stdout.receiver() instanceof Ast.NameExpr stdio && stdio.name().equals("stdio");
+        return stdout.receiver() instanceof Ast.NameExpr stdio
+                && stdio.name().equals("stdio")
+                && env.lookup("stdio") == null;
     }
 
     private void requireSpreadable(Type type, String operation) {
@@ -2981,6 +2983,8 @@ public final class TypeChecker {
             rejectStaticClassGenericReferences(conditional.condition(), classGenerics, klass, method);
             rejectStaticClassGenericReferences(conditional.whenTrue(), classGenerics, klass, method);
             rejectStaticClassGenericReferences(conditional.whenFalse(), classGenerics, klass, method);
+        } else if (expression instanceof Ast.SpreadExpr spread) {
+            rejectStaticClassGenericReferences(spread.expression(), classGenerics, klass, method);
         } else if (expression instanceof Ast.CallExpr call) {
             for (Ast.TypeRef argument : call.typeArguments()) {
                 rejectStaticClassGenericReference(argument, classGenerics, klass, method);
