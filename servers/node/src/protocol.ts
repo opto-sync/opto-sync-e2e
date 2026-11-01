@@ -1,4 +1,5 @@
 import { createHash, timingSafeEqual } from "node:crypto";
+import { installScopedReadRoutes } from "./scoped-reads.js";
 
 import type express from "express";
 import type pg from "pg";
@@ -1425,6 +1426,10 @@ export function installSyncProtocol(
       "tenant",
     );
   });
+
+  // Additive fixed-ID scoped reads share the authenticated, rate-limited
+  // /v1/sync middleware and the canonical PostgreSQL commit log.
+  installScopedReadRoutes(app, pool, config);
 
   const pushCore = async (
     context: ProtocolCallContext,
