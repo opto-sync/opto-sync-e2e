@@ -77,10 +77,11 @@ interface ScopedReadQuotas {
  * Missing/throwing policy fails closed; tenant-level auth is not an ACL.
  */
 export type ScopedRecordAuthorizer = (
-  identity: ProtocolIdentity, table: string, recordId: string,
+  connection: pg.PoolClient, identity: ProtocolIdentity, table: string, recordId: string,
 ) => Promise<boolean>;
 
 async function authorizedRecords(
+  connection: pg.PoolClient,
   identity: ProtocolIdentity,
   scope: FixedRecordIdScopeV1,
   authorizer?: ScopedRecordAuthorizer,
@@ -88,7 +89,7 @@ async function authorizedRecords(
   if (authorizer === undefined) return false;
   try {
     for (const id of scope.recordIds) {
-      if (await authorizer(identity, scope.table, id) !== true) return false;
+      if (await authorizer(connection, identity, scope.table, id) !== true) return false;
     }
     return true;
   } catch {
@@ -109,12 +110,12 @@ export function installScopedReadRoutes(
     try { scope = canonicalFixedScope(parsed.data.scope); }
     catch { return response.status(400).json(fail('INVALID_SCOPE')); }
     const identity = response.locals.syncIdentity as ProtocolIdentity;
-    if (!await authorizedRecords(identity, scope, authorizeRecord)) {
-      return response.status(403).json(fail('SCOPE_FORBIDDEN'));
-    }
     const scopeToken = fixedScopeToken(scope, identity);
     try {
       const result = await withReadSnapshot(pool, async (conn) => {
+        if (!await authorizedRecords(conn, identity, scope, authorizeRecord)) {
+          return { status: 403, body: fail('SCOPE_FORBIDDEN') };
+        }
         const state = await conn.query(
           'SELECT last_seq FROM syncer_protocol_state WHERE singleton = TRUE',
         );
@@ -165,9 +166,6 @@ export function installScopedReadRoutes(
     try { scope = canonicalFixedScope(parsed.data.scope); }
     catch { return response.status(400).json(fail('INVALID_SCOPE')); }
     const identity = response.locals.syncIdentity as ProtocolIdentity;
-    if (!await authorizedRecords(identity, scope, authorizeRecord)) {
-      return response.status(403).json(fail('SCOPE_FORBIDDEN'));
-    }
     const expected = fixedScopeToken(scope, identity);
     const actual = parsed.data.scopeToken;
     if (!timingSafeEqual(Buffer.from(expected, 'hex'), Buffer.from(actual, 'hex'))) {
@@ -177,6 +175,9 @@ export function installScopedReadRoutes(
     const limit = parsed.data.limit ?? 100;
     try {
       const result = await withReadSnapshot(pool, async (conn) => {
+        if (!await authorizedRecords(conn, identity, scope, authorizeRecord)) {
+          return { status: 403, body: fail('SCOPE_FORBIDDEN') };
+        }
         const state = await conn.query(
           'SELECT last_seq, min_available_seq FROM syncer_protocol_state WHERE singleton = TRUE',
         );
