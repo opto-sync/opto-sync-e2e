@@ -131,6 +131,7 @@ export type SyncProtocolOptions = {
   onPushCommitted?: (checkpoint: bigint, origin: unknown) => void;
   /** Required for scoped reads; absent hook fails closed per record. */
   authorizeScopedRecord?: (
+    connection: pg.PoolClient,
     identity: Readonly<ProtocolIdentity>, table: string, recordId: string,
   ) => Promise<boolean>;
 };
