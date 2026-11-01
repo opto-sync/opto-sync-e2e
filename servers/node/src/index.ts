@@ -560,6 +560,11 @@ const syncRuntime = installSyncProtocol(
   protocolOperations,
   {
     mutationHandlers: protocolMutationHandlers,
+    // E2E-only record ACL fixture. Production has no default allow hook.
+    authorizeScopedRecord: TEST_MODE
+      ? async (_connection, _identity, table, recordId) =>
+          table === "docs" && recordId.startsWith("scoped-v1-")
+      : undefined,
     onPushCommitted: (checkpoint, origin) =>
       syncHub.broadcast(Number(checkpoint), origin),
   },

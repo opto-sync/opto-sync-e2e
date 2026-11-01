@@ -1,4 +1,5 @@
 import { createHash, timingSafeEqual } from "node:crypto";
+import { installScopedReadRoutes } from "./scoped-reads.js";
 
 import type express from "express";
 import type pg from "pg";
@@ -128,6 +129,11 @@ export type SyncProtocolOptions = {
    * cannot fail the push.
    */
   onPushCommitted?: (checkpoint: bigint, origin: unknown) => void;
+  /** Required for scoped reads; absent hook fails closed per record. */
+  authorizeScopedRecord?: (
+    connection: pg.PoolClient,
+    identity: Readonly<ProtocolIdentity>, table: string, recordId: string,
+  ) => Promise<boolean>;
 };
 
 /** Transport-independent request envelope for the protocol core handlers. */
@@ -1425,6 +1431,10 @@ export function installSyncProtocol(
       "tenant",
     );
   });
+
+  // Additive fixed-ID scoped reads share the authenticated, rate-limited
+  // /v1/sync middleware and the canonical PostgreSQL commit log.
+  installScopedReadRoutes(app, pool, config, options.authorizeScopedRecord);
 
   const pushCore = async (
     context: ProtocolCallContext,
