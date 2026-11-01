@@ -55,9 +55,11 @@ An expired checkpoint returns RESET_REQUIRED and the scoped snapshot route.
   which is not sufficient for scoped replication.
   Scoped routes now FAIL CLOSED with SCOPE_FORBIDDEN unless the host installs
   an explicit `SyncProtocolOptions.authorizeScopedRecord` callback.
-  That callback must verify each ID against current access policy on EACH
-  snapshot and pull; a false, missing or throwing callback denies the entire
-  request. The callback is not a substitute for hardening database RLS.
+  That callback executes inside the same PostgreSQL repeatable-read transaction
+  as the snapshot/pull query, and must verify each ID against current access
+  policy on EACH snapshot and pull; a false, missing or throwing callback denies
+  the entire request. Authorization must use the supplied connection for
+  transactional consistency. The callback is not a substitute for database RLS.
   No production caller is wired to grant these permissions by default.
 - Snapshots and pull pages use read-only repeatable-read transactions; the
   server's existing commit-ordered state is unchanged. No new mutation write
