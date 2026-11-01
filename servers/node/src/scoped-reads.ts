@@ -17,7 +17,11 @@ const ScopeSchema = z.object({
   version: z.literal(1),
   table: z.literal('docs'),
   recordIds: z.array(z.string().min(1).max(512)).min(1).max(128),
-}).strict();
+}).strict().superRefine((scope, ctx) => {
+  if (new Set(scope.recordIds).size !== scope.recordIds.length) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'duplicate record IDs in scope' });
+  }
+});
 const BaseRequest = z.object({
   protocolVersion: z.literal(1),
   scopeKey: z.string().min(1).max(131072),
@@ -32,10 +36,11 @@ export type FixedRecordIdScopeV1 = z.infer<typeof ScopeSchema>;
 
 export function canonicalFixedScope(scope: FixedRecordIdScopeV1): FixedRecordIdScopeV1 {
   const parsed = ScopeSchema.parse(scope);
-  const ids = parsed.recordIds.slice().sort();
-  if (ids.some((id, i) => i > 0 && id === ids[i - 1])) {
-    throw new RangeError('duplicate record IDs in scope');
-  }
+  // Fixed 128-ID cap: immutable insertion instead of in-place sorting.
+  const ids = parsed.recordIds.reduce<string[]>((acc, id) => {
+    const at = acc.findIndex((other) => other > id);
+    return at < 0 ? [...acc, id] : [...acc.slice(0, at), id, ...acc.slice(at)];
+  }, []);
   return { version: 1, table: 'docs', recordIds: ids };
 }
 
@@ -57,7 +62,7 @@ async function withReadSnapshot<T>(pool: pg.Pool, work: (conn: pg.PoolClient) =>
     return result;
   } catch (error) {
     try { await conn.query('ROLLBACK'); } catch { /* preserve failure */ }
-    throw error;
+    return Promise.reject(error);
   } finally {
     conn.release();
   }
@@ -106,9 +111,8 @@ export function installScopedReadRoutes(
     response.set('Cache-Control', 'no-store');
     const parsed = BaseRequest.safeParse(request.body);
     if (!parsed.success) return response.status(400).json(fail('INVALID_SCOPE'));
-    let scope: FixedRecordIdScopeV1;
-    try { scope = canonicalFixedScope(parsed.data.scope); }
-    catch { return response.status(400).json(fail('INVALID_SCOPE')); }
+    // BaseRequest validates scope + duplicate IDs before this point.
+    const scope = canonicalFixedScope(parsed.data.scope);
     const identity = response.locals.syncIdentity as ProtocolIdentity;
     const scopeToken = fixedScopeToken(scope, identity);
     try {
