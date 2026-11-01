@@ -72,9 +72,34 @@ interface ScopedReadQuotas {
   readonly maxSnapshotBytes: number;
 }
 
+/**
+ * Called for each requested ID, on every snapshot and pull.
+ * Missing/throwing policy fails closed; tenant-level auth is not an ACL.
+ */
+export type ScopedRecordAuthorizer = (
+  identity: ProtocolIdentity, table: string, recordId: string,
+) => Promise<boolean>;
+
+async function authorizedRecords(
+  identity: ProtocolIdentity,
+  scope: FixedRecordIdScopeV1,
+  authorizer?: ScopedRecordAuthorizer,
+): Promise<boolean> {
+  if (authorizer === undefined) return false;
+  try {
+    for (const id of scope.recordIds) {
+      if (await authorizer(identity, scope.table, id) !== true) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Must be called AFTER installSyncProtocol's /v1/sync auth middleware. */
 export function installScopedReadRoutes(
   app: express.Express, pool: pg.Pool, quotas: ScopedReadQuotas,
+  authorizeRecord?: ScopedRecordAuthorizer,
 ): void {
   app.post('/v1/sync/scopes/snapshot', async (request, response) => {
     response.set('Cache-Control', 'no-store');
@@ -84,6 +109,9 @@ export function installScopedReadRoutes(
     try { scope = canonicalFixedScope(parsed.data.scope); }
     catch { return response.status(400).json(fail('INVALID_SCOPE')); }
     const identity = response.locals.syncIdentity as ProtocolIdentity;
+    if (!await authorizedRecords(identity, scope, authorizeRecord)) {
+      return response.status(403).json(fail('SCOPE_FORBIDDEN'));
+    }
     const scopeToken = fixedScopeToken(scope, identity);
     try {
       const result = await withReadSnapshot(pool, async (conn) => {
@@ -137,6 +165,9 @@ export function installScopedReadRoutes(
     try { scope = canonicalFixedScope(parsed.data.scope); }
     catch { return response.status(400).json(fail('INVALID_SCOPE')); }
     const identity = response.locals.syncIdentity as ProtocolIdentity;
+    if (!await authorizedRecords(identity, scope, authorizeRecord)) {
+      return response.status(403).json(fail('SCOPE_FORBIDDEN'));
+    }
     const expected = fixedScopeToken(scope, identity);
     const actual = parsed.data.scopeToken;
     if (!timingSafeEqual(Buffer.from(expected, 'hex'), Buffer.from(actual, 'hex'))) {
