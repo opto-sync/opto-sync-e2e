@@ -159,3 +159,72 @@ test('default missing ACL denies snapshot and pull without accessing record rows
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
+
+
+test('revoke a record grant between snapshot and pull without returning a row', async () => {
+  const queries: string[] = [];
+  const permission = { allowed: true };
+  const conn = {
+    query: async (sql: string, params?: unknown[]) => {
+      queries.push(sql);
+      if (sql.startsWith('SELECT last_seq, min_available_seq')) {
+        return { rows: [{ last_seq: '11', min_available_seq: '1' }] };
+      }
+      if (sql.startsWith('SELECT last_seq')) {
+        return { rows: [{ last_seq: '10' }] };
+      }
+      if (sql.startsWith('SELECT COUNT')) {
+        return { rows: [{ count: '1', bytes: '12' }] };
+      }
+      if (sql.startsWith('SELECT record_id')) {
+        return { rows: [{record_id: 'a', revision: '1', record: { title: 'private' }}] };
+      }
+      if (sql.startsWith('SELECT seq')) {
+        return { rows: [{seq: '11', record_id: 'a', revision: '2', operation: 'upsert', record: { title: 'secret' }}] };
+      }
+      return {rows: []};
+    },
+    release() { /* no-op */ },
+  };
+  const app = express();
+  app.use(express.json());
+  app.use('/v1/sync', (_req, res, next) => {
+    res.locals.syncIdentity = identity;
+    next();
+  });
+  installScopedReadRoutes(app, { connect: async () => conn } as unknown as pg.Pool,
+    { maxSnapshotRecords: 128, maxSnapshotBytes: 1024 },
+    async (_connection, _identity, _table, id) => permission.allowed && id === 'a');
+  const server = await new Promise<ReturnType<typeof app.listen>>((resolve) => {
+    const running = app.listen(0, '127.0.0.1', () => resolve(running));
+  });
+  try {
+    const address = server.address();
+    assert.ok(address && typeof address !== 'string');
+    const origin = 'http://127.0.0.1:' + address.port;
+    const post = async (path: string, body: object) => {
+      const result = await fetch(origin + path, {method:'POST',
+        headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+      return {status:result.status, body:await result.json() as Record<string, unknown>};
+    };
+    const scopeOne = {version:1,table:'docs',recordIds:['a']};
+    const request = {protocolVersion:1,scopeKey:'test-partition',scope:scopeOne};
+    const snapshot = await post('/v1/sync/scopes/snapshot', request);
+    assert.equal(snapshot.status, 200);
+    const observed = queries.filter(x=>x.startsWith('SELECT ')).length;
+    permission.allowed = false;
+    const pulled = await post('/v1/sync/scopes/pull', {
+      ...request,scopeToken:snapshot.body.scopeToken,checkpoint:'10',
+    });
+    assert.equal(pulled.status, 403);
+    assert.equal(pulled.body.error, 'SCOPE_FORBIDDEN');
+    assert.equal(queries.filter(x=>x.startsWith('SELECT ')).length, observed,
+      'revoked pull must not read scoped log rows');
+
+    const afterRevocation = await post('/v1/sync/scopes/snapshot', request);
+    assert.equal(afterRevocation.status,403);
+    assert.equal(afterRevocation.body.error,'SCOPE_FORBIDDEN');
+  } finally {
+    await new Promise<void>((resolve)=>server.close(()=>resolve()));
+  }
+});
