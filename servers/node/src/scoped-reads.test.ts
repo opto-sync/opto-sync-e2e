@@ -114,3 +114,48 @@ test('scoped snapshot and pull filter at SQL boundary and advance global checkpo
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
+
+
+test('default missing ACL denies snapshot and pull without accessing record rows', async () => {
+  const queries: string[] = [];
+  const conn = {
+    query: async (sql: string) => { queries.push(sql); return { rows: [] }; },
+    release: () => undefined,
+  };
+  const app = express();
+  app.use(express.json());
+  app.use('/v1/sync', (_req, res, next) => {
+    res.locals.syncIdentity = identity;
+    next();
+  });
+  installScopedReadRoutes(app, { connect: async () => conn } as unknown as pg.Pool,
+    { maxSnapshotRecords: 128, maxSnapshotBytes: 1024 });
+  const server = await new Promise<ReturnType<typeof app.listen>>((resolve) => {
+    const running = app.listen(0, '127.0.0.1', () => resolve(running));
+  });
+  try {
+    const address = server.address();
+    assert.ok(address && typeof address !== 'string');
+    const origin = 'http://127.0.0.1:' + address.port;
+    const req = async (path: string, data: object) => {
+      const response = await fetch(origin + path, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      return { status: response.status, payload: await response.json() as {error: string} };
+    };
+    const base = { protocolVersion: 1, scopeKey: 'opaque-client-scope', scope };
+    const snapshot = await req('/v1/sync/scopes/snapshot', base);
+    assert.equal(snapshot.status, 403);
+    assert.equal(snapshot.payload.error, 'SCOPE_FORBIDDEN');
+    const pull = await req('/v1/sync/scopes/pull', {
+      ...base, checkpoint: '0', scopeToken: fixedScopeToken(scope, identity),
+    });
+    assert.equal(pull.status, 403);
+    assert.equal(pull.payload.error, 'SCOPE_FORBIDDEN');
+    assert.equal(queries.some(sql => sql.startsWith('SELECT ')), false,
+      'authorization must precede data reads');
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
