@@ -52,7 +52,9 @@ test('scoped snapshot and pull filter at SQL boundary and advance global checkpo
     res.locals.syncIdentity = identity;
     next();
   });
-  installScopedReadRoutes(app, pool, { maxSnapshotRecords: 128, maxSnapshotBytes: 1024 });
+  installScopedReadRoutes(app, pool, { maxSnapshotRecords: 128, maxSnapshotBytes: 1024 },
+    async (principal, table, recordId) =>
+      principal.tenantId === 'acme' && table === 'docs' && ['a', 'b'].includes(recordId));
   const server = await new Promise<ReturnType<typeof app.listen>>((resolve) => {
     const running = app.listen(0, '127.0.0.1', () => resolve(running));
   });
@@ -103,6 +105,11 @@ test('scoped snapshot and pull filter at SQL boundary and advance global checkpo
       ...base, scope: { ...scope, table: 'private_records' },
     });
     assert.equal(malformed.status, 400);
+    const unauthorized = await post('/v1/sync/scopes/snapshot', {
+      ...base, scope: { version: 1, table: 'docs', recordIds: ['a', 'secret'] },
+    });
+    assert.equal(unauthorized.status, 403);
+    assert.equal(unauthorized.body.error, 'SCOPE_FORBIDDEN');
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
