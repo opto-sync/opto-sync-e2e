@@ -53,7 +53,7 @@ test('scoped snapshot and pull filter at SQL boundary and advance global checkpo
     next();
   });
   installScopedReadRoutes(app, pool, { maxSnapshotRecords: 128, maxSnapshotBytes: 1024 },
-    async (principal, table, recordId) =>
+    async (_connection, principal, table, recordId) =>
       principal.tenantId === 'acme' && table === 'docs' && ['a', 'b'].includes(recordId));
   const server = await new Promise<ReturnType<typeof app.listen>>((resolve) => {
     const running = app.listen(0, '127.0.0.1', () => resolve(running));
