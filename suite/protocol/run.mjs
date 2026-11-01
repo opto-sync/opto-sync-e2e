@@ -864,6 +864,70 @@ await test("uncaptured handler success rolls back its watermark and can be retri
   equal(retry.json.results[0].document.record.visible, true);
 });
 
+await test("real PostgreSQL scoped snapshots, filtering, cursor and ACL isolation", async () => {
+  const ids = ["scoped-v1-a", "scoped-v1-b"];
+  const clientId = "scoped-v1-client";
+  const put = (id, value, mutationId) => request(
+    "POST", "/v1/sync/push",
+    mutation(clientId, mutationId, {
+      operation: "upsert", recordId: id, payload: { title: value },
+    }),
+  );
+  equal((await put(ids[0], "initial", 1)).status, 200);
+  const base = {
+    protocolVersion: 1,
+    scopeKey: "scoped-contract-v1-e2e",
+    scope: { version: 1, table: "docs", recordIds: ids },
+  };
+  const snapshot = await request("POST", "/v1/sync/scopes/snapshot", base);
+  equal(snapshot.status, 200);
+  equal(snapshot.json.records.map(r => r.recordId), [ids[0]]);
+  check(/^[0-9a-f]{64}$/.test(snapshot.json.scopeToken), "scope token must be SHA-256-shaped");
+
+  const checkpoint = snapshot.json.checkpoint;
+  equal((await put(ids[1], "second", 2)).status, 200);
+  equal((await put("scoped-v1-outside", "unselected", 3)).status, 200);
+  const pull = await request("POST", "/v1/sync/scopes/pull", {
+    ...base, scopeToken: snapshot.json.scopeToken, checkpoint, limit: 1,
+  });
+  equal(pull.status, 200);
+  equal(pull.json.changes.length, 1);
+  equal(pull.json.changes[0].recordId, ids[1]);
+  equal(pull.json.hasMore, false);
+  check(BigInt(pull.json.checkpoint) > BigInt(pull.json.changes[0].checkpoint),
+    "filtered pull must safely skip unrelated global commits");
+
+  const otherTenant = { "x-syncer-test-tenant": "scoped-v1-other" };
+  const foreign = await request("POST", "/v1/sync/scopes/snapshot", base, otherTenant);
+  equal(foreign.status, 200);
+  equal(foreign.json.records, []);
+  check(foreign.json.scopeToken !== snapshot.json.scopeToken,
+    "tenant partition must change the scope token");
+
+  const crossTenant = await request("POST", "/v1/sync/scopes/pull", {
+    ...base, scopeToken: snapshot.json.scopeToken, checkpoint,
+  }, otherTenant);
+  equal(crossTenant.status, 409);
+  equal(crossTenant.json.error, "SCOPE_CHANGED");
+
+  const denied = await request("POST", "/v1/sync/scopes/snapshot", {
+    ...base, scope: { version: 1, table: "docs", recordIds: ["secret-not-in-e2e-acl"] },
+  });
+  equal(denied.status, 403);
+  equal(denied.json.error, "SCOPE_FORBIDDEN");
+
+  const remove = await request("POST", "/v1/sync/push", mutation(clientId, 4, {
+    operation: "delete", recordId: ids[0],
+  }));
+  equal(remove.status, 200);
+  const afterDelete = await request("POST", "/v1/sync/scopes/pull", {
+    ...base, scopeToken: snapshot.json.scopeToken, checkpoint: pull.json.checkpoint,
+  });
+  equal(afterDelete.status, 200);
+  equal(afterDelete.json.changes[0].operation, "delete");
+  equal(afterDelete.json.changes[0].recordId, ids[0]);
+});
+
 let finalCheckpoint;
 await test("pull pagination never advances beyond the returned page", async () => {
   const first = await request("GET", "/v1/sync/pull?checkpoint=0&limit=2");
