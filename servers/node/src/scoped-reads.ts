@@ -166,9 +166,8 @@ export function installScopedReadRoutes(
     response.set('Cache-Control', 'no-store');
     const parsed = PullRequest.safeParse(request.body);
     if (!parsed.success) return response.status(400).json(fail('INVALID_SCOPE_PULL'));
-    let scope: FixedRecordIdScopeV1;
-    try { scope = canonicalFixedScope(parsed.data.scope); }
-    catch { return response.status(400).json(fail('INVALID_SCOPE')); }
+    // PullRequest already validated the canonicalizable scope shape.
+    const scope = canonicalFixedScope(parsed.data.scope);
     const identity = response.locals.syncIdentity as ProtocolIdentity;
     const expected = fixedScopeToken(scope, identity);
     const actual = parsed.data.scopeToken;
