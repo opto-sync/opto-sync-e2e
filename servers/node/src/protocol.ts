@@ -129,6 +129,10 @@ export type SyncProtocolOptions = {
    * cannot fail the push.
    */
   onPushCommitted?: (checkpoint: bigint, origin: unknown) => void;
+  /** Required for scoped reads; absent hook fails closed per record. */
+  authorizeScopedRecord?: (
+    identity: Readonly<ProtocolIdentity>, table: string, recordId: string,
+  ) => Promise<boolean>;
 };
 
 /** Transport-independent request envelope for the protocol core handlers. */
@@ -1429,7 +1433,7 @@ export function installSyncProtocol(
 
   // Additive fixed-ID scoped reads share the authenticated, rate-limited
   // /v1/sync middleware and the canonical PostgreSQL commit log.
-  installScopedReadRoutes(app, pool, config);
+  installScopedReadRoutes(app, pool, config, options.authorizeScopedRecord);
 
   const pushCore = async (
     context: ProtocolCallContext,
