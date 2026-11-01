@@ -51,9 +51,14 @@ An expired checkpoint returns RESET_REQUIRED and the scoped snapshot route.
   apply tenant/table/ID predicates in parameterized PostgreSQL queries.
 - The server echoes client scopeKey, but never trusts it to choose records,
   sessions, tenants or checkpoints. Clients must separately verify it.
-- The current reference protocol authorizes documents at the TENANT level.
-  Applications with document-level ACLs MUST add authorization before exposing
-  this pilot; do not treat these routes as record-level ACL enforcement.
+- The current reference protocol authorizes documents at the TENANT level,
+  which is not sufficient for scoped replication.
+  Scoped routes now FAIL CLOSED with SCOPE_FORBIDDEN unless the host installs
+  an explicit `SyncProtocolOptions.authorizeScopedRecord` callback.
+  That callback must verify each ID against current access policy on EACH
+  snapshot and pull; a false, missing or throwing callback denies the entire
+  request. The callback is not a substitute for hardening database RLS.
+  No production caller is wired to grant these permissions by default.
 - Snapshots and pull pages use read-only repeatable-read transactions; the
   server's existing commit-ordered state is unchanged. No new mutation write
   path, merge engine, or local optimistic queue is introduced.
