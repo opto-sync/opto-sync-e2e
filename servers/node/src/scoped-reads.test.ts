@@ -24,14 +24,14 @@ test('fixed scopes are canonical and bound to verified tenant/subject', () => {
 
 test('scoped snapshot and pull filter at SQL boundary and advance global checkpoint', async () => {
   const calls: { sql: string; params?: unknown[] }[] = [];
-  let head = '1';
+  const responseState = { head: '1' };
   const conn = {
     query: async (sql: string, params?: unknown[]) => {
       calls.push({ sql, params });
       if (sql.startsWith('SELECT last_seq, min_available_seq')) {
-        return { rows: [{ last_seq: head, min_available_seq: '1' }] };
+        return { rows: [{ last_seq: responseState.head, min_available_seq: '1' }] };
       }
-      if (sql.startsWith('SELECT last_seq')) return { rows: [{ last_seq: head }] };
+      if (sql.startsWith('SELECT last_seq')) return { rows: [{ last_seq: responseState.head }] };
       if (sql.startsWith('SELECT COUNT')) return { rows: [{ count: '1', bytes: '50' }] };
       if (sql.startsWith('SELECT record_id')) return {
         rows: [{ record_id: 'a', revision: '1', record: { title: 'a' } }],
@@ -79,7 +79,7 @@ test('scoped snapshot and pull filter at SQL boundary and advance global checkpo
     const token = snapshot.body.scopeToken;
     assert.equal(typeof token, 'string');
 
-    head = '5';
+    responseState.head = '5';
     const pulled = await post('/v1/sync/scopes/pull', {
       ...base, checkpoint: '1', scopeToken: token, limit: 2,
     });
