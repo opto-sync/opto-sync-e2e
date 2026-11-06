@@ -11,10 +11,11 @@ change_trigger = "Review this inventory with protocol, client, server, auth, rec
 [[machine]]
 id = "protocol-v1-fault-recovery"
 risk = "critical"
-status = "planned"
-backend = "quint-itf-system-replay"
+status = "modeling"
+backend = "bounded-js-model; quint-itf-system-replay planned"
 owner = "opto-sync-protocol"
 source_paths = ["suite/protocol/run.mjs", "suite/protocol/load.mjs", "suite/conformance"]
+model_paths = ["formal/atto-sync/cursor_retry_model.cjs"]
 safety = [
   "immutable client mutation identity maps to one durable outcome",
   "committed response loss and retry do not double-apply an effect",
