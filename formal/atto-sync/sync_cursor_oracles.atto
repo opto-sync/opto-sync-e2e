@@ -1,0 +1,22 @@
+// AttoLang source-level sync replay and cursor admission predicates.
+// Full protocol semantics remain in opto-sync's canonical model and servers.
+define module sync_cursor_oracles as
+  pub fnc admit_pull(bool tenant_matches, int requested_checkpoint,
+                     int durable_watermark): bool {
+    return tenant_matches && requested_checkpoint >= 0 &&
+      requested_checkpoint <= durable_watermark;
+  }
+
+  pub fnc acknowledge_mutation(bool durable_outcome_known,
+                               bool same_mutation_identity): bool {
+    return durable_outcome_known && same_mutation_identity;
+  }
+
+  pub fnc self_check(): bool {
+    return admit_pull(true,0,1) &&
+      !admit_pull(false,0,1) &&
+      !admit_pull(true,2,1) &&
+      acknowledge_mutation(true,true) &&
+      !acknowledge_mutation(false,true);
+  }
+end
