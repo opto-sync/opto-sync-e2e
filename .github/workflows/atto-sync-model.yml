@@ -1,0 +1,18 @@
+name: Atto sync cursor finite model
+on:
+  pull_request:
+    paths:
+      - 'formal/atto-sync/**'
+      - '.github/workflows/atto-sync-model.yml'
+  workflow_dispatch:
+jobs:
+  bounded-model:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node formal/atto-sync/cursor_retry_model.cjs
