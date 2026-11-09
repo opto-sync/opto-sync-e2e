@@ -1,18 +1,37 @@
-name: Atto sync cursor finite model
+name: Atto sync cursor finite model and HTTP oracle controls
 on:
   pull_request:
     paths:
       - 'formal/atto-sync/**'
+      - 'suite/protocol/refinement-oracle*.mjs'
+      - 'suite/protocol/atto-refinement.mjs'
       - '.github/workflows/atto-sync-model.yml'
   workflow_dispatch:
+
+permissions:
+  contents: read
+
 jobs:
   bounded-model:
     runs-on: ubuntu-24.04
-    permissions:
-      contents: read
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4.2.2 pinned
         with:
-          node-version: '22'
-      - run: node formal/atto-sync/cursor_retry_model.cjs
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Reject wrong checkout revision
+        env:
+          EXACT_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXACT_HEAD"
+      - name: Bounded model (host-only evidence)
+        run: node formal/atto-sync/cursor_retry_model.cjs
+      - name: Validate live E2E script syntax
+        run: node --check suite/protocol/atto-refinement.mjs
+      - name: Deliberately unsafe host response controls
+        run: node --test suite/protocol/refinement-oracle.test.mjs
+      - name: Evidence boundary
+        run: |
+          echo 'HOST_ONLY: bounded model, JS oracle tests and E2E runner syntax.'
+          echo 'NOT_EXECUTED: live PostgreSQL/HTTP replay in this workflow.'
+          echo 'NOT_EXECUTED: AttoLang compiler/backend guest code.'

@@ -971,3 +971,7 @@ await test("malformed envelopes are rejected before touching the ledger", async 
 console.log(
   `\nProtocol v1: ${cases} cases passed, ${assertions} assertions passed\n`,
 );
+
+// Additional live trace refinement of the bounded AttoLang protocol model.
+// This intentionally fails the existing Docker protocol lane on a divergence.
+await import('./atto-refinement.mjs');

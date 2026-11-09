@@ -12,11 +12,23 @@ define module sync_cursor_oracles as
     return durable_outcome_known && same_mutation_identity;
   }
 
+  // Candidate compiler-backed policy: response correlation must include all
+  // immutable caller and durable outcome identities, never just mutation ID.
+  pub fnc correlate_response(bool same_tenant, bool same_client,
+                             bool same_mutation, bool outcome_is_durable): bool {
+    return same_tenant && same_client && same_mutation && outcome_is_durable;
+  }
+
   pub fnc self_check(): bool {
     return admit_pull(true,0,1) &&
       !admit_pull(false,0,1) &&
       !admit_pull(true,2,1) &&
       acknowledge_mutation(true,true) &&
-      !acknowledge_mutation(false,true);
+      !acknowledge_mutation(false,true) &&
+      correlate_response(true,true,true,true) &&
+      !correlate_response(false,true,true,true) &&
+      !correlate_response(true,false,true,true) &&
+      !correlate_response(true,true,false,true) &&
+      !correlate_response(true,true,true,false);
   }
 end
