@@ -1,22 +1,33 @@
-// AttoLang source-level sync replay and cursor admission predicates.
-// Full protocol semantics remain in opto-sync's canonical model and servers.
+// Candidate AttoLang policy predicates for Opto Sync tenant-scoped synchronization.
+// HOST_ONLY model equivalence is not a real AttoLang compiler or runtime pass.
 define module sync_cursor_oracles as
-  pub fnc admit_pull(bool tenant_matches, int requested_checkpoint,
-                     int durable_watermark): bool {
-    return tenant_matches && requested_checkpoint >= 0 &&
+  pub fnc admit_pull(int requester_tenant, int cursor_tenant,
+                     int requested_checkpoint, int durable_watermark): bool {
+    return requester_tenant >= 0 && requester_tenant < 2 &&
+      requester_tenant == cursor_tenant &&
+      requested_checkpoint >= 0 &&
       requested_checkpoint <= durable_watermark;
   }
 
-  pub fnc acknowledge_mutation(bool durable_outcome_known,
-                               bool same_mutation_identity): bool {
-    return durable_outcome_known && same_mutation_identity;
+  pub fnc acknowledge_mutation(int requester_tenant, int response_tenant,
+                               int in_flight_id, int response_id,
+                               int committed_id): bool {
+    return requester_tenant >= 0 && requester_tenant < 2 &&
+      requester_tenant == response_tenant &&
+      in_flight_id > 0 && response_id == in_flight_id &&
+      committed_id >= response_id;
   }
 
   pub fnc self_check(): bool {
-    return admit_pull(true,0,1) &&
-      !admit_pull(false,0,1) &&
-      !admit_pull(true,2,1) &&
-      acknowledge_mutation(true,true) &&
-      !acknowledge_mutation(false,true);
+    return admit_pull(0, 0, 0, 1) &&
+      admit_pull(1, 1, 1, 1) &&
+      !admit_pull(0, 1, 0, 1) &&
+      !admit_pull(0, 0, 2, 1) &&
+      !admit_pull(0, 0, -1, 1) &&
+      acknowledge_mutation(0, 0, 1, 1, 1) &&
+      !acknowledge_mutation(0, 1, 1, 1, 1) &&
+      !acknowledge_mutation(0, 0, 1, 2, 2) &&
+      !acknowledge_mutation(0, 0, 1, 1, 0) &&
+      !acknowledge_mutation(0, 0, 0, 0, 1);
   }
 end
