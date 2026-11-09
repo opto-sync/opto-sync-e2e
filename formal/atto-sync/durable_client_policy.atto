@@ -1,0 +1,30 @@
+// AttoLang SOURCE CANDIDATE for the durable reference-client policy.
+// No compiled guest execution or network transport is claimed.
+define module durable_client_policy as
+  // Only one next sequential mutation may be staged by a journal owner.
+  pub fnc may_stage(int last_ack, int new_id, bool has_pending): bool {
+    return !has_pending && last_ack >= 0 &&
+      new_id > 0 && new_id == last_ack + 1;
+  }
+
+  // Lost responses and restarted processes do not authorize deleting work.
+  // Exact scoped, durably committed ACK correlation is mandatory.
+  pub fnc may_retire(bool pending, bool tenant_ok, bool client_ok,
+                     bool mutation_ok, bool server_durable): bool {
+    return pending && tenant_ok && client_ok && mutation_ok && server_durable;
+  }
+
+  pub fnc self_check(): bool {
+    return may_stage(0, 1, false) &&
+      may_stage(1, 2, false) &&
+      !may_stage(1, 3, false) &&
+      !may_stage(1, 2, true) &&
+      !may_stage(-1, 0, false) &&
+      may_retire(true, true, true, true, true) &&
+      !may_retire(false, true, true, true, true) &&
+      !may_retire(true, false, true, true) &&
+      !may_retire(true, true, false, true, true) &&
+      !may_retire(true, true, true, false, true) &&
+      !may_retire(true, true, true, true, false);
+  }
+end
