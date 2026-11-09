@@ -975,3 +975,7 @@ console.log(
 // Additional live trace refinement of the bounded AttoLang protocol model.
 // This intentionally fails the existing Docker protocol lane on a divergence.
 await import('./atto-refinement.mjs');
+
+// Separate-OS-process crash/retry reference adapter against native/PostgreSQL.
+// NOT an AttoLang guest binary; intentionally mandatory in the Docker lane.
+await import('./atto-journal-e2e.mjs');

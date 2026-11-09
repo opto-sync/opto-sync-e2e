@@ -71,3 +71,31 @@ Node HTTP requests against native-backed protocol handlers, **not** AttoLang
 bytecode or any of its five compiler backends. `sync_cursor_oracles.atto` is
 still a source candidate. Host-only and real-HTTP evidence must never be
 reported as AttoLang guest execution or cross-backend parity.
+
+## Durable client restart refinement (host reference, no AttoLang guest)
+
+The `suite/protocol/durable-client.mjs` Node **reference adapter** keeps a single
+unacknowledged immutable mutation in a JSON write-ahead journal. It writes a new
+journal file with exclusive creation, fsyncs the file, atomically renames it and
+syncs the parent directory **before** sending. The same durable request is replayed
+after network loss or after a server ACK that was not persisted locally. It denies
+client identity mismatch, stale/malformed ACKs, corrupt journal contents and
+noncanonical decimal IDs/checkpoints. It is intentionally **one client-process
+writer only**; it is not a process-shared lease, transaction database or production
+AttoLang SDK. Cross-process simultaneous writes require fencing and ownership.
+
+`node --test suite/protocol/durable-client.test.mjs` runs **12 host-only** negative
+and recovery tests. The mandatory `suite/protocol/atto-journal-e2e.mjs` launches
+a **new Node OS process for each phase**, against the actual native-backed HTTP
+server and PostgreSQL: persist mutation 1, lose its post-commit response, recover
+an exact duplicate ACK after restart; persist mutation 2, inject a crash after the
+server ACK but before local ACK persistence, recover another duplicate ACK in a
+fresh process; reject a forged client ACK for mutation 3, then apply the real
+mutation and verify three ordered effects, exactly one final record and a drained
+journal. The test mode headers are not production JWT authorization evidence.
+
+`durable_client_policy.atto` is the candidate compiler-refinement policy for
+journal admission and ACK retirement. It is **NOT_EXECUTED** on AttoLang Java,
+LLVM, Wasm, Forge or .NET. The live Node/PostgreSQL run is real E2E, but only for
+the Node reference adapter. No guest-executed AttoLang client, multi-backend
+certification, or AttoLang SDK publication is claimed.
