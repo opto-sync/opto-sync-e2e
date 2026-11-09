@@ -3,16 +3,39 @@ on:
   pull_request:
     paths:
       - 'formal/atto-sync/**'
+      - 'suite/protocol/auth.mjs'
+      - '.github/workflows/atto-sync-model.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'formal/atto-sync/**'
+      - 'suite/protocol/auth.mjs'
       - '.github/workflows/atto-sync-model.yml'
   workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: atto-sync-cursor-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
-  bounded-model:
+  bounded-host-only:
     runs-on: ubuntu-24.04
-    permissions:
-      contents: read
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Check out exact triggering head without persisted credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # pinned
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Prove checked-out head is the one under review
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - name: Set up Node host
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # pinned
         with:
           node-version: '22'
-      - run: node formal/atto-sync/cursor_retry_model.cjs
+      - name: Bounded host-only model (NOT AttoLang guest evidence)
+        run: node formal/atto-sync/cursor_retry_model.cjs
+      - name: Adversarial regression tests (NOT AttoLang guest evidence)
+        run: node --test formal/atto-sync/cursor_retry_model.test.cjs
