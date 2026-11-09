@@ -18,6 +18,12 @@ define module sync_cursor_oracles as
       committed_id >= response_id;
   }
 
+  // Source candidate; compiled AttoLang guest evidence is still absent.
+  pub fnc correlate_response(bool same_tenant, bool same_client,
+                             bool same_mutation, bool outcome_is_durable): bool {
+    return same_tenant && same_client && same_mutation && outcome_is_durable;
+  }
+
   pub fnc self_check(): bool {
     return admit_pull(0, 0, 0, 1) &&
       admit_pull(1, 1, 1, 1) &&
@@ -28,6 +34,11 @@ define module sync_cursor_oracles as
       !acknowledge_mutation(0, 1, 1, 1, 1) &&
       !acknowledge_mutation(0, 0, 1, 2, 2) &&
       !acknowledge_mutation(0, 0, 1, 1, 0) &&
-      !acknowledge_mutation(0, 0, 0, 0, 1);
+      !acknowledge_mutation(0, 0, 0, 0, 1) &&
+      correlate_response(true,true,true,true) &&
+      !correlate_response(false,true,true,true) &&
+      !correlate_response(true,false,true,true) &&
+      !correlate_response(true,true,false,true) &&
+      !correlate_response(true,true,true,false);
   }
 end

@@ -4,12 +4,16 @@ on:
     paths:
       - 'formal/atto-sync/**'
       - 'suite/protocol/auth.mjs'
+      - 'suite/protocol/atto-refinement.mjs'
+      - 'suite/protocol/refinement-oracle*.mjs'
       - '.github/workflows/atto-sync-model.yml'
   push:
     branches: [main]
     paths:
       - 'formal/atto-sync/**'
       - 'suite/protocol/auth.mjs'
+      - 'suite/protocol/atto-refinement.mjs'
+      - 'suite/protocol/refinement-oracle*.mjs'
       - '.github/workflows/atto-sync-model.yml'
   workflow_dispatch:
 permissions:
@@ -39,3 +43,7 @@ jobs:
         run: node formal/atto-sync/cursor_retry_model.cjs
       - name: Adversarial regression tests (NOT AttoLang guest evidence)
         run: node --test formal/atto-sync/cursor_retry_model.test.cjs
+      - name: Validate real HTTP refinement runner syntax (NOT live E2E)
+        run: node --check suite/protocol/atto-refinement.mjs
+      - name: ACK and cursor negative controls (HOST_ONLY)
+        run: node --test suite/protocol/refinement-oracle.test.mjs
