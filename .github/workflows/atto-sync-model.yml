@@ -1,37 +1,49 @@
-name: Atto sync cursor finite model and HTTP oracle controls
+name: Atto sync cursor finite model
 on:
   pull_request:
     paths:
       - 'formal/atto-sync/**'
-      - 'suite/protocol/refinement-oracle*.mjs'
+      - 'suite/protocol/auth.mjs'
       - 'suite/protocol/atto-refinement.mjs'
+      - 'suite/protocol/refinement-oracle*.mjs'
+      - '.github/workflows/atto-sync-model.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'formal/atto-sync/**'
+      - 'suite/protocol/auth.mjs'
+      - 'suite/protocol/atto-refinement.mjs'
+      - 'suite/protocol/refinement-oracle*.mjs'
       - '.github/workflows/atto-sync-model.yml'
   workflow_dispatch:
-
 permissions:
   contents: read
-
+concurrency:
+  group: atto-sync-cursor-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
-  bounded-model:
+  bounded-host-only:
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4.2.2 pinned
+      - name: Check out exact triggering head without persisted credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # pinned
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-      - name: Reject wrong checkout revision
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Prove checked-out head is the one under review
         env:
-          EXACT_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: test "$(git rev-parse HEAD)" = "$EXACT_HEAD"
-      - name: Bounded model (host-only evidence)
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - name: Set up Node host
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # pinned
+        with:
+          node-version: '22'
+      - name: Bounded host-only model (NOT AttoLang guest evidence)
         run: node formal/atto-sync/cursor_retry_model.cjs
-      - name: Validate live E2E script syntax
+      - name: Adversarial regression tests (NOT AttoLang guest evidence)
+        run: node --test formal/atto-sync/cursor_retry_model.test.cjs
+      - name: Validate real HTTP refinement runner syntax (NOT live E2E)
         run: node --check suite/protocol/atto-refinement.mjs
-      - name: Deliberately unsafe host response controls
+      - name: ACK and cursor negative controls (HOST_ONLY)
         run: node --test suite/protocol/refinement-oracle.test.mjs
-      - name: Evidence boundary
-        run: |
-          echo 'HOST_ONLY: bounded model, JS oracle tests and E2E runner syntax.'
-          echo 'NOT_EXECUTED: live PostgreSQL/HTTP replay in this workflow.'
-          echo 'NOT_EXECUTED: AttoLang compiler/backend guest code.'

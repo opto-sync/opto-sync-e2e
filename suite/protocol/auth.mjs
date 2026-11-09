@@ -17,11 +17,12 @@ function equal(actual, expected, message) {
   assert.deepEqual(actual, expected, message);
 }
 
-async function request(method, path, body, token) {
+async function request(method, path, body, token, extraHeaders = {}) {
   const response = await fetch(`${baseUrl}${path}`, {
     method,
     headers: {
       ...(body === undefined ? {} : { "content-type": "application/json" }),
+      ...extraHeaders,
       ...(token === undefined ? {} : { authorization: `Bearer ${token}` }),
     },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -130,6 +131,47 @@ await test("token rotation preserves durable client ownership and retry identity
   equal(retry.status, 200);
   equal(retry.json.results[0].status, "duplicate");
   equal(retry.json.results[0].originalStatus, "applied");
+});
+
+await test("rotated credentials cannot rebind an existing mutation to a different payload", async () => {
+  const conflict = await request(
+    "POST", "/v1/sync/push",
+    push("auth-client-a", "tenant-a", "forged-replay"), tokenARotated,
+  );
+  equal(conflict.status, 409);
+  equal(conflict.json.error, "MUTATION_ID_REUSED");
+  const a = await request("GET", "/v1/sync/snapshot", undefined, tokenA);
+  const b = await request("GET", "/v1/sync/snapshot", undefined, tokenB);
+  equal(a.status, 200);
+  equal(b.status, 200);
+  equal(a.json.records[0].record, { tenant: "tenant-a", value: "alpha" });
+  equal(b.json.records[0].record, { tenant: "tenant-b", value: "bravo" });
+});
+
+await test("production auth ignores spoofed e2e tenant headers and denies anonymous override", async () => {
+  const spoof = {
+    "x-syncer-test-tenant": "tenant-b",
+    "x-syncer-test-subject": "user-b",
+    "x-syncer-test-client-id": "auth-client-b",
+  };
+  const pull = await request("GET", "/v1/sync/pull?checkpoint=0", undefined, tokenA, spoof);
+  equal(pull.status, 200);
+  equal(pull.json.changes.length, 1);
+  equal(pull.json.changes[0].record, { tenant: "tenant-a", value: "alpha" });
+  const snapshot = await request("GET", "/v1/sync/snapshot", undefined, tokenA, spoof);
+  equal(snapshot.status, 200);
+  equal(snapshot.json.records.length, 1);
+  equal(snapshot.json.records[0].record, { tenant: "tenant-a", value: "alpha" });
+  const crossWriter = await request(
+    "POST", "/v1/sync/push",
+    push("auth-client-b", "tenant-b", "header-escalation"), tokenA, spoof,
+  );
+  equal(crossWriter.status, 403);
+  equal(crossWriter.json.error, "CLIENT_ID_FORBIDDEN");
+  const anonymous = await request(
+    "GET", "/v1/sync/pull?checkpoint=0", undefined, undefined, spoof,
+  );
+  equal(anonymous.status, 401);
 });
 
 await test("pull and snapshot expose only the authenticated tenant", async () => {
