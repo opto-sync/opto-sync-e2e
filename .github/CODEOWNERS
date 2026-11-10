@@ -1,0 +1,6 @@
+# Ownership proposals: source and security/CI control surfaces.
+# This file does not itself enable required reviewers or branch protection.
+# @ORESoftware must independently approve this policy before merging.
+* @ORESoftware
+/.github/ @ORESoftware
+/.github/CODEOWNERS @ORESoftware
