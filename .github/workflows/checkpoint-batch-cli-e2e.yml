@@ -30,7 +30,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: opto-sync/opto-sync-cli
-          ref: e2e79692edbd4d5f5f934d288b5c8de8c635ddd7
+          ref: 45f53f6c3587a47446f116b56cb6328424eea005
           path: cli
           persist-credentials: false
 
@@ -39,7 +39,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "e2e79692edbd4d5f5f934d288b5c8de8c635ddd7"
+          test "$(git rev-parse HEAD)" = "45f53f6c3587a47446f116b56cb6328424eea005"
 
       - name: Install Node.js 22
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
