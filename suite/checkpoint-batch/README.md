@@ -6,8 +6,8 @@ client. It does not exercise remote database durability or durable ACK semantics
 
 The CI job `.github/workflows/checkpoint-batch-cli-e2e.yml` checks out the
 reviewed CLI merge commit
-`e2e79692edbd4d5f5f934d288b5c8de8c635ddd7`, confirms its exact Git
-revision, builds `opto-sync` with `cargo build --locked`, and executes the 17
+`45f53f6c3587a47446f116b56cb6328424eea005`, confirms its exact Git
+revision, builds `opto-sync` with `cargo build --locked`, and executes the 18
 black-box cases on Node.js 22. All input data is synthetic.
 
 Run locally with an existing Rust CLI binary:
@@ -23,7 +23,8 @@ JavaScript checkpoint implementation. It checks successful ordered admission,
 duplicate replay, count and final checkpoint, the redacted versioned JSON
 envelope, monotonic regression, noncanonical initial and operation checkpoints, invalid IDs, window
 exhaustion, malformed JSON, unknown fields, wrong schema, missing required values,
-invalid value types, checked u64 overflow, empty and oversized batches, and symlinks escaping the configured trust root. Failed validation
+invalid value types, checked u64 overflow, empty and oversized batches, and symlinks escaping the configured trust root. It also rejects the
+unsupported mutating `self-update` command. Failed validation
 must exit nonzero with no success output; the input must remain byte-identical.
 
 This is a pinned **consumer compatibility gate**, not a moving-branch test.
