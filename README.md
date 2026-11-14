@@ -128,7 +128,7 @@ rather than merely that a merge occurred.
 
 | Suite | What it proves | Run |
 |---|---|---|
-| `suite/checkpoint-batch/run.mjs` | Exact-SHA Rust CLI checkpoint-batch admission, rejection, redaction, and trust-root boundaries (11 black-box cases) | [Suite instructions](suite/checkpoint-batch/README.md) |
+| `suite/checkpoint-batch/run.mjs` | Exact-SHA Rust CLI checkpoint-batch admission, rejection, redaction, and trust-root boundaries (17 black-box cases) | [Suite instructions](suite/checkpoint-batch/README.md) |
 | `suite/conformance/` | Scenario-level behavior against the Postgres-backed node server: jsonb round-trip fidelity, tombstones, CAS conflicts, unique-index identity, strategy matrix, robustness | `docker compose --profile conformance up --exit-code-from conformance` |
 | `suite/protocol/run.mjs` | Protocol v1 idempotency, immutable mutation ids, transactional push, committed-but-response-lost retry recovery, durable rejection, commit-ordered protocol/direct-SQL capture through the canonical multi-table mirror, explicit tombstones, tenant-filtered pagination, compaction reset, and snapshot consistency | `docker compose --profile protocol up --exit-code-from protocol` |
 | `suite/protocol/auth.mjs` | Production-mode bearer authentication, exact client binding, durable subject ownership, token rotation, cross-tenant pull/snapshot isolation, and separate compaction administration | `docker compose --profile auth up --exit-code-from auth-protocol` |
