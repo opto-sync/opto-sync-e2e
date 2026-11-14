@@ -52,6 +52,8 @@ const invoke = (name, payload, expected) => {
     assert.equal(output.schema, "opto-sync.cli.output.v1");
     assert.equal(output.ok, true);
     assert.equal(output.command, "validate");
+    assert.equal(output.interfacesRevision, "b92b3a2eb43eeb183144521a188ae465a013951e");
+    assert.equal(output.policyRevision, "f2ea017328aff58401d38a6d36480c45b39d3c15");
     assert.equal(output.data.kind, "checkpoint_batch");
     assert.equal(output.data.schema, "opto-sync.checkpoint-batch.v1");
     assert.equal(output.data.redacted, true);
@@ -83,6 +85,12 @@ try {
     ["wrong schema", batch([operation("a", "1")], { schema: "opto-sync.checkpoint-batch.v2" })],
     ["oversized batch", batch(Array.from({ length: 1025 }, (_, i) => operation("op-" + i, String(i + 1))))],
     ["malformed JSON", "{not-json"],
+    ["noncanonical initial checkpoint", batch([operation("a", "1")], { initialCheckpoint: "00" })],
+    ["zero seen-operation budget", batch([operation("a", "1")], { maximumSeenOperations: 0 })],
+    ["oversized seen-operation budget", batch([operation("a", "1")], { maximumSeenOperations: 1025 })],
+    ["u64 checkpoint overflow", batch([operation("a", "18446744073709551616")])],
+    ["missing operation ID", batch([{ checkpoint: "1" }])],
+    ["numeric checkpoint rejected", batch([{ operationId: "a", checkpoint: 1 }])],
   ];
   invalid.forEach(([name, payload]) => invoke(name, payload, { status: 4 }));
 
@@ -97,7 +105,7 @@ try {
   assert.ok(!escaped.stderr.includes(secret), "symlink: stderr leaked an operation ID");
   console.log("PASS symlink outside trust root");
 
-  console.log("Checkpoint-batch CLI conformance: 11/11 cases passed");
+  console.log("Checkpoint-batch CLI conformance: 17/17 cases passed");
 } finally {
   rmSync(root, { recursive: true, force: true });
   rmSync(external, { recursive: true, force: true });
