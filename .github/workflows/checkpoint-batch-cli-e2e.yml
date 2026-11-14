@@ -1,0 +1,62 @@
+name: Checkpoint batch CLI conformance
+
+on:
+  pull_request:
+    paths:
+      - 'suite/checkpoint-batch/**'
+      - '.github/workflows/checkpoint-batch-cli-e2e.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'suite/checkpoint-batch/**'
+      - '.github/workflows/checkpoint-batch-cli-e2e.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checkpoint-batch-cli:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout conformance suite
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          path: e2e
+          persist-credentials: false
+
+      - name: Checkout reviewed CLI at exact merged commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: opto-sync/opto-sync-cli
+          ref: 45f53f6c3587a47446f116b56cb6328424eea005
+          path: cli
+          persist-credentials: false
+
+      - name: Prove immutable CLI source revision
+        working-directory: cli
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "45f53f6c3587a47446f116b56cb6328424eea005"
+
+      - name: Install Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+
+      - name: Install supported Rust compiler
+        run: rustup toolchain install 1.95.0 --profile minimal
+
+      - name: Build real pinned CLI with the committed dependency graph
+        working-directory: cli
+        run: rustup run 1.95.0 cargo build --locked --bin opto-sync
+
+      - name: Test checkpoint admission through the executable
+        working-directory: e2e
+        env:
+          OPTO_SYNC_CLI_BIN: ../cli/target/debug/opto-sync
+        run: |
+          node --check suite/checkpoint-batch/run.mjs
+          node suite/checkpoint-batch/run.mjs
