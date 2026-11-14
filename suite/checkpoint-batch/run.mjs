@@ -53,7 +53,7 @@ const invoke = (name, payload, expected) => {
     assert.equal(output.ok, true);
     assert.equal(output.command, "validate");
     assert.equal(output.interfacesRevision, "b92b3a2eb43eeb183144521a188ae465a013951e");
-    assert.equal(output.policyRevision, "f2ea017328aff58401d38a6d36480c45b39d3c15");
+    assert.equal(output.policyRevision, "90083002b4bc11a141f240634f3139f9b460e6fc");
     assert.equal(output.data.kind, "checkpoint_batch");
     assert.equal(output.data.schema, "opto-sync.checkpoint-batch.v1");
     assert.equal(output.data.redacted, true);
@@ -105,7 +105,18 @@ try {
   assert.ok(!escaped.stderr.includes(secret), "symlink: stderr leaked an operation ID");
   console.log("PASS symlink outside trust root");
 
-  console.log("Checkpoint-batch CLI conformance: 17/17 cases passed");
+  // Probe the product's read-only command boundary. --help is safe even if a
+  // mutating shared updater is accidentally reintroduced in a future build.
+  const update = spawnSync(binary, ["self-update", "--help"], {
+    encoding: "utf8", timeout: 30_000,
+  });
+  assert.equal(update.error, undefined, "self-update probe: could not run executable");
+  assert.equal(update.signal, null, "self-update probe: executable was killed");
+  assert.equal(update.status, 2, "mutating self-update must not be available");
+  assert.equal(update.stdout, "", "self-update probe: no primary output permitted");
+  console.log("PASS self-update command is not registered");
+
+  console.log("Checkpoint-batch CLI conformance: 18/18 cases passed");
 } finally {
   rmSync(root, { recursive: true, force: true });
   rmSync(external, { recursive: true, force: true });
