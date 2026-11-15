@@ -1,0 +1,42 @@
+// EXPERIMENTAL, NON-SHIPPING AttoLang guest policy.
+// The privileged adapter MUST authenticate scope, snapshot durability and
+// provenance before setting the booleans. A bool is not a capability.
+define pub module checkpoint_policy as
+  pub fnc valid_resume(int active_generation, int cursor_generation,
+                       int local_checkpoint, int observed_checkpoint,
+                       bool scope_verified, bool snapshot_committed): bool {
+    return active_generation > 0 &&
+      active_generation == cursor_generation &&
+      local_checkpoint >= 0 &&
+      observed_checkpoint == local_checkpoint &&
+      scope_verified && snapshot_committed;
+  }
+
+  // Gaps in server revisions are allowed for filtered tenant projections.
+  // A delta must nevertheless chain from our exact previous checkpoint.
+  pub fnc valid_change(int active_generation, int observed_generation,
+                       int local_checkpoint, int previous_checkpoint,
+                       int next_checkpoint, bool scope_verified,
+                       bool authoritative): bool {
+    return active_generation > 0 &&
+      active_generation == observed_generation &&
+      scope_verified && authoritative &&
+      local_checkpoint >= 0 &&
+      previous_checkpoint == local_checkpoint &&
+      next_checkpoint > previous_checkpoint &&
+      next_checkpoint <= 9223372036854775807;
+  }
+
+  // A rotated generation must start with an authenticated NEW snapshot.
+  // The old cursor is never portable across generations.
+  pub fnc valid_rotation(int old_generation, int new_generation,
+                         int reset_checkpoint, bool scope_verified,
+                         bool new_snapshot_committed): bool {
+    return old_generation > 0 &&
+      old_generation < 9223372036854775807 &&
+      new_generation > old_generation &&
+      new_generation <= 9223372036854775807 &&
+      reset_checkpoint == 0 &&
+      scope_verified && new_snapshot_committed;
+  }
+end
