@@ -47,6 +47,8 @@ jobs:
         run: node formal/atto-sync/cursor_retry_model.cjs
       - name: Adversarial regression tests (NOT AttoLang guest evidence)
         run: node --test formal/atto-sync/cursor_retry_model.test.cjs
+      - name: Scoped checkpoint and rotation model (HOST_ONLY, not AttoLang guest execution)
+        run: node --test formal/atto-sync/checkpoint-scope.test.cjs
       - name: Validate real HTTP refinement runner syntax (NOT live E2E)
         run: node --check suite/protocol/atto-refinement.mjs
       - name: ACK and cursor negative controls (HOST_ONLY)
